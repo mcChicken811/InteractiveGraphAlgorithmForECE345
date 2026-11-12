@@ -10,6 +10,8 @@ const adjacencyEl = document.querySelector<HTMLElement>('#adjacency')!;
 const clearBtn = document.querySelector<HTMLButtonElement>('#clear-btn')!;
 const layoutBtn = document.querySelector<HTMLButtonElement>('#layout-toggle')!;
 const layoutState = layoutBtn.querySelector<HTMLElement>('.state')!;
+const panelBtn = document.querySelector<HTMLButtonElement>('#panel-toggle')!;
+const panel = document.querySelector<HTMLElement>('#info-panel')!;
 
 const graph = new Graph();
 
@@ -47,6 +49,21 @@ layoutBtn.addEventListener('click', () => {
   editor.setAutoLayout(enabled);
   layoutBtn.setAttribute('aria-pressed', String(enabled));
   layoutState.textContent = enabled ? 'On' : 'Off';
+});
+
+// Hamburger menu. The panel floats over the canvas and stays open while editing, so the
+// adjacency list can be watched as the graph changes; the button or Esc closes it.
+const isPanelOpen = (): boolean => !panel.hasAttribute('hidden');
+
+function setPanelOpen(open: boolean): void {
+  panel.toggleAttribute('hidden', !open);
+  panelBtn.setAttribute('aria-expanded', String(open));
+}
+
+panelBtn.addEventListener('click', () => setPanelOpen(!isPanelOpen()));
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && isPanelOpen()) setPanelOpen(false);
 });
 
 refreshPanels();

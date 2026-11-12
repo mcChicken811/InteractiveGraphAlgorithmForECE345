@@ -33,31 +33,49 @@
           Auto-layout
           <span class="state" aria-hidden="true">Off</span>
         </button>
+
+        <!-- Hamburger menu: shows the help and adjacency list floating over the canvas. -->
+        <button
+          id="panel-toggle"
+          class="panel-toggle"
+          type="button"
+          aria-expanded="false"
+          aria-controls="info-panel"
+          aria-label="Help and adjacency list"
+          title="Help and adjacency list"
+        >
+          <svg class="icon-menu" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+          <svg class="icon-close" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </button>
+        <aside id="info-panel" class="info-panel" aria-label="Help and adjacency list" hidden>
+          <section>
+            <h2>How to use</h2>
+            <ul class="help">
+              <li><strong>Click empty space</strong> to add a node.</li>
+              <li><strong>Click a node, then another</strong> to connect them.</li>
+              <li><strong>Click an edge</strong> to delete it.</li>
+              <li><strong>Drag a node</strong> to move it.</li>
+              <li><strong>Right-click a node</strong> (or select it and press Delete) to remove it.</li>
+              <li><strong>Esc</strong> or click empty space to cancel a selection.</li>
+              <li><strong>Auto-layout</strong> (top left) spaces the graph out automatically.</li>
+            </ul>
+          </section>
+          <section>
+            <h2>Adjacency list</h2>
+            <pre id="adjacency" class="adjacency"></pre>
+          </section>
+        </aside>
+
         <svg id="canvas" role="img" aria-label="Graph editor canvas"></svg>
         <!-- Replaced by build/main.js on startup; stays visible only if the script failed to load. -->
         <p id="message" class="message" data-tone="warn" aria-live="polite">
           The app script didn't load. Run <code>npm run build</code> in BFS/ and reload.
         </p>
       </section>
-
-      <aside class="sidebar">
-        <section>
-          <h2>How to use</h2>
-          <ul class="help">
-            <li><strong>Click empty space</strong> to add a node.</li>
-            <li><strong>Click a node, then another</strong> to connect them.</li>
-            <li><strong>Click an edge</strong> to delete it.</li>
-            <li><strong>Drag a node</strong> to move it.</li>
-            <li><strong>Right-click a node</strong> (or select it and press Delete) to remove it.</li>
-            <li><strong>Esc</strong> or click empty space to cancel a selection.</li>
-            <li><strong>Auto-layout</strong> (top left) spaces the graph out automatically.</li>
-          </ul>
-        </section>
-        <section>
-          <h2>Adjacency list</h2>
-          <pre id="adjacency" class="adjacency"></pre>
-        </section>
-      </aside>
     </main>
   </body>
 </html>

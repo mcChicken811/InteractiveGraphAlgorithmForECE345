@@ -9,6 +9,8 @@ const adjacencyEl = document.querySelector('#adjacency');
 const clearBtn = document.querySelector('#clear-btn');
 const layoutBtn = document.querySelector('#layout-toggle');
 const layoutState = layoutBtn.querySelector('.state');
+const panelBtn = document.querySelector('#panel-toggle');
+const panel = document.querySelector('#info-panel');
 const graph = new Graph();
 function refreshPanels() {
     const n = graph.nodeCount;
@@ -39,6 +41,18 @@ layoutBtn.addEventListener('click', () => {
     editor.setAutoLayout(enabled);
     layoutBtn.setAttribute('aria-pressed', String(enabled));
     layoutState.textContent = enabled ? 'On' : 'Off';
+});
+// Hamburger menu. The panel floats over the canvas and stays open while editing, so the
+// adjacency list can be watched as the graph changes; the button or Esc closes it.
+const isPanelOpen = () => !panel.hasAttribute('hidden');
+function setPanelOpen(open) {
+    panel.toggleAttribute('hidden', !open);
+    panelBtn.setAttribute('aria-expanded', String(open));
+}
+panelBtn.addEventListener('click', () => setPanelOpen(!isPanelOpen()));
+window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && isPanelOpen())
+        setPanelOpen(false);
 });
 refreshPanels();
 showMessage('Click empty space to add a node.');

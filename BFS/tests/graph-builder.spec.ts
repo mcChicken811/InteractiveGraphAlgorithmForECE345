@@ -275,6 +275,77 @@ test('Clear graph removes everything', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Clear graph' })).toBeDisabled();
 });
 
+test.describe('help & adjacency panel (hamburger menu)', () => {
+  const menu = (page: Page) => page.getByRole('button', { name: 'Help and adjacency list' });
+  const panel = (page: Page) => page.getByRole('complementary', { name: 'Help and adjacency list' });
+
+  test('is closed by default, and the canvas uses the full width', async ({ page }) => {
+    await expect(menu(page)).toHaveAttribute('aria-expanded', 'false');
+    await expect(panel(page)).toBeHidden();
+    const canvas = (await cv.canvas.boundingBox())!;
+    expect(canvas.width).toBe(page.viewportSize()!.width);
+  });
+
+  test('the hamburger sits in the canvas’s top-right corner', async ({ page }) => {
+    const b = (await menu(page).boundingBox())!;
+    const c = (await cv.canvas.boundingBox())!;
+    expect(c.x + c.width - (b.x + b.width)).toBeGreaterThanOrEqual(0);
+    expect(c.x + c.width - (b.x + b.width)).toBeLessThan(24);
+    expect(b.y - c.y).toBeGreaterThanOrEqual(0);
+    expect(b.y - c.y).toBeLessThan(24);
+  });
+
+  test('opens a panel floating over the canvas, and closes it again', async ({ page }) => {
+    await menu(page).click();
+    await expect(menu(page)).toHaveAttribute('aria-expanded', 'true');
+    await expect(panel(page)).toBeVisible();
+    await expect(panel(page).getByRole('heading', { name: 'How to use' })).toBeVisible();
+    await expect(panel(page).getByRole('heading', { name: 'Adjacency list' })).toBeVisible();
+
+    // It hovers on top of the canvas rather than taking space beside it.
+    const p = (await panel(page).boundingBox())!;
+    const c = (await cv.canvas.boundingBox())!;
+    expect(p.x).toBeGreaterThan(c.x);
+    expect(p.x + p.width).toBeLessThanOrEqual(c.x + c.width);
+    expect(p.y).toBeGreaterThan(c.y);
+    expect(p.y + p.height).toBeLessThanOrEqual(c.y + c.height);
+    expect(c.width).toBe(page.viewportSize()!.width);
+
+    await menu(page).click();
+    await expect(menu(page)).toHaveAttribute('aria-expanded', 'false');
+    await expect(panel(page)).toBeHidden();
+  });
+
+  test('Esc closes the panel', async ({ page }) => {
+    await menu(page).click();
+    await page.keyboard.press('Escape');
+    await expect(panel(page)).toBeHidden();
+    await expect(menu(page)).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  test('works from the keyboard', async ({ page }) => {
+    await menu(page).focus();
+    await page.keyboard.press('Enter');
+    await expect(panel(page)).toBeVisible();
+    await page.keyboard.press('Space');
+    await expect(panel(page)).toBeHidden();
+  });
+
+  test('stays open while editing, with a live adjacency list', async ({ page }) => {
+    await menu(page).click();
+    await addTriangleNodes();
+    await connect(P.a, P.b);
+    await expect(panel(page)).toBeVisible();
+    await expect(panel(page).locator('#adjacency')).toHaveText('0: 1\n1: 0\n2: —');
+  });
+
+  test('clicks inside the panel do not touch the graph', async ({ page }) => {
+    await menu(page).click();
+    await panel(page).getByRole('heading', { name: 'Adjacency list' }).click();
+    await expect(cv.nodes).toHaveCount(0);
+  });
+});
+
 test.describe('on a phone-sized screen', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 
@@ -292,6 +363,12 @@ test.describe('on a phone-sized screen', () => {
     await page.touchscreen.tap(box.x + 80, box.y + 80);
     await page.touchscreen.tap(box.x + 280, box.y + 200);
     await expect(cv.edges).toHaveCount(1);
+    // The panel opens within the screen, still floating over the canvas.
+    await page.getByRole('button', { name: 'Help and adjacency list' }).tap();
+    const panelBox = (await page.getByRole('complementary', { name: 'Help and adjacency list' }).boundingBox())!;
+    expect(panelBox.x).toBeGreaterThanOrEqual(0);
+    expect(panelBox.x + panelBox.width).toBeLessThanOrEqual(390);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
   });
 });
 
