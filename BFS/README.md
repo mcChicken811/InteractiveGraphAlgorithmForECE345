@@ -1,14 +1,37 @@
 # BFS · Graph Builder
 
-Interactive editor for building an undirected, unweighted graph in the browser (TypeScript + Vite, no runtime dependencies).
+Interactive editor for building an undirected, unweighted graph in the browser (TypeScript, no runtime dependencies).
 
-## Run
+## Setup
+
+Run these commands from the `BFS/` directory:
 
 ```sh
 npm install
-npm run dev      # open the printed URL
-npm run build    # type-check + production build into dist/
 ```
+
+## Compile
+
+The browser can't run TypeScript, so `src/*.ts` is compiled to plain ES modules in `build/*.js` (with source maps). `index.html` loads `./build/main.js`.
+
+| Command | What it runs | Use it to |
+| --- | --- | --- |
+| `npm run build` | `tsc -p tsconfig.build.json` | Compile once |
+| `npm run dev` | `tsc -p tsconfig.build.json --watch` | Recompile on every save while editing |
+| `npm run typecheck` | `tsc` | Type-check `src/`, the tests and the config files without writing output |
+
+- `tsconfig.build.json` holds the compile settings (`src/` → `build/`) and extends `tsconfig.json`, which holds the shared type-check settings.
+- Recompile after changing anything in `src/`, or the page keeps running the old code. If the page shows "The app script didn't load", `build/` is missing: run `npm run build`.
+- Run `npm run build` before committing changes to `src/`, because `build/` is committed.
+
+## Run
+
+Any static file server works, because `index.html` loads everything by relative path:
+
+- **VS Code Live Server:** keep `npm run dev` running and open `BFS/index.html` with Live Server. It reloads the page whenever `build/` changes.
+- **No editor server:** run `npm run serve` and open http://127.0.0.1:5199/BFS/.
+
+Opening the file directly (`file://`) does not work, because browsers block ES modules there.
 
 ## Tests
 
@@ -24,7 +47,7 @@ Pass Playwright options after `--`, e.g. `npm run test:e2e -- --grep "edge"`.
 
 - `unit_tests/graph.test.ts`: the `Graph` model (ids, edges, neighbors, removal).
 - `unit_tests/editor.test.ts`: `GraphEditor` interactions driven by synthetic pointer and keyboard events in a simulated DOM.
-- `tests/graph-builder.spec.ts`: end-to-end tests that click, drag, right-click, type and tap in a real browser. Playwright starts its own Vite server on port 5199.
+- `tests/graph-builder.spec.ts`: end-to-end tests that click, drag, right-click, type and tap in a real browser. Playwright runs `npm run build`, then starts `scripts/static-server.mjs` on port 5199. That server serves files as-is under `/BFS/`, the way Live Server does, so a page that only works through a dev server fails the tests.
 
 ### Isolated browser-test environment (Docker)
 
@@ -33,7 +56,7 @@ Pass Playwright options after `--`, e.g. `npm run test:e2e -- --grep "edge"`.
 - **Image:** the official `mcr.microsoft.com/playwright` image, which includes Chromium and its system libraries. Nothing is installed into the host's browser caches.
 - **Dependencies:** a Linux `node_modules` is installed inside the image with `npm ci`, separate from the host's `node_modules`.
 - **User:** the container runs as the unprivileged `pwuser` with all Linux capabilities dropped and `no-new-privileges` set.
-- **Network:** `--network none`. The tests only use the Vite server running inside the same container.
+- **Network:** `--network none`. The tests only use the static server running inside the same container. The project is compiled inside the container too.
 - **Shared files:** only `test-results/` is mounted back to the host, so failure traces and screenshots can be inspected.
 
 The image tag in `docker/playwright.Dockerfile` must match the exact `@playwright/test` version in `package.json` (pinned to `1.65.0`). When upgrading Playwright, update both together.
@@ -56,3 +79,5 @@ The image tag in `docker/playwright.Dockerfile` must match the exact `@playwrigh
 - `src/graph.ts` — `Graph` model (adjacency list of `Set`s, plus node positions). `neighbors(id)` returns ids in sorted order, giving BFS a deterministic visiting order.
 - `src/editor.ts` — `GraphEditor`: SVG rendering and pointer/keyboard interaction.
 - `src/main.ts` — wires the editor to the stats, status message and adjacency-list panel.
+- `src/style.css` — styles, linked directly from `index.html`.
+- `build/` — compiled JavaScript loaded by the page. It is committed so the page works from a fresh clone, so rebuild it before committing changes to `src/`. Imports in `src/` use `.js` extensions because the browser loads them unbundled.

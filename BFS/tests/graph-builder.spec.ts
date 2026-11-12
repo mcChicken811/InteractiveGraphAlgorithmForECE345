@@ -65,8 +65,29 @@ const mid = (p: readonly [number, number], q: readonly [number, number]): [numbe
 let cv: CanvasDriver;
 
 test.beforeEach(async ({ page }) => {
-  await page.goto('/');
+  // Relative to baseURL (…/BFS/), i.e. the same URL Live Server opens.
+  await page.goto('index.html');
   cv = new CanvasDriver(page);
+});
+
+test('loads every resource from a plain static server without errors', async ({ page }) => {
+  // Regression: index.html once referenced "/src/main.ts", which only Vite's dev server
+  // could serve, so under Live Server the script 404'd and clicks did nothing.
+  const failures: string[] = [];
+  page.on('response', (r) => {
+    if (r.status() >= 400) failures.push(`${r.status()} ${r.url()}`);
+  });
+  page.on('requestfailed', (r) => failures.push(`failed ${r.url()}`));
+  page.on('console', (m) => {
+    if (m.type() === 'error') failures.push(`console: ${m.text()}`);
+  });
+  page.on('pageerror', (err) => failures.push(`pageerror: ${err.message}`));
+
+  await page.goto('index.html');
+  await expect(page.locator('#message')).not.toContainText("didn't load");
+  await cv.click(...P.a);
+  await expect(cv.nodes).toHaveCount(1);
+  expect(failures).toEqual([]);
 });
 
 /** Builds nodes 0, 1, 2 at P.a, P.b, P.c. */

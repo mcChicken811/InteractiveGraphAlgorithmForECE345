@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
-import { Graph } from '../src/graph';
-import { GraphEditor, NODE_RADIUS, type EditorCallbacks } from '../src/editor';
+import { Graph } from '../src/graph.js';
+import { GraphEditor, NODE_RADIUS, type EditorCallbacks } from '../src/editor.js';
 
 const WIDTH = 800;
 const HEIGHT = 600;

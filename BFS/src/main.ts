@@ -1,6 +1,7 @@
-import './style.css';
-import { Graph } from './graph';
-import { GraphEditor } from './editor';
+// Compiled by `npm run build` to build/main.js, which index.html loads directly.
+// Imports use .js extensions because browsers resolve them verbatim (no bundler).
+import { Graph } from './graph.js';
+import { GraphEditor } from './editor.js';
 
 const svg = document.querySelector<SVGSVGElement>('#canvas')!;
 const stats = document.querySelector<HTMLElement>('#stats')!;

@@ -1,17 +1,13 @@
 {
+  // Type-checks everything (app, tests, configs). `npm run typecheck`
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "lib": [
-      "ES2022",
-      "DOM",
-      "DOM.Iterable"
-    ],
-    "types": [
-      "vite/client",
-      "node"
-    ],
+    // NodeNext enforces explicit ".js" import extensions, which the browser needs
+    // because build/ output is loaded directly without a bundler.
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"],
     "strict": true,
     "noEmit": true,
     "noUnusedLocals": true,
@@ -20,11 +16,5 @@
     "isolatedModules": true,
     "skipLibCheck": true
   },
-  "include": [
-    "src",
-    "unit_tests",
-    "tests",
-    "vitest.config.ts",
-    "playwright.config.ts"
-  ]
+  "include": ["src", "unit_tests", "tests", "vitest.config.ts", "playwright.config.ts"]
 }

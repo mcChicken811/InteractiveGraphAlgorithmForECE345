@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { Graph } from '../src/graph';
+import { Graph } from '../src/graph.js';
 
 describe('Graph', () => {
   let g: Graph;

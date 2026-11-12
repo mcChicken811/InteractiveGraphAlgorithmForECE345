@@ -1,4 +1,4 @@
-import { Graph, type NodeId } from './graph';
+import { Graph, type NodeId } from './graph.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 export const NODE_RADIUS = 20;

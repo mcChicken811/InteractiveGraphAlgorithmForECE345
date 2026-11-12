@@ -1,0 +1,12 @@
+{
+  // Compiles src/*.ts to build/*.js for the browser. `npm run build` / `npm run dev`
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": "src",
+    "outDir": "build",
+    "types": [],
+    "sourceMap": true
+  },
+  "include": ["src"]
+}
