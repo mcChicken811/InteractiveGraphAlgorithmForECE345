@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BFS Graph Builder</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>BFS · Graph Builder</h1>
+      <span id="stats" class="stats"></span>
+      <button id="clear-btn" type="button">Clear graph</button>
+    </header>
+
+    <main class="layout">
+      <section class="canvas-wrap">
+        <svg id="canvas" role="img" aria-label="Graph editor canvas"></svg>
+        <p id="message" class="message" aria-live="polite"></p>
+      </section>
+
+      <aside class="sidebar">
+        <section>
+          <h2>How to use</h2>
+          <ul class="help">
+            <li><strong>Click empty space</strong> to add a node.</li>
+            <li><strong>Click a node, then another</strong> to connect them.</li>
+            <li><strong>Click an edge</strong> to delete it.</li>
+            <li><strong>Drag a node</strong> to move it.</li>
+            <li><strong>Right-click a node</strong> (or select it and press Delete) to remove it.</li>
+            <li><strong>Esc</strong> or click empty space to cancel a selection.</li>
+          </ul>
+        </section>
+        <section>
+          <h2>Adjacency list</h2>
+          <pre id="adjacency" class="adjacency"></pre>
+        </section>
+      </aside>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,102 @@
+export type NodeId = number;
+
+export interface GraphNode {
+  id: NodeId;
+  x: number;
+  y: number;
+}
+
+/**
+ * Undirected, unweighted graph stored as an adjacency list.
+ * Node positions live here too so the editor can render them.
+ */
+export class Graph {
+  private readonly nodes = new Map<NodeId, GraphNode>();
+  private readonly adjacency = new Map<NodeId, Set<NodeId>>();
+
+  get nodeCount(): number {
+    return this.nodes.size;
+  }
+
+  get edgeCount(): number {
+    let total = 0;
+    for (const set of this.adjacency.values()) total += set.size;
+    return total / 2;
+  }
+
+  /** Adds a node using the smallest unused id, so labels stay compact. */
+  addNode(x: number, y: number): GraphNode {
+    let id = 0;
+    while (this.nodes.has(id)) id++;
+    const node: GraphNode = { id, x, y };
+    this.nodes.set(id, node);
+    this.adjacency.set(id, new Set());
+    return node;
+  }
+
+  removeNode(id: NodeId): boolean {
+    const neighbors = this.adjacency.get(id);
+    if (!neighbors) return false;
+    for (const other of neighbors) this.adjacency.get(other)?.delete(id);
+    this.adjacency.delete(id);
+    this.nodes.delete(id);
+    return true;
+  }
+
+  moveNode(id: NodeId, x: number, y: number): void {
+    const node = this.nodes.get(id);
+    if (node) {
+      node.x = x;
+      node.y = y;
+    }
+  }
+
+  getNode(id: NodeId): GraphNode | undefined {
+    return this.nodes.get(id);
+  }
+
+  /** Nodes sorted by id. */
+  getNodes(): GraphNode[] {
+    return [...this.nodes.values()].sort((a, b) => a.id - b.id);
+  }
+
+  /** Each undirected edge once, as [smaller id, larger id]. */
+  getEdges(): Array<[NodeId, NodeId]> {
+    const edges: Array<[NodeId, NodeId]> = [];
+    for (const [a, set] of this.adjacency) {
+      for (const b of set) if (a < b) edges.push([a, b]);
+    }
+    return edges.sort((p, q) => p[0] - q[0] || p[1] - q[1]);
+  }
+
+  /** Neighbors of a node, sorted by id (a stable order for BFS later). */
+  neighbors(id: NodeId): NodeId[] {
+    return [...(this.adjacency.get(id) ?? [])].sort((a, b) => a - b);
+  }
+
+  hasEdge(a: NodeId, b: NodeId): boolean {
+    return this.adjacency.get(a)?.has(b) ?? false;
+  }
+
+  /** Returns false for self-loops, unknown nodes, or duplicate edges. */
+  addEdge(a: NodeId, b: NodeId): boolean {
+    if (a === b) return false;
+    const setA = this.adjacency.get(a);
+    const setB = this.adjacency.get(b);
+    if (!setA || !setB || setA.has(b)) return false;
+    setA.add(b);
+    setB.add(a);
+    return true;
+  }
+
+  removeEdge(a: NodeId, b: NodeId): boolean {
+    const removed = this.adjacency.get(a)?.delete(b) ?? false;
+    this.adjacency.get(b)?.delete(a);
+    return removed;
+  }
+
+  clear(): void {
+    this.nodes.clear();
+    this.adjacency.clear();
+  }
+}
