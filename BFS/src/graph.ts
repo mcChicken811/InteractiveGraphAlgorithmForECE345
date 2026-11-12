@@ -95,6 +95,35 @@ export class Graph {
     return removed;
   }
 
+  /**
+   * Connected components, found by breadth-first search.
+   * Ordered largest first (ties: smallest node id first); each component lists its
+   * node ids in BFS order from its smallest id.
+   */
+  connectedComponents(): NodeId[][] {
+    const seen = new Set<NodeId>();
+    const components: NodeId[][] = [];
+    for (const { id: start } of this.getNodes()) {
+      if (seen.has(start)) continue;
+      const component: NodeId[] = [];
+      const queue: NodeId[] = [start];
+      seen.add(start);
+      for (let head = 0; head < queue.length; head++) {
+        const v = queue[head];
+        component.push(v);
+        for (const w of this.neighbors(v)) {
+          if (!seen.has(w)) {
+            seen.add(w);
+            queue.push(w);
+          }
+        }
+      }
+      components.push(component);
+    }
+    // Stable sort: equal sizes keep discovery order, i.e. by smallest id.
+    return components.sort((a, b) => b.length - a.length);
+  }
+
   clear(): void {
     this.nodes.clear();
     this.adjacency.clear();

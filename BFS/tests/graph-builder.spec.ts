@@ -424,6 +424,57 @@ test.describe('auto-layout', () => {
     await expect(cv.node(4)).toHaveAttribute('transform', `translate(${P.d[0]} ${P.d[1]})`);
   });
 
+  test('separates disconnected parts and settles without drifting', async ({ page }) => {
+    // A triangle, a separate edge and two isolated nodes, all crammed together.
+    const pts: Array<[number, number]> = [
+      [300, 300],
+      [360, 300],
+      [330, 350],
+      [420, 300],
+      [480, 300],
+      [420, 360],
+      [480, 360],
+    ];
+    for (const p of pts) await cv.click(...p);
+    await connect(pts[0], pts[1]);
+    await connect(pts[1], pts[2]);
+    await connect(pts[2], pts[0]);
+    await connect(pts[3], pts[4]);
+
+    await toggle(page).click();
+    const settled = await waitUntilSettled(page);
+
+    // Each component's box (node circles included) is clear of every other's.
+    const groups = [[0, 1, 2], [3, 4], [5], [6]].map((ids) => {
+      const xs = ids.map((id) => settled[id].x);
+      const ys = ids.map((id) => settled[id].y);
+      return { x0: Math.min(...xs) - 20, x1: Math.max(...xs) + 20, y0: Math.min(...ys) - 20, y1: Math.max(...ys) + 20 };
+    });
+    for (let i = 0; i < groups.length; i++) {
+      for (let j = i + 1; j < groups.length; j++) {
+        const a = groups[i];
+        const b = groups[j];
+        expect(a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1, `parts ${i} and ${j} overlap`).toBe(false);
+      }
+    }
+
+    // Nothing is pressed against the canvas edges.
+    const box = (await cv.canvas.boundingBox())!;
+    for (const p of Object.values(settled)) {
+      expect(p.x).toBeGreaterThan(30);
+      expect(p.x).toBeLessThan(box.width - 30);
+      expect(p.y).toBeGreaterThan(30);
+      expect(p.y).toBeLessThan(box.height - 30);
+    }
+
+    // Adding another isolated node re-packs, but the triangle keeps its shape.
+    const side = (pos: Positions, a: string, b: string) => Math.hypot(pos[a].x - pos[b].x, pos[a].y - pos[b].y);
+    await cv.click(box.width - 80, box.height - 80);
+    const after = await waitUntilSettled(page);
+    expect(Object.keys(after)).toHaveLength(8);
+    expect(side(after, '0', '1')).toBeCloseTo(side(settled, '0', '1'), 0);
+  });
+
   test.describe('with reduced motion', () => {
     test.use({ reducedMotion: 'reduce' });
 

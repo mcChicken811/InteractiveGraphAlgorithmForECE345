@@ -82,24 +82,47 @@ The image tag in `docker/playwright.Dockerfile` must match the exact `@playwrigh
 
 ## Auto-layout
 
-The **Auto-layout** toggle runs a force-directed layout ([src/layout.ts](src/layout.ts)) that spaces the graph out:
+The **Auto-layout** toggle runs a force-directed layout ([src/layout.ts](src/layout.ts)) that spaces the graph out. Each step does the following:
 
-- **Fruchterman–Reingold (1991)**, a refinement of Eades' spring embedder (1984):
-  - every pair of nodes repels with force k²/d
-  - every edge pulls its endpoints together with force d²/k
-  - k is the ideal edge length, worked out from the canvas area per node and clamped to 70–150 px
-  - each step moves a node along its net force, capped by a "temperature" that cools so the layout settles
-- **Repulsion cutoff:** nodes more than 2.5k apart ignore each other, as in FR's grid variant.
-- **Center pull:** a weak pull toward the center keeps disconnected pieces on screen.
-- **Animation:** in the style of d3-force, cooling runs one step per animation frame, and editing the graph, dragging, or resizing the window re-heats it. Nodes therefore glide into place, which takes up to ~6 s, with most movement in the first second.
+1. **Split into connected components** using breadth-first search (`Graph.connectedComponents()`).
+2. **Run Fruchterman–Reingold (1991) inside each component.** This is a refinement of Eades' spring embedder (1984):
+   - every pair of nodes repels with force k²/d
+   - every edge pulls its endpoints together with force d²/k
+   - k is the ideal edge length, worked out from the canvas area per node
+   - each node moves along its net force, capped by a "temperature" that cools so the layout settles
+   - a small deterministic jiggle that fades as the layout cools breaks symmetric starts (such as nodes on one line), which pure Fruchterman–Reingold forces can never leave
+3. **Separate overlapping nodes** with a collision pass, like d3's `forceCollide`.
+4. **Fit to the canvas.** A long, thin component that doesn't fit is turned a few degrees per step toward the canvas's longer side, using its principal axis. If the drawing is still too big, every component and k shrink by the same factor. This keeps the drawing in balance, because Fruchterman–Reingold's balanced shape scales linearly with k.
+5. **Pack the components.** Their bounding boxes are arranged in centered rows, trying several row widths and keeping the best fit. Each component then glides part of the way toward its slot.
 
-While it is on, a node being dragged is held under the pointer and the rest of the graph reacts to it. Turning it off leaves every node where it is. With the OS "reduce motion" setting enabled, the layout jumps straight to its settled state instead of animating.
+### Why components are laid out separately
+
+Repulsion acts between every pair of nodes, including nodes in unrelated components. The first version used one global simulation, with a repulsion cutoff and a weak pull toward the center, as in ForceAtlas2's gravity or d3's `forceX`/`forceY`. With that version, disconnected graphs:
+
+- never settled, and kept drifting by up to ~110 px after every edit
+- had isolated nodes pushed into the walls (12 of 20 in one test)
+- could trap a lone node inside a cycle, with components overlapping
+
+Laying out each component on its own and then packing the components is the standard remedy in graph-drawing tools:
+
+- Graphviz `pack`
+- OGDF `ComponentSplitterLayout` with `TileToRowsCCPacker`
+- yFiles `ComponentLayout`
+
+Freivalds, Dogrusoz & Kikusts study this approach in *Disconnected Graph Layout and the Polyomino Packing Approach* (Graph Drawing 2001). The unit tests in `unit_tests/layout.test.ts` ("disconnected graphs") fail on the old algorithm and pass on this one.
+
+### Interaction
+
+- **Animation:** cooling and packing run one step per animation frame. Editing the graph, dragging, or resizing the window starts it again. Nodes glide into place within a few seconds, with most of the movement in the first second.
+- **Dragging:** a node being dragged stays under the pointer, and the rest of its component reacts to it. After release, the component glides back into its packed slot.
+- **Turning it off** leaves every node where it is.
+- **Reduced motion:** with the OS "reduce motion" setting enabled, the layout jumps straight to its settled state instead of animating.
 
 ## Code layout
 
-- `src/graph.ts` — `Graph` model (adjacency list of `Set`s, plus node positions). `neighbors(id)` returns ids in sorted order, giving BFS a deterministic visiting order.
+- `src/graph.ts` — `Graph` model (adjacency list of `Set`s, plus node positions), including BFS-based `connectedComponents()`. `neighbors(id)` returns ids in sorted order, giving BFS a deterministic visiting order.
 - `src/editor.ts` — `GraphEditor`: SVG rendering, pointer/keyboard interaction, and driving the auto-layout animation.
-- `src/layout.ts` — `ForceLayout`: the force-directed layout algorithm (pure, no DOM).
+- `src/layout.ts` — `ForceLayout` (per-component force-directed layout, fitting and packing) and `packRows`; pure, no DOM.
 - `src/main.ts` — wires the editor to the stats, status message and adjacency-list panel.
 - `src/style.css` — styles, linked directly from `index.html`.
 - `build/` — compiled JavaScript loaded by the page. It is committed so the page works from a fresh clone, so rebuild it before committing changes to `src/`. Imports in `src/` use `.js` extensions because the browser loads them unbundled.

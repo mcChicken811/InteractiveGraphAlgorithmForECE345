@@ -1,37 +1,123 @@
-/** Tuned on paths, cycles, stars, grids, triangles and disconnected/isolated nodes. */
 export const DEFAULT_LAYOUT_OPTIONS = {
     padding: 24,
     minEdgeLength: 70,
     maxEdgeLength: 150,
-    gravity: 0.15,
-    repulsionCutoff: 2.5,
+    componentGap: 0.5,
+    packRate: 0.15,
     stepScale: 0.1,
     maxStep: 0.25,
     cooling: 0.985,
 };
-/** Below this temperature the layout counts as settled. */
+/** Below this temperature the force simulation counts as settled. */
 const MIN_TEMPERATURE = 0.005;
-/** If no node moved more than this (px) in a step, stop early. */
+/** Movements below this (px) count as "at rest". */
 const REST_THRESHOLD = 0.05;
+/**
+ * When the packed layout overflows the canvas, k shrinks (e.g. a long path drawn straight),
+ * but never below this many node "paddings" (≈ radii), so nodes cannot overlap.
+ */
+const MIN_EDGE_IN_PADDINGS = 2;
+/** The packed layout may fill at most this fraction of the canvas before it is shrunk. */
+const FIT = 0.95;
+/** Shrink by at most this factor per step, so the fit is smooth and does not fold the drawing. */
+const MAX_SHRINK_PER_STEP = 0.97;
+/** Below this fraction (in both directions), a shrunken layout grows back toward scale 1. */
+const GROW = 0.8;
+/** Largest rotation per step (radians, ≈3°) when aligning an overflowing component. */
+const MAX_ROTATION = 0.05;
+/** Only rotate components whose spread along their minor axis is below this fraction of the major. */
+const ELONGATED = 0.6;
+/** Golden angle (radians): spreads per-node jiggle directions evenly. */
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+/** Jiggle strength as a fraction of k at full temperature (fades with temperature²). */
+const JIGGLE = 0.03;
+/** Fills rows left to right, starting a new row when the next box would exceed `rowLimit`. */
+function fillRows(sizes, gap, rowLimit) {
+    const rows = [];
+    let row = { items: [], width: 0, height: 0 };
+    sizes.forEach((s, i) => {
+        if (row.items.length && row.width + gap + s.width > rowLimit) {
+            rows.push(row);
+            row = { items: [], width: 0, height: 0 };
+        }
+        row.width = row.items.length ? row.width + gap + s.width : s.width;
+        row.height = Math.max(row.height, s.height);
+        row.items.push(i);
+    });
+    rows.push(row);
+    return rows;
+}
+function extent(rows, gap) {
+    return {
+        width: Math.max(...rows.map((r) => r.width)),
+        height: rows.reduce((sum, r) => sum + r.height, 0) + gap * (rows.length - 1),
+    };
+}
+/**
+ * Packs boxes (given largest-first) into centred rows (tile-to-rows / shelf packing).
+ *
+ * Several row widths are tried, from the widest box up to the canvas width, starting
+ * with one that matches the canvas's aspect ratio; the packing that leaves the most
+ * room on the canvas (largest min(canvas/packing) ratio) wins, ties going to the
+ * aspect-ratio guess so the choice stays stable while the layout animates.
+ */
+export function packRows(sizes, bounds, gap) {
+    if (sizes.length === 0)
+        return { centers: [], width: 0, height: 0 };
+    const area = sizes.reduce((sum, s) => sum + (s.width + gap) * (s.height + gap), 0);
+    const widest = Math.max(...sizes.map((s) => s.width));
+    const aspect = bounds.width / Math.max(1, bounds.height);
+    const limits = [Math.max(widest, Math.min(bounds.width, Math.sqrt(area * aspect)))];
+    const STEPS = 8;
+    for (let i = 0; i <= STEPS; i++)
+        limits.push(widest + ((bounds.width - widest) * i) / STEPS);
+    let best = null;
+    for (const limit of limits) {
+        const rows = fillRows(sizes, gap, limit);
+        const size = extent(rows, gap);
+        const room = Math.min(bounds.width / size.width, bounds.height / size.height);
+        if (!best || room > best.room * 1.01)
+            best = { rows, size, room };
+    }
+    const { rows, size } = best;
+    // Centre the packing on the canvas, and each row within the packing.
+    const centers = new Array(sizes.length);
+    let y = (bounds.height - size.height) / 2;
+    for (const r of rows) {
+        let x = (bounds.width - r.width) / 2;
+        for (const i of r.items) {
+            centers[i] = { x: x + sizes[i].width / 2, y: y + r.height / 2 };
+            x += sizes[i].width + gap;
+        }
+        y += r.height + gap;
+    }
+    return { centers, width: size.width, height: size.height };
+}
 export class ForceLayout {
-    /** 1 = hot (just started), 0 = settled. */
+    /** Force-simulation temperature: 1 = hot (just started), 0 = settled. */
     temperature = 0;
+    /** True while components are still travelling to their packed slots. */
+    packing = false;
+    /** Shrinks k when the packed components do not fit the canvas. */
+    scale = 1;
     options;
     constructor(options = {}) {
         this.options = { ...DEFAULT_LAYOUT_OPTIONS, ...options };
     }
-    /** True while the layout still has energy and `step()` should keep being called. */
+    /** True while the layout still has work to do and `step()` should keep being called. */
     get running() {
-        return this.temperature > MIN_TEMPERATURE;
+        return this.temperature > MIN_TEMPERATURE || this.packing;
     }
     /** Restart (or keep) the simulation at least at the given temperature. */
     reheat(temperature = 1) {
         this.temperature = Math.max(this.temperature, Math.min(1, temperature));
+        this.packing = true;
     }
     stop() {
         this.temperature = 0;
+        this.packing = false;
     }
-    /** Ideal edge length: the side of the square each node would get if area were shared evenly. */
+    /** Ideal edge length: proportional to the side of the square each node would get if area were shared evenly. */
     idealEdgeLength(bounds, nodeCount) {
         const { padding, minEdgeLength, maxEdgeLength } = this.options;
         const area = Math.max(1, bounds.width - 2 * padding) * Math.max(1, bounds.height - 2 * padding);
@@ -39,107 +125,132 @@ export class ForceLayout {
         return Math.min(maxEdgeLength, Math.max(minEdgeLength, k));
     }
     /**
-     * Advances the simulation one step, moving nodes in `graph` in place.
-     * Nodes in `pinned` (e.g. one being dragged) exert forces but do not move.
+     * Advances the layout one step, moving nodes in `graph` in place.
+     * Nodes in `pinned` (e.g. one being dragged) exert forces but do not move, and
+     * their component is not repositioned by the packing.
      * Returns the largest distance any node moved.
      */
     step(graph, bounds, pinned = new Set()) {
         const nodes = graph.getNodes();
         if (!this.running || nodes.length === 0) {
-            this.temperature = 0;
+            this.stop();
             return 0;
         }
-        const { padding, gravity, repulsionCutoff, stepScale, maxStep, cooling } = this.options;
-        const n = nodes.length;
-        const k = this.idealEdgeLength(bounds, n);
-        const index = new Map(nodes.map((node, i) => [node.id, i]));
-        const fx = new Float64Array(n);
-        const fy = new Float64Array(n);
-        const cutoff = repulsionCutoff * k;
-        // Repulsion between every pair: k² / d.  O(n²), fine for hand-drawn graphs.
-        for (let i = 0; i < n; i++) {
-            for (let j = i + 1; j < n; j++) {
-                let dx = nodes[i].x - nodes[j].x;
-                let dy = nodes[i].y - nodes[j].y;
-                let d = Math.hypot(dx, dy);
-                if (d < 0.01) {
-                    // Coincident nodes: separate them in a deterministic direction.
-                    const angle = (i * 7 + j * 13) % 360;
-                    dx = Math.cos(angle);
-                    dy = Math.sin(angle);
-                    d = 1;
-                }
-                if (d > cutoff)
+        const { padding, componentGap, packRate, stepScale, maxStep, cooling } = this.options;
+        const minK = MIN_EDGE_IN_PADDINGS * padding;
+        let k = Math.max(minK, this.idealEdgeLength(bounds, nodes.length) * this.scale);
+        const pos = new Map(nodes.map((n) => [n.id, { x: n.x, y: n.y }]));
+        const components = graph.connectedComponents();
+        // 1. Fruchterman–Reingold forces, within each component only.
+        const limit = this.temperature * maxStep * k;
+        for (const component of components) {
+            if (component.length < 2)
+                continue;
+            const force = this.componentForces(graph, component, pos, k);
+            for (const id of component) {
+                if (pinned.has(id))
                     continue;
-                const f = (k * k) / d;
-                const ux = dx / d;
-                const uy = dy / d;
-                fx[i] += ux * f;
-                fy[i] += uy * f;
-                fx[j] -= ux * f;
-                fy[j] -= uy * f;
+                const f = force.get(id);
+                // Small deterministic jiggle that fades as the layout cools. Pure FR forces keep
+                // symmetric starts (e.g. nodes on one line) symmetric, an unstable equilibrium
+                // it can never leave; d3-force's "jiggle" serves the same purpose.
+                const jiggle = JIGGLE * k * this.temperature ** 2;
+                let mx = f.x * stepScale + Math.cos(id * GOLDEN_ANGLE) * jiggle;
+                let my = f.y * stepScale + Math.sin(id * GOLDEN_ANGLE) * jiggle;
+                const len = Math.hypot(mx, my);
+                if (len > limit) {
+                    mx = (mx / len) * limit;
+                    my = (my / len) * limit;
+                }
+                const p = pos.get(id);
+                p.x += mx;
+                p.y += my;
             }
         }
-        // Attraction along edges: d² / k.
-        for (const [a, b] of graph.getEdges()) {
-            const i = index.get(a);
-            const j = index.get(b);
-            const dx = nodes[i].x - nodes[j].x;
-            const dy = nodes[i].y - nodes[j].y;
-            const d = Math.hypot(dx, dy);
-            if (d < 0.01)
+        // Collision pass (like d3's forceCollide): FR is a local optimiser, and a drawing
+        // that folds over itself can pull two nodes on top of each other. Push apart any
+        // pair closer than two node "paddings" (≈ radii); components never overlap thanks
+        // to the packing, so only pairs within a component are checked.
+        for (const component of components)
+            resolveCollisions(component, pos, pinned, 2 * padding);
+        // 2. Turn long, thin components that overflow the canvas toward its longer side,
+        //    a few degrees per step. FR forces don't depend on rotation, so this never
+        //    fights the simulation (e.g. a long path drawn vertically on a wide canvas).
+        for (const component of components) {
+            if (component.length < 3 || component.some((id) => pinned.has(id)))
                 continue;
-            const f = (d * d) / k;
-            const ux = dx / d;
-            const uy = dy / d;
-            fx[i] -= ux * f;
-            fy[i] -= uy * f;
-            fx[j] += ux * f;
-            fy[j] += uy * f;
+            const box = boundingBox(component, pos, padding);
+            const overflows = box.maxX - box.minX > FIT * bounds.width || box.maxY - box.minY > FIT * bounds.height;
+            if (overflows)
+                rotateTowardLongSide(component, pos, bounds);
         }
-        // Gentle constant pull toward the centre.
-        const cx = bounds.width / 2;
-        const cy = bounds.height / 2;
-        for (let i = 0; i < n; i++) {
-            const dx = cx - nodes[i].x;
-            const dy = cy - nodes[i].y;
-            const d = Math.hypot(dx, dy);
-            if (d < 1)
-                continue;
-            const f = gravity * k * Math.min(1, d / k); // fades out near the centre
-            fx[i] += (dx / d) * f;
-            fy[i] += (dy / d) * f;
+        // 3. Fit to the canvas. If the packed components would not fit, shrink every
+        //    component about its own centre, and k, by the same factor. With no global
+        //    forces, FR's equilibrium scales linearly with k, so the smaller drawing is
+        //    still in balance instead of being squashed against the walls.
+        let boxes = components.map((c) => boundingBox(c, pos, padding));
+        let packed = packRows(sizesOf(boxes), bounds, componentGap * k);
+        const fit = Math.min((FIT * bounds.width) / packed.width, (FIT * bounds.height) / packed.height);
+        const factor = Math.min(1, Math.max(fit, MAX_SHRINK_PER_STEP, minK / k));
+        if (factor < 1) {
+            components.forEach((component, i) => {
+                if (component.some((id) => pinned.has(id)))
+                    return;
+                const cx = (boxes[i].minX + boxes[i].maxX) / 2;
+                const cy = (boxes[i].minY + boxes[i].maxY) / 2;
+                for (const id of component) {
+                    const p = pos.get(id);
+                    p.x = cx + (p.x - cx) * factor;
+                    p.y = cy + (p.y - cy) * factor;
+                }
+            });
+            k *= factor;
+            this.scale *= factor;
+            boxes = components.map((c) => boundingBox(c, pos, padding));
+            packed = packRows(sizesOf(boxes), bounds, componentGap * k);
         }
-        // Move each free node along its force, capped by the temperature.
-        const limit = this.temperature * maxStep * k;
+        // Drift back toward the natural size (scale 1) when there is plenty of room.
+        if (this.scale < 1 && packed.width < GROW * bounds.width && packed.height < GROW * bounds.height) {
+            this.scale = Math.min(1, this.scale * 1.002);
+        }
+        // 4. Move each component a fraction of the way toward its packed slot.
+        let packMoved = 0;
+        components.forEach((component, i) => {
+            if (component.some((id) => pinned.has(id)))
+                return;
+            const box = boxes[i];
+            const dx = (packed.centers[i].x - (box.minX + box.maxX) / 2) * packRate;
+            const dy = (packed.centers[i].y - (box.minY + box.maxY) / 2) * packRate;
+            packMoved = Math.max(packMoved, Math.hypot(dx, dy));
+            for (const id of component) {
+                const p = pos.get(id);
+                p.x += dx;
+                p.y += dy;
+            }
+        });
+        // 5. Write back, keeping every node on the canvas as a last resort.
         const minX = Math.min(padding, bounds.width / 2);
         const minY = Math.min(padding, bounds.height / 2);
         const maxX = Math.max(minX, bounds.width - padding);
         const maxY = Math.max(minY, bounds.height - padding);
         let maxMoved = 0;
-        for (let i = 0; i < n; i++) {
-            const node = nodes[i];
+        for (const node of nodes) {
             if (pinned.has(node.id))
                 continue;
-            let mx = fx[i] * stepScale;
-            let my = fy[i] * stepScale;
-            const len = Math.hypot(mx, my);
-            if (len > limit) {
-                mx = (mx / len) * limit;
-                my = (my / len) * limit;
-            }
-            const x = Math.min(maxX, Math.max(minX, node.x + mx));
-            const y = Math.min(maxY, Math.max(minY, node.y + my));
+            const p = pos.get(node.id);
+            const x = Math.min(maxX, Math.max(minX, p.x));
+            const y = Math.min(maxY, Math.max(minY, p.y));
             maxMoved = Math.max(maxMoved, Math.hypot(x - node.x, y - node.y));
             graph.moveNode(node.id, x, y);
         }
         this.temperature *= cooling;
+        this.packing = packMoved > REST_THRESHOLD;
         if (maxMoved < REST_THRESHOLD)
-            this.temperature = 0;
+            this.stop();
         return maxMoved;
     }
     /** Runs until settled (or `maxSteps`), returning the number of steps taken. */
-    settle(graph, bounds, maxSteps = 1000) {
+    settle(graph, bounds, maxSteps = 2000) {
         this.reheat();
         let steps = 0;
         while (this.running && steps < maxSteps) {
@@ -148,5 +259,150 @@ export class ForceLayout {
         }
         return steps;
     }
+    /** Net Fruchterman–Reingold force on each node of one connected component. */
+    componentForces(graph, component, pos, k) {
+        const force = new Map(component.map((id) => [id, { x: 0, y: 0 }]));
+        const ids = [...component].sort((a, b) => a - b);
+        // Repulsion between every pair in the component: k² / d.
+        for (let i = 0; i < ids.length; i++) {
+            for (let j = i + 1; j < ids.length; j++) {
+                const p = pos.get(ids[i]);
+                const q = pos.get(ids[j]);
+                let dx = p.x - q.x;
+                let dy = p.y - q.y;
+                let d = Math.hypot(dx, dy);
+                if (d < 0.01) {
+                    // Coincident nodes: separate them in a deterministic direction.
+                    const angle = (ids[i] * 7 + ids[j] * 13) % 360;
+                    dx = Math.cos(angle);
+                    dy = Math.sin(angle);
+                    d = 1;
+                }
+                const f = (k * k) / d;
+                addForce(force.get(ids[i]), (dx / d) * f, (dy / d) * f);
+                addForce(force.get(ids[j]), (-dx / d) * f, (-dy / d) * f);
+            }
+        }
+        // Attraction along each edge: d² / k.
+        for (const a of ids) {
+            for (const b of graph.neighbors(a)) {
+                if (b < a)
+                    continue; // each edge once
+                const p = pos.get(a);
+                const q = pos.get(b);
+                const dx = p.x - q.x;
+                const dy = p.y - q.y;
+                const d = Math.hypot(dx, dy);
+                if (d < 0.01)
+                    continue;
+                const f = (d * d) / k;
+                addForce(force.get(a), (-dx / d) * f, (-dy / d) * f);
+                addForce(force.get(b), (dx / d) * f, (dy / d) * f);
+            }
+        }
+        return force;
+    }
+}
+function addForce(target, x, y) {
+    target.x += x;
+    target.y += y;
+}
+/** Separates overlapping nodes of one component; pinned nodes stay put. */
+function resolveCollisions(component, pos, pinned, minDistance) {
+    for (let pass = 0; pass < 2; pass++) {
+        for (let i = 0; i < component.length; i++) {
+            for (let j = i + 1; j < component.length; j++) {
+                const a = component[i];
+                const b = component[j];
+                const p = pos.get(a);
+                const q = pos.get(b);
+                const dx = q.x - p.x;
+                const dy = q.y - p.y;
+                const d = Math.hypot(dx, dy);
+                if (d >= minDistance || d < 1e-6)
+                    continue; // exact overlaps are split by FR's jiggle
+                const aFixed = pinned.has(a);
+                const bFixed = pinned.has(b);
+                if (aFixed && bFixed)
+                    continue;
+                const push = (minDistance - d) / d;
+                const share = aFixed || bFixed ? 1 : 0.5;
+                if (!aFixed) {
+                    p.x -= dx * push * share;
+                    p.y -= dy * push * share;
+                }
+                if (!bFixed) {
+                    q.x += dx * push * share;
+                    q.y += dy * push * share;
+                }
+            }
+        }
+    }
+}
+/**
+ * Rotates a component about its centroid toward the canvas's longer side, by at most
+ * MAX_ROTATION. The component's main direction is its principal axis (the dominant
+ * eigenvector of the positions' covariance matrix).
+ */
+function rotateTowardLongSide(component, pos, bounds) {
+    let cx = 0;
+    let cy = 0;
+    for (const id of component) {
+        cx += pos.get(id).x;
+        cy += pos.get(id).y;
+    }
+    cx /= component.length;
+    cy /= component.length;
+    let sxx = 0;
+    let syy = 0;
+    let sxy = 0;
+    for (const id of component) {
+        const dx = pos.get(id).x - cx;
+        const dy = pos.get(id).y - cy;
+        sxx += dx * dx;
+        syy += dy * dy;
+        sxy += dx * dy;
+    }
+    // Eigenvalues of [[sxx, sxy], [sxy, syy]]; skip round-ish components.
+    const mean = (sxx + syy) / 2;
+    const spread = Math.hypot((sxx - syy) / 2, sxy);
+    const major = mean + spread;
+    const minor = mean - spread;
+    if (major <= 0 || Math.sqrt(Math.max(0, minor) / major) > ELONGATED)
+        return;
+    const axis = 0.5 * Math.atan2(2 * sxy, sxx - syy); // principal axis angle
+    const target = bounds.width >= bounds.height ? 0 : Math.PI / 2;
+    // Axes are undirected: bring the difference into (-π/2, π/2].
+    let diff = target - axis;
+    while (diff > Math.PI / 2)
+        diff -= Math.PI;
+    while (diff <= -Math.PI / 2)
+        diff += Math.PI;
+    const angle = Math.max(-MAX_ROTATION, Math.min(MAX_ROTATION, diff));
+    if (Math.abs(angle) < 1e-4)
+        return;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    for (const id of component) {
+        const p = pos.get(id);
+        const dx = p.x - cx;
+        const dy = p.y - cy;
+        p.x = cx + dx * cos - dy * sin;
+        p.y = cy + dx * sin + dy * cos;
+    }
+}
+function sizesOf(boxes) {
+    return boxes.map((b) => ({ width: b.maxX - b.minX, height: b.maxY - b.minY }));
+}
+function boundingBox(ids, pos, margin) {
+    const box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+    for (const id of ids) {
+        const p = pos.get(id);
+        box.minX = Math.min(box.minX, p.x - margin);
+        box.minY = Math.min(box.minY, p.y - margin);
+        box.maxX = Math.max(box.maxX, p.x + margin);
+        box.maxY = Math.max(box.maxY, p.y + margin);
+    }
+    return box;
 }
 //# sourceMappingURL=layout.js.map

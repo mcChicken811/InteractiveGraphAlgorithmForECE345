@@ -136,6 +136,46 @@ describe('Graph', () => {
     });
   });
 
+  describe('connectedComponents', () => {
+    it('returns nothing for an empty graph', () => {
+      expect(g.connectedComponents()).toEqual([]);
+    });
+
+    it('treats isolated nodes as their own components', () => {
+      for (let i = 0; i < 3; i++) g.addNode(0, 0);
+      expect(g.connectedComponents()).toEqual([[0], [1], [2]]);
+    });
+
+    it('groups nodes by reachability, largest first, BFS order inside', () => {
+      for (let i = 0; i < 7; i++) g.addNode(0, 0);
+      g.addEdge(5, 6); // component {5, 6}
+      g.addEdge(1, 3); // component {1, 2, 3, 4}: 1-3, 1-2, 3-4
+      g.addEdge(1, 2);
+      g.addEdge(3, 4);
+      // node 0 is isolated
+      expect(g.connectedComponents()).toEqual([[1, 2, 3, 4], [5, 6], [0]]);
+    });
+
+    it('orders equal-sized components by their smallest id', () => {
+      for (let i = 0; i < 4; i++) g.addNode(0, 0);
+      g.addEdge(2, 3);
+      g.addEdge(0, 1);
+      expect(g.connectedComponents()).toEqual([
+        [0, 1],
+        [2, 3],
+      ]);
+    });
+
+    it('updates when edges are removed', () => {
+      for (let i = 0; i < 3; i++) g.addNode(0, 0);
+      g.addEdge(0, 1);
+      g.addEdge(1, 2);
+      expect(g.connectedComponents()).toHaveLength(1);
+      g.removeEdge(0, 1);
+      expect(g.connectedComponents()).toEqual([[1, 2], [0]]);
+    });
+  });
+
   it('clear() removes everything and restarts ids at 0', () => {
     g.addNode(0, 0);
     g.addNode(0, 0);

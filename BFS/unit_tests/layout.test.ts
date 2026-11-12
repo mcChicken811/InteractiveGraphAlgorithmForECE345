@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Graph } from '../src/graph.js';
-import { DEFAULT_LAYOUT_OPTIONS, ForceLayout } from '../src/layout.js';
+import { DEFAULT_LAYOUT_OPTIONS, ForceLayout, packRows } from '../src/layout.js';
 
 const BOUNDS = { width: 1000, height: 750 };
 const PAD = DEFAULT_LAYOUT_OPTIONS.padding;
@@ -194,6 +194,195 @@ describe('ForceLayout', () => {
       for (let i = 0; i < 200 && layout.running; i++) layout.step(g, BOUNDS, new Set([1]));
       expect(g.getNode(1)).toEqual(pinnedBefore);
       expect(dist(g, 0, 1)).toBeGreaterThan(60); // the others still moved around it
+    });
+  });
+
+  describe('disconnected graphs', () => {
+    /** Bounding boxes (node centres ± padding) of each connected component. */
+    function componentBoxes(g: Graph) {
+      return g.connectedComponents().map((ids) => {
+        const xs = ids.map((id) => g.getNode(id)!.x);
+        const ys = ids.map((id) => g.getNode(id)!.y);
+        return {
+          minX: Math.min(...xs) - PAD,
+          maxX: Math.max(...xs) + PAD,
+          minY: Math.min(...ys) - PAD,
+          maxY: Math.max(...ys) + PAD,
+        };
+      });
+    }
+
+    function expectNoComponentOverlap(g: Graph): void {
+      const boxes = componentBoxes(g);
+      for (let i = 0; i < boxes.length; i++) {
+        for (let j = i + 1; j < boxes.length; j++) {
+          const a = boxes[i];
+          const b = boxes[j];
+          const overlap = a.minX < b.maxX && b.minX < a.maxX && a.minY < b.maxY && b.minY < a.maxY;
+          expect(overlap, `components ${i} and ${j} overlap`).toBe(false);
+        }
+      }
+    }
+
+    function expectOffTheWalls(g: Graph): void {
+      for (const n of g.getNodes()) {
+        expect(n.x).toBeGreaterThan(PAD + 1);
+        expect(n.x).toBeLessThan(BOUNDS.width - PAD - 1);
+        expect(n.y).toBeGreaterThan(PAD + 1);
+        expect(n.y).toBeLessThan(BOUNDS.height - PAD - 1);
+      }
+    }
+
+    function cycle(offset: number, n: number): Array<[number, number]> {
+      return Array.from({ length: n }, (_, i) => [offset + i, offset + ((i + 1) % n)] as [number, number]);
+    }
+
+    it('settles on its own instead of drifting until it cools down', () => {
+      const g = bunched(17, cycle(0, 12), 300); // a 12-cycle plus 5 isolated nodes
+      const layout = new ForceLayout();
+      const steps = layout.settle(g, BOUNDS);
+      expect(layout.running).toBe(false);
+      expect(steps).toBeLessThan(300);
+
+      // Re-heating a settled layout barely moves it.
+      const settled = g.getNodes().map((n) => ({ ...n }));
+      layout.reheat(0.2);
+      for (let i = 0; i < 50; i++) layout.step(g, BOUNDS);
+      for (const n of g.getNodes()) {
+        const before = settled.find((s) => s.id === n.id)!;
+        expect(Math.hypot(n.x - before.x, n.y - before.y)).toBeLessThan(5);
+      }
+    });
+
+    it('keeps components apart and off the walls', () => {
+      const g = bunched(24, [...cycle(0, 8), ...cycle(8, 8), ...cycle(16, 8)], 300);
+      new ForceLayout().settle(g, BOUNDS);
+      expectNoComponentOverlap(g);
+      expectOffTheWalls(g);
+    });
+
+    it('packs many isolated nodes into a tidy block instead of pushing them to the walls', () => {
+      const g = bunched(20, [], 300);
+      new ForceLayout().settle(g, BOUNDS);
+      expectOffTheWalls(g);
+      expect(minPairDistance(g)).toBeGreaterThan(2 * PAD);
+    });
+
+    it('frees an isolated node that starts trapped inside a cycle', () => {
+      const g = new Graph();
+      for (let i = 0; i < 12; i++) {
+        g.addNode(500 + 200 * Math.cos((i / 12) * 2 * Math.PI), 375 + 200 * Math.sin((i / 12) * 2 * Math.PI));
+      }
+      g.addNode(500, 375); // node 12, in the middle of the ring
+      for (const [a, b] of cycle(0, 12)) g.addEdge(a, b);
+      new ForceLayout().settle(g, BOUNDS);
+      expectNoComponentOverlap(g);
+    });
+
+    it('lays out each component as if it were alone', () => {
+      // Two triangles: each should be equilateral, with side ≈ k, despite the other.
+      const g = bunched(6, [...cycle(0, 3), ...cycle(3, 3)], 300);
+      const layout = new ForceLayout();
+      layout.settle(g, BOUNDS);
+      const k = layout.idealEdgeLength(BOUNDS, 6);
+      for (const len of edgeLengths(g)) {
+        expect(len).toBeGreaterThan(0.9 * k);
+        expect(len).toBeLessThan(1.1 * k);
+      }
+    });
+
+    it('centres the packed drawing on the canvas', () => {
+      const g = bunched(10, [
+        [0, 1],
+        [2, 3],
+        [4, 5],
+        [6, 7],
+        [8, 9],
+      ]);
+      new ForceLayout().settle(g, BOUNDS);
+      const xs = g.getNodes().map((n) => n.x);
+      const ys = g.getNodes().map((n) => n.y);
+      expect((Math.min(...xs) + Math.max(...xs)) / 2).toBeCloseTo(BOUNDS.width / 2, -1);
+      expect((Math.min(...ys) + Math.max(...ys)) / 2).toBeCloseTo(BOUNDS.height / 2, -1);
+    });
+  });
+
+  describe('fitting large components', () => {
+    it('turns a long path to lie along the canvas’s longer side', () => {
+      const g = bunched(10, path(10), 30);
+      new ForceLayout().settle(g, BOUNDS);
+      const xs = g.getNodes().map((n) => n.x);
+      const ys = g.getNodes().map((n) => n.y);
+      expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(Math.max(...ys) - Math.min(...ys));
+      for (const n of g.getNodes()) {
+        expect(n.x).toBeGreaterThan(PAD + 1); // fits without touching the walls
+        expect(n.x).toBeLessThan(BOUNDS.width - PAD - 1);
+      }
+    });
+
+    it('never lets two nodes overlap', () => {
+      // A start that folds the grid: FR is a local optimiser, so folding can happen,
+      // but the collision pass must still keep node circles apart.
+      const g = bunched(25, grid(5, 5), 200);
+      new ForceLayout().settle(g, BOUNDS);
+      expect(minPairDistance(g)).toBeGreaterThanOrEqual(2 * PAD - 0.5);
+    });
+
+    it('unfolds grids from random starts', () => {
+      let seed = 1;
+      const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+      for (let trial = 0; trial < 10; trial++) {
+        const g = new Graph();
+        for (let i = 0; i < 25; i++) g.addNode(400 + random() * 200, 275 + random() * 200);
+        for (const [a, b] of grid(5, 5)) g.addEdge(a, b);
+        new ForceLayout().settle(g, BOUNDS);
+        const lengths = edgeLengths(g);
+        expect(Math.max(...lengths) / Math.min(...lengths)).toBeLessThan(1.5);
+      }
+    });
+  });
+
+  describe('packRows', () => {
+    it('returns nothing for no boxes', () => {
+      expect(packRows([], BOUNDS, 10)).toEqual({ centers: [], width: 0, height: 0 });
+    });
+
+    it('centres a single box on the canvas', () => {
+      const { centers } = packRows([{ width: 100, height: 50 }], BOUNDS, 10);
+      expect(centers).toEqual([{ x: 500, y: 375 }]);
+    });
+
+    it('places boxes in rows without overlap and wraps to keep the canvas aspect ratio', () => {
+      const sizes = Array.from({ length: 9 }, () => ({ width: 100, height: 100 }));
+      const { centers, width, height } = packRows(sizes, BOUNDS, 20);
+      // 9 equal squares on a 4:3 canvas → rows of 3 or 4, not one long row.
+      expect(new Set(centers.map((c) => c.y)).size).toBeGreaterThan(1);
+      expect(width).toBeLessThan(BOUNDS.width);
+      expect(height).toBeLessThan(BOUNDS.height);
+      for (let i = 0; i < centers.length; i++) {
+        for (let j = i + 1; j < centers.length; j++) {
+          const apart =
+            Math.abs(centers[i].x - centers[j].x) >= 120 - 1e-9 || Math.abs(centers[i].y - centers[j].y) >= 120 - 1e-9;
+          expect(apart).toBe(true);
+        }
+      }
+    });
+
+    it('keeps the input order (largest component first) in reading order', () => {
+      const { centers } = packRows(
+        [
+          { width: 300, height: 200 },
+          { width: 100, height: 100 },
+          { width: 100, height: 100 },
+        ],
+        BOUNDS,
+        20,
+      );
+      const order = centers
+        .map((c, i) => ({ ...c, i }))
+        .sort((a, b) => a.y - b.y || a.x - b.x)
+        .map((c) => c.i);
+      expect(order[0]).toBe(0);
     });
   });
 });
