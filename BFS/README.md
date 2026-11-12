@@ -46,7 +46,12 @@ npm run test:e2e:local  # browser tests directly on this machine (uses installed
 Pass Playwright options after `--`, e.g. `npm run test:e2e -- --grep "edge"`.
 
 - `unit_tests/graph.test.ts`: the `Graph` model (ids, edges, neighbors, removal).
-- `unit_tests/editor.test.ts`: `GraphEditor` interactions driven by synthetic pointer and keyboard events in a simulated DOM.
+- `unit_tests/editor.test.ts`: `GraphEditor` interactions driven by synthetic pointer and keyboard events in a simulated DOM, including auto-layout with manually stepped animation frames.
+- `unit_tests/layout.test.ts`: `ForceLayout` behaviour:
+  - pair spacing and equilateral triangles
+  - grids unfold, and isolated or coincident nodes spread out
+  - nodes stay in bounds and pinned nodes stay put
+  - the layout settles and gives the same result every run
 - `tests/graph-builder.spec.ts`: end-to-end tests that click, drag, right-click, type and tap in a real browser. Playwright runs `npm run build`, then starts `scripts/static-server.mjs` on port 5199. That server serves files as-is under `/BFS/`, the way Live Server does, so a page that only works through a dev server fails the tests.
 
 ### Isolated browser-test environment (Docker)
@@ -73,11 +78,28 @@ The image tag in `docker/playwright.Dockerfile` must match the exact `@playwrigh
 | Drag a node | Move it |
 | Right-click a node, or select it and press Delete | Delete the node and its edges |
 | Esc, or click empty space while a node is selected | Cancel the selection |
+| **Auto-layout** button (top-left of the canvas) | Turn automatic spacing on/off |
+
+## Auto-layout
+
+The **Auto-layout** toggle runs a force-directed layout ([src/layout.ts](src/layout.ts)) that spaces the graph out:
+
+- **Fruchterman–Reingold (1991)**, a refinement of Eades' spring embedder (1984):
+  - every pair of nodes repels with force k²/d
+  - every edge pulls its endpoints together with force d²/k
+  - k is the ideal edge length, worked out from the canvas area per node and clamped to 70–150 px
+  - each step moves a node along its net force, capped by a "temperature" that cools so the layout settles
+- **Repulsion cutoff:** nodes more than 2.5k apart ignore each other, as in FR's grid variant.
+- **Center pull:** a weak pull toward the center keeps disconnected pieces on screen.
+- **Animation:** in the style of d3-force, cooling runs one step per animation frame, and editing the graph, dragging, or resizing the window re-heats it. Nodes therefore glide into place, which takes up to ~6 s, with most movement in the first second.
+
+While it is on, a node being dragged is held under the pointer and the rest of the graph reacts to it. Turning it off leaves every node where it is. With the OS "reduce motion" setting enabled, the layout jumps straight to its settled state instead of animating.
 
 ## Code layout
 
 - `src/graph.ts` — `Graph` model (adjacency list of `Set`s, plus node positions). `neighbors(id)` returns ids in sorted order, giving BFS a deterministic visiting order.
-- `src/editor.ts` — `GraphEditor`: SVG rendering and pointer/keyboard interaction.
+- `src/editor.ts` — `GraphEditor`: SVG rendering, pointer/keyboard interaction, and driving the auto-layout animation.
+- `src/layout.ts` — `ForceLayout`: the force-directed layout algorithm (pure, no DOM).
 - `src/main.ts` — wires the editor to the stats, status message and adjacency-list panel.
 - `src/style.css` — styles, linked directly from `index.html`.
 - `build/` — compiled JavaScript loaded by the page. It is committed so the page works from a fresh clone, so rebuild it before committing changes to `src/`. Imports in `src/` use `.js` extensions because the browser loads them unbundled.

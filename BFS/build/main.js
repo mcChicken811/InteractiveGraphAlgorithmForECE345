@@ -7,6 +7,8 @@ const stats = document.querySelector('#stats');
 const messageEl = document.querySelector('#message');
 const adjacencyEl = document.querySelector('#adjacency');
 const clearBtn = document.querySelector('#clear-btn');
+const layoutBtn = document.querySelector('#layout-toggle');
+const layoutState = layoutBtn.querySelector('.state');
 const graph = new Graph();
 function refreshPanels() {
     const n = graph.nodeCount;
@@ -32,6 +34,12 @@ const editor = new GraphEditor(svg, graph, {
     onMessage: showMessage,
 });
 clearBtn.addEventListener('click', () => editor.clear());
+layoutBtn.addEventListener('click', () => {
+    const enabled = !editor.autoLayoutEnabled;
+    editor.setAutoLayout(enabled);
+    layoutBtn.setAttribute('aria-pressed', String(enabled));
+    layoutState.textContent = enabled ? 'On' : 'Off';
+});
 refreshPanels();
 showMessage('Click empty space to add a node.');
 //# sourceMappingURL=main.js.map

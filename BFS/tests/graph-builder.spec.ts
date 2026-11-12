@@ -294,3 +294,182 @@ test.describe('on a phone-sized screen', () => {
     await expect(cv.edges).toHaveCount(1);
   });
 });
+
+test.describe('auto-layout', () => {
+  type Positions = Record<string, { x: number; y: number }>;
+
+  /** Reads every node's position from its SVG transform. */
+  async function positions(page: Page): Promise<Positions> {
+    return page.locator('#canvas [data-node-id]').evaluateAll((els) =>
+      Object.fromEntries(
+        els.map((el) => {
+          const [x, y] = (el.getAttribute('transform') ?? '').match(/-?[\d.]+/g)!.map(Number);
+          return [el.getAttribute('data-node-id')!, { x, y }];
+        }),
+      ),
+    );
+  }
+
+  function minPairDistance(pos: Positions): number {
+    const pts = Object.values(pos);
+    let min = Infinity;
+    for (let i = 0; i < pts.length; i++) {
+      for (let j = i + 1; j < pts.length; j++) {
+        min = Math.min(min, Math.hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y));
+      }
+    }
+    return min;
+  }
+
+  /** Waits until no node moves between two samples taken 300 ms apart. */
+  async function waitUntilSettled(page: Page): Promise<Positions> {
+    let last = await positions(page);
+    await expect
+      .poll(
+        async () => {
+          await page.waitForTimeout(300);
+          const now = await positions(page);
+          const same = JSON.stringify(now) === JSON.stringify(last);
+          last = now;
+          return same;
+        },
+        { timeout: 15_000, intervals: [0] },
+      )
+      .toBe(true);
+    return last;
+  }
+
+  /** Four nodes in a cramped 2×2 cluster, connected as a path 0-1-2-3. */
+  const CRAMPED: Array<[number, number]> = [
+    [380, 280],
+    [440, 280],
+    [440, 340],
+    [380, 340],
+  ];
+
+  async function addCrampedPath(): Promise<void> {
+    for (const p of CRAMPED) await cv.click(...p);
+    await connect(CRAMPED[0], CRAMPED[1]);
+    await connect(CRAMPED[1], CRAMPED[2]);
+    await connect(CRAMPED[2], CRAMPED[3]);
+  }
+
+  const toggle = (page: Page) => page.getByRole('button', { name: 'Auto-layout' });
+
+  test('toggle sits in the top-left corner of the canvas and starts off', async ({ page }) => {
+    const btn = toggle(page);
+    await expect(btn).toBeVisible();
+    await expect(btn).toHaveAttribute('aria-pressed', 'false');
+    await expect(btn).toContainText('Off');
+
+    const b = (await btn.boundingBox())!;
+    const c = (await cv.canvas.boundingBox())!;
+    expect(b.x - c.x).toBeGreaterThanOrEqual(0);
+    expect(b.x - c.x).toBeLessThan(24);
+    expect(b.y - c.y).toBeGreaterThanOrEqual(0);
+    expect(b.y - c.y).toBeLessThan(24);
+  });
+
+  test('clicking the toggle opens and closes auto-layout without adding nodes', async ({ page }) => {
+    await toggle(page).click();
+    await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+    await expect(toggle(page)).toContainText('On');
+    await expect(page.locator('#message')).toContainText('Auto-layout on');
+
+    await toggle(page).click();
+    await expect(toggle(page)).toHaveAttribute('aria-pressed', 'false');
+    await expect(toggle(page)).toContainText('Off');
+    await expect(page.locator('#message')).toContainText('Auto-layout off');
+    await expect(cv.nodes).toHaveCount(0);
+  });
+
+  test('the toggle is keyboard accessible', async ({ page }) => {
+    await toggle(page).focus();
+    await page.keyboard.press('Enter');
+    await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+    await page.keyboard.press('Space');
+    await expect(toggle(page)).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  test('animates a cramped graph into a spaced-out layout', async ({ page }) => {
+    await addCrampedPath();
+    const before = await positions(page);
+    expect(minPairDistance(before)).toBeLessThan(70);
+
+    await toggle(page).click();
+    // It animates: shortly after, nodes have started moving but are not done yet.
+    await expect.poll(async () => JSON.stringify(await positions(page))).not.toBe(JSON.stringify(before));
+
+    const settled = await waitUntilSettled(page);
+    expect(minPairDistance(settled)).toBeGreaterThan(100);
+    // Edges and the adjacency list are unchanged; only positions moved.
+    await expect(cv.edges).toHaveCount(3);
+    await expect(page.locator('#adjacency')).toHaveText('0: 1\n1: 0, 2\n2: 1, 3\n3: 2');
+    // Edge lines follow their nodes.
+    await expect(cv.edge(0, 1).locator('.edge-line')).toHaveAttribute('x1', String(settled['0'].x));
+  });
+
+  test('turning it off freezes the nodes where they are', async ({ page }) => {
+    await addCrampedPath();
+    await toggle(page).click();
+    await page.waitForTimeout(400); // mid-animation
+    await toggle(page).click();
+
+    const frozen = await positions(page);
+    await page.waitForTimeout(600);
+    expect(await positions(page)).toEqual(frozen);
+
+    // New nodes are placed exactly where clicked again.
+    await cv.click(...P.d);
+    await expect(cv.node(4)).toHaveAttribute('transform', `translate(${P.d[0]} ${P.d[1]})`);
+  });
+
+  test.describe('with reduced motion', () => {
+    test.use({ reducedMotion: 'reduce' });
+
+    test('jumps straight to the settled layout', async ({ page }) => {
+      await addCrampedPath();
+      await toggle(page).click();
+      // Settled in a single frame: no intermediate positions to wait through.
+      await expect.poll(async () => minPairDistance(await positions(page)), { timeout: 1000 }).toBeGreaterThan(100);
+      const settled = await positions(page);
+      await page.waitForTimeout(300);
+      expect(await positions(page)).toEqual(settled);
+    });
+
+    /** Builds the cramped path, turns auto-layout on, and waits for it to settle. */
+    async function settledPath(page: Page): Promise<Positions> {
+      await addCrampedPath();
+      await toggle(page).click();
+      return waitUntilSettled(page);
+    }
+
+    test('re-lays out when the graph is edited', async ({ page }) => {
+      const before = await settledPath(page);
+      expect(minPairDistance(before)).toBeGreaterThan(100);
+
+      // Close the path into a cycle (clicking where the nodes are now): the layout adapts.
+      await cv.click(before['0'].x, before['0'].y);
+      await cv.click(before['3'].x, before['3'].y);
+      await expect(cv.edge(0, 3)).toHaveCount(1);
+      await expect(page.locator('#adjacency')).toHaveText('0: 1, 3\n1: 0, 2\n2: 1, 3\n3: 0, 2');
+      await expect.poll(async () => JSON.stringify(await positions(page))).not.toBe(JSON.stringify(before));
+    });
+
+    test('a node being dragged stays under the pointer', async ({ page }) => {
+      const start = (await settledPath(page))['0'];
+
+      const o = (await cv.canvas.boundingBox())!;
+      await page.mouse.move(o.x + start.x, o.y + start.y);
+      await page.mouse.down();
+      await page.mouse.move(o.x + 150, o.y + 120, { steps: 8 });
+      await page.waitForTimeout(200); // layout keeps running while held
+      const held = (await positions(page))['0'];
+      expect(held.x).toBeCloseTo(150, 1); // laid-out positions are fractional
+      expect(held.y).toBeCloseTo(120, 1);
+      await page.mouse.up();
+      // Released, it rejoins the layout and gets pulled back toward its neighbour.
+      await expect.poll(async () => (await positions(page))['0'].x).toBeGreaterThan(160);
+    });
+  });
+});

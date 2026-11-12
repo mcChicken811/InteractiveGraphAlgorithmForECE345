@@ -8,6 +8,8 @@ const stats = document.querySelector<HTMLElement>('#stats')!;
 const messageEl = document.querySelector<HTMLElement>('#message')!;
 const adjacencyEl = document.querySelector<HTMLElement>('#adjacency')!;
 const clearBtn = document.querySelector<HTMLButtonElement>('#clear-btn')!;
+const layoutBtn = document.querySelector<HTMLButtonElement>('#layout-toggle')!;
+const layoutState = layoutBtn.querySelector<HTMLElement>('.state')!;
 
 const graph = new Graph();
 
@@ -39,6 +41,13 @@ const editor = new GraphEditor(svg, graph, {
 });
 
 clearBtn.addEventListener('click', () => editor.clear());
+
+layoutBtn.addEventListener('click', () => {
+  const enabled = !editor.autoLayoutEnabled;
+  editor.setAutoLayout(enabled);
+  layoutBtn.setAttribute('aria-pressed', String(enabled));
+  layoutState.textContent = enabled ? 'On' : 'Off';
+});
 
 refreshPanels();
 showMessage('Click empty space to add a node.');

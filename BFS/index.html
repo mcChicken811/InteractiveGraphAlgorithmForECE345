@@ -22,6 +22,17 @@
 
     <main class="layout">
       <section class="canvas-wrap">
+        <button
+          id="layout-toggle"
+          class="layout-toggle"
+          type="button"
+          aria-pressed="false"
+          title="Automatically space out the graph (force-directed layout)"
+        >
+          <span class="switch" aria-hidden="true"></span>
+          Auto-layout
+          <span class="state" aria-hidden="true">Off</span>
+        </button>
         <svg id="canvas" role="img" aria-label="Graph editor canvas"></svg>
         <!-- Replaced by build/main.js on startup; stays visible only if the script failed to load. -->
         <p id="message" class="message" data-tone="warn" aria-live="polite">
@@ -39,6 +50,7 @@
             <li><strong>Drag a node</strong> to move it.</li>
             <li><strong>Right-click a node</strong> (or select it and press Delete) to remove it.</li>
             <li><strong>Esc</strong> or click empty space to cancel a selection.</li>
+            <li><strong>Auto-layout</strong> (top left) spaces the graph out automatically.</li>
           </ul>
         </section>
         <section>

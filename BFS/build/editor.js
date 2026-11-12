@@ -1,3 +1,4 @@
+import { ForceLayout } from './layout.js';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 export const NODE_RADIUS = 20;
 /** Pointer travel (px) before a press on a node becomes a drag instead of a click. */
@@ -10,6 +11,7 @@ const MIN_NODE_GAP = 6;
  *  - click node, then another node → add edge
  *  - click edge → delete it
  *  - drag node → move it; right-click node (or Delete with it selected) → delete it
+ *  - optional auto-layout: a force-directed simulation spaces the nodes out
  */
 export class GraphEditor {
     svg;
@@ -18,6 +20,9 @@ export class GraphEditor {
     selected = null;
     pending = null;
     cursor = null;
+    layout = new ForceLayout({ padding: NODE_RADIUS + 2 });
+    autoLayout = false;
+    frame = null;
     edgeLayer;
     previewLine;
     nodeLayer;
@@ -38,6 +43,7 @@ export class GraphEditor {
         svg.addEventListener('pointerleave', this.onPointerLeave);
         svg.addEventListener('contextmenu', this.onContextMenu);
         window.addEventListener('keydown', this.onKeyDown);
+        window.addEventListener('resize', this.onResize);
         this.render();
     }
     /** Removes every node and edge. */
@@ -48,6 +54,26 @@ export class GraphEditor {
         this.render();
         this.changed();
         this.message('Graph cleared. Click empty space to add a node.');
+    }
+    get autoLayoutEnabled() {
+        return this.autoLayout;
+    }
+    /** Turns the force-directed auto-layout on or off. Nodes stay where they are when turned off. */
+    setAutoLayout(enabled) {
+        if (enabled === this.autoLayout)
+            return;
+        this.autoLayout = enabled;
+        if (enabled) {
+            this.kickLayout();
+            this.message('Auto-layout on: drag a node to nudge the layout.');
+        }
+        else {
+            this.layout.stop();
+            if (this.frame !== null)
+                cancelAnimationFrame(this.frame);
+            this.frame = null;
+            this.message('Auto-layout off: nodes stay where you put them.');
+        }
     }
     // ---------------------------------------------------------------- events
     onPointerDown = (e) => {
@@ -97,6 +123,7 @@ export class GraphEditor {
                 const pos = this.clampToCanvas({ x: p.x + pending.offset.x, y: p.y + pending.offset.y });
                 this.graph.moveNode(pending.id, pos.x, pos.y);
                 this.render();
+                this.kickLayout(0.5); // let the neighbours react to the dragged node
                 return;
             }
         }
@@ -114,6 +141,7 @@ export class GraphEditor {
                 if (pending.dragging) {
                     this.svg.classList.remove('dragging');
                     this.render();
+                    this.kickLayout(); // released node rejoins the simulation
                 }
                 else {
                     this.handleNodeClick(pending.id);
@@ -133,6 +161,10 @@ export class GraphEditor {
         this.pending = null;
         this.svg.classList.remove('dragging');
         this.render();
+        this.kickLayout();
+    };
+    onResize = () => {
+        this.kickLayout();
     };
     onPointerLeave = () => {
         if (this.pending)
@@ -286,6 +318,33 @@ export class GraphEditor {
         this.previewLine.style.display = '';
         setAttrs(this.previewLine, { x1: from.x, y1: from.y, x2: this.cursor.x, y2: this.cursor.y });
     }
+    // --------------------------------------------------------------- layout
+    /** (Re)starts the auto-layout animation if it is enabled. */
+    kickLayout(temperature = 1) {
+        if (!this.autoLayout)
+            return;
+        this.layout.reheat(temperature);
+        if (this.frame === null)
+            this.frame = requestAnimationFrame(this.layoutFrame);
+    }
+    layoutFrame = () => {
+        this.frame = null;
+        if (!this.autoLayout)
+            return;
+        const rect = this.svg.getBoundingClientRect();
+        const bounds = { width: rect.width, height: rect.height };
+        const pinned = new Set();
+        if (this.pending?.kind === 'node' && this.pending.dragging)
+            pinned.add(this.pending.id);
+        // With reduced motion, jump straight to the settled layout instead of animating.
+        const steps = prefersReducedMotion() ? 1000 : 1;
+        for (let i = 0; i < steps && this.layout.running; i++) {
+            this.layout.step(this.graph, bounds, pinned);
+        }
+        this.render();
+        if (this.layout.running)
+            this.frame = requestAnimationFrame(this.layoutFrame);
+    };
     // -------------------------------------------------------------- helpers
     toLocal(e) {
         const rect = this.svg.getBoundingClientRect();
@@ -299,12 +358,17 @@ export class GraphEditor {
             y: Math.min(Math.max(p.y, pad), Math.max(pad, rect.height - pad)),
         };
     }
+    /** The graph's structure changed: notify listeners and re-run the layout. */
     changed() {
         this.callbacks.onChange?.();
+        this.kickLayout();
     }
     message(text, tone = 'info') {
         this.callbacks.onMessage?.(text, tone);
     }
+}
+function prefersReducedMotion() {
+    return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 function distance(a, b) {
     return Math.hypot(a.x - b.x, a.y - b.y);

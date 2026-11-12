@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { Graph } from '../src/graph.js';
 import { GraphEditor, NODE_RADIUS, type EditorCallbacks } from '../src/editor.js';
 
@@ -314,5 +314,139 @@ describe('GraphEditor', () => {
       clickBackground(600, 100);
       expect(graph.nodeCount).toBe(3);
     });
+  });
+});
+
+describe('GraphEditor auto-layout', () => {
+  let frames: FrameRequestCallback[];
+
+  beforeEach(() => {
+    frames = [];
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => frames.push(cb));
+    vi.stubGlobal('cancelAnimationFrame', () => {
+      frames = [];
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** Runs queued animation frames (each may queue the next) and returns how many ran. */
+  function flushFrames(max = 2000): number {
+    let ran = 0;
+    while (frames.length && ran < max) {
+      frames.shift()!(performance.now());
+      ran++;
+    }
+    return ran;
+  }
+
+  function minPairDistance(): number {
+    const nodes = graph.getNodes();
+    let min = Infinity;
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        min = Math.min(min, Math.hypot(nodes[i].x - nodes[j].x, nodes[i].y - nodes[j].y));
+      }
+    }
+    return min;
+  }
+
+  /** Four nodes in a cramped 2×2 cluster, connected as a path 0-1-2-3. */
+  function addCrampedPath(): void {
+    clickBackground(380, 280);
+    clickBackground(440, 280);
+    clickBackground(440, 340);
+    clickBackground(380, 340);
+    for (const [a, b] of [
+      [0, 1],
+      [1, 2],
+      [2, 3],
+    ]) {
+      clickNode(a);
+      clickNode(b);
+    }
+  }
+
+  it('is off by default and never animates', () => {
+    expect(editor.autoLayoutEnabled).toBe(false);
+    addCrampedPath();
+    expect(frames).toHaveLength(0);
+    expect(graph.getNode(0)).toMatchObject({ x: 380, y: 280 });
+  });
+
+  it('spreads out a cramped graph when turned on', () => {
+    addCrampedPath();
+    const before = minPairDistance();
+    editor.setAutoLayout(true);
+    expect(editor.autoLayoutEnabled).toBe(true);
+    expect(lastMessage()[0]).toContain('Auto-layout on');
+
+    const ran = flushFrames();
+    expect(ran).toBeGreaterThan(1); // animated over several frames
+    expect(frames).toHaveLength(0); // ...then stopped by itself
+    expect(minPairDistance()).toBeGreaterThan(before * 1.5);
+    // The DOM follows the model.
+    const n0 = graph.getNode(0)!;
+    expect(nodeEl(0).getAttribute('transform')).toBe(`translate(${n0.x} ${n0.y})`);
+  });
+
+  it('does not report layout movement as a structural change', () => {
+    addCrampedPath();
+    onChange.mockClear();
+    editor.setAutoLayout(true);
+    flushFrames();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('re-runs the layout when the graph changes', () => {
+    addCrampedPath();
+    editor.setAutoLayout(true);
+    flushFrames();
+    const settled = graph.getNodes().map((n) => ({ ...n }));
+
+    clickNode(0);
+    clickNode(3); // close the cycle
+    expect(frames.length).toBeGreaterThan(0);
+    flushFrames();
+    expect(graph.getNodes()).not.toEqual(settled);
+  });
+
+  it('freezes nodes in place when turned off', () => {
+    addCrampedPath();
+    editor.setAutoLayout(true);
+    flushFrames(5);
+    editor.setAutoLayout(false);
+    expect(lastMessage()[0]).toContain('Auto-layout off');
+    const frozen = graph.getNodes().map((n) => ({ ...n }));
+
+    flushFrames();
+    clickBackground(700, 500); // structural change while off
+    flushFrames();
+    expect(graph.getNodes().slice(0, 4)).toEqual(frozen);
+  });
+
+  it('keeps a dragged node under the pointer while the others react', () => {
+    addCrampedPath();
+    editor.setAutoLayout(true);
+    flushFrames();
+
+    const n0 = graph.getNode(0)!;
+    pointer(nodeEl(0).querySelector('circle')!, 'pointerdown', n0.x, n0.y);
+    pointer(svg, 'pointermove', 150, 120);
+    flushFrames(30); // layout frames while the button is still held
+    expect(graph.getNode(0)).toMatchObject({ x: 150, y: 120 });
+
+    pointer(svg, 'pointerup', 150, 120);
+    flushFrames();
+    expect(frames).toHaveLength(0);
+  });
+
+  it('turning it on twice is a no-op', () => {
+    editor.setAutoLayout(true);
+    onMessage.mockClear();
+    editor.setAutoLayout(true);
+    expect(onMessage).not.toHaveBeenCalled();
   });
 });
