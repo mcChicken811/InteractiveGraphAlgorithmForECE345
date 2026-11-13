@@ -134,6 +134,19 @@ describe('BfsSimulation (undirected)', () => {
     expect(Object.fromEntries(sim.parent)).toEqual({ 0: null, 1: 0, 2: 0, 3: 1 });
   });
 
+  it('marks only the predecessor edges (v.π, v) as explored, from the moment v is discovered', () => {
+    const tree = () => sim.highlight().exploredEdges!.map((e) => `${e.from}-${e.to}`);
+    expect(tree()).toEqual([]); // only the source is known
+    sim.step(); // pops 0, discovers 1 and 2
+    expect(tree()).toEqual(['0-1', '0-2']);
+    sim.step(); // pops 1, discovers 3
+    expect(tree()).toEqual(['0-1', '0-2', '1-3']);
+    runToEnd(sim);
+    // 2 — 3 joins two discovered vertices but is no one's predecessor edge: it stays dashed.
+    expect(tree()).toEqual(['0-1', '0-2', '1-3']);
+    expect(sim.highlight().exploredEdges!.every((e) => !e.label && !e.done)).toBe(true);
+  });
+
   it('takes exactly one step per reachable vertex', () => {
     expect(runToEnd(sim)).toBe(4);
     expect(sim.finished).toBe(true);
@@ -188,6 +201,16 @@ describe('BfsSimulation (directed)', () => {
     runToEnd(sim);
     // 2 has no out-arcs; 3 is reached via 1 → 3. 3 → 2 is not needed (2 already found).
     expect(sim.order).toEqual([0, 1, 2, 3]);
+  });
+
+  it('the solid predecessor edges are the arcs (v.π → v) the search travelled', () => {
+    const sim = new BfsSimulation(g.directedView, 0);
+    runToEnd(sim);
+    expect(sim.highlight().exploredEdges).toEqual([
+      { from: 0, to: 1 },
+      { from: 0, to: 2 },
+      { from: 1, to: 3 },
+    ]); // 3 → 2 stays dashed
   });
 
   it('cannot go against an arc', () => {

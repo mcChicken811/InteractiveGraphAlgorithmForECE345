@@ -2050,14 +2050,30 @@ test.describe('algorithm simulation (DFS)', () => {
     expect(await strokeOf(3)).toBe(WHITE);
   });
 
-  test('BFS still draws every edge solid', async ({ page }) => {
+  test('BFS draws every edge dashed except the predecessor edges (v.π, v)', async ({ page }) => {
+    // Undirected: 0 — 1, 1 — 2, 0 — 2, 1 — 3, 3 — 4. BFS from 0: π(1) = π(2) = 0, π(3) = 1, π(4) = 3.
     await build(page);
     await page.getByRole('combobox', { name: 'Algorithm' }).click();
     await page.getByRole('option', { name: 'Breadth-first search' }).click();
     await run(page);
-    await update(page);
-    expect(Object.values(await edgeLook(page)).every((e) => !e.dashed)).toBe(true);
+    const dashed = async () =>
+      Object.entries(await edgeLook(page))
+        .filter(([, e]) => e.dashed)
+        .map(([k]) => k)
+        .sort();
+    // Before the first pop: no predecessor edges yet; 0's edges to 1 and 2 are the white ones.
+    expect(await dashed()).toEqual(['1>2', '1>3', '3>4']);
+    await update(page); // pops 0: discovers 1 and 2 through 0 — 1 and 0 — 2
+    expect(await dashed()).toEqual(['1>2', '3>4']); // 1 — 3 is white: the next pop travels it
+    await update(page); // pops 1: discovers 3
+    await update(page); // pops 2
+    await update(page); // pops 3: discovers 4
+    await update(page); // pops 4
+    // 1 — 2 joins two discovered vertices, but is neither one's predecessor edge.
+    expect(await dashed()).toEqual(['1>2']);
     await expect(radio(page, 'Undirected')).toBeChecked(); // BFS keeps the chosen direction
+    await page.getByRole('button', { name: 'Finish', exact: true }).click();
+    expect(Object.values(await edgeLook(page)).every((e) => !e.dashed)).toBe(true); // all solid again
   });
 
   test.describe('topological sort', () => {

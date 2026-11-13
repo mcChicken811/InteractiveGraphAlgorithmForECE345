@@ -147,6 +147,7 @@ The header's picker lists the available algorithms: **Breadth-first search**, **
 
 - **White:** the vertex at the front of the queue, which the next Update pops, and the edges that Update will travel (from it to neighbours not discovered yet). Right after Run, that's the start vertex.
 - **Green:** vertices already popped.
+- **Solid edges:** only the predecessor edges (v.π, v), which make up the breadth-first tree G_π (CLRS §20.2). Each one turns solid when BFS discovers v through it. Every other edge stays dashed and faded, including an edge between two discovered vertices that is neither one's predecessor edge. The white edges are solid too, since the next Update travels them. Finish or Stop draws every edge solid again.
 
 Each Update pops the front vertex (it turns green) and appends its undiscovered neighbours to the queue in ascending id order; the new front vertex turns white. The status message lists the whole queue, front (white) vertex first, for example "Popped 0: discovered 1, 2. Queue: 1, 2." A start vertex with *n* reachable vertices takes exactly *n* Updates, then Update becomes Finish.
 

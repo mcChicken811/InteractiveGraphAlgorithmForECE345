@@ -8,7 +8,10 @@ import type { AlgorithmDefinition, Highlight, QueueSnapshot, Simulation } from '
  * The display always shows what the *next* step will do:
  *  - white: the vertex at the front of the queue (popped next step), and the edges that
  *    step will travel — from it to its not-yet-discovered neighbours;
- *  - green: vertices already popped (finished).
+ *  - green: vertices already popped (finished);
+ *  - solid edges: the predecessor edges (v.π, v) of the vertices discovered so far — the
+ *    breadth-first tree G_π (CLRS §20.2), each drawn as soon as v is discovered. Every
+ *    other edge is dashed.
  *
  * Each step pops the front vertex (it turns green), then discovers its undiscovered
  * neighbours and appends them to the queue in ascending id order (views return sorted
@@ -90,6 +93,10 @@ export class BfsSimulation implements Simulation {
       // Shortest-path length (in edges) from the source, known from the moment a vertex is
       // discovered; undiscovered vertices get no label.
       labels: Object.fromEntries([...this.distance].map(([id, d]) => [id, String(d)])),
+      // Only the predecessor edges (v.π, v) are solid; the editor dashes the rest.
+      exploredEdges: [...this.parent]
+        .filter((entry): entry is [NodeId, NodeId] => entry[1] !== null)
+        .map(([v, u]) => ({ from: u, to: v })),
     };
   }
 
