@@ -2,11 +2,13 @@
 // Imports use .js extensions because browsers resolve them verbatim (no bundler).
 import { Graph } from './graph.js';
 import { GraphEditor } from './editor.js';
+import { renderAdjacencyList, renderAdjacencyMatrix, setupTabs } from './representations.js';
 
 const svg = document.querySelector<SVGSVGElement>('#canvas')!;
 const stats = document.querySelector<HTMLElement>('#stats')!;
 const messageEl = document.querySelector<HTMLElement>('#message')!;
 const adjacencyEl = document.querySelector<HTMLElement>('#adjacency')!;
+const matrixEl = document.querySelector<HTMLElement>('#adjacency-matrix')!;
 const clearBtn = document.querySelector<HTMLButtonElement>('#clear-btn')!;
 const layoutBtn = document.querySelector<HTMLButtonElement>('#layout-toggle')!;
 const layoutState = layoutBtn.querySelector<HTMLElement>('.state')!;
@@ -21,16 +23,11 @@ function refreshPanels(): void {
   stats.textContent = `${n} node${n === 1 ? '' : 's'} · ${m} edge${m === 1 ? '' : 's'}`;
   clearBtn.disabled = n === 0;
 
-  const nodes = graph.getNodes();
-  adjacencyEl.textContent = nodes.length
-    ? nodes
-        .map((node) => {
-          const nbrs = graph.neighbors(node.id);
-          return `${node.id}: ${nbrs.length ? nbrs.join(', ') : '—'}`;
-        })
-        .join('\n')
-    : 'No nodes yet.';
+  renderAdjacencyList(adjacencyEl, graph);
+  renderAdjacencyMatrix(matrixEl, graph);
 }
+
+setupTabs(document.querySelector<HTMLElement>('.rep-tabs')!);
 
 function showMessage(text: string, tone: 'info' | 'warn' = 'info'): void {
   messageEl.textContent = text;

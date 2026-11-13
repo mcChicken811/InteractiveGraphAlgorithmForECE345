@@ -300,7 +300,8 @@ test.describe('help & adjacency panel (hamburger menu)', () => {
     await expect(menu(page)).toHaveAttribute('aria-expanded', 'true');
     await expect(panel(page)).toBeVisible();
     await expect(panel(page).getByRole('heading', { name: 'How to use' })).toBeVisible();
-    await expect(panel(page).getByRole('heading', { name: 'Adjacency list' })).toBeVisible();
+    await expect(panel(page).getByRole('tab', { name: 'Adjacency list' })).toBeVisible();
+    await expect(panel(page).getByRole('tab', { name: 'Adjacency matrix' })).toBeVisible();
 
     // It hovers on top of the canvas rather than taking space beside it.
     const p = (await panel(page).boundingBox())!;
@@ -341,8 +342,117 @@ test.describe('help & adjacency panel (hamburger menu)', () => {
 
   test('clicks inside the panel do not touch the graph', async ({ page }) => {
     await menu(page).click();
-    await panel(page).getByRole('heading', { name: 'Adjacency list' }).click();
+    await panel(page).getByRole('heading', { name: 'How to use' }).click();
+    await panel(page).getByRole('tab', { name: 'Adjacency matrix' }).click();
+    await panel(page).getByRole('tab', { name: 'Adjacency list' }).click();
     await expect(cv.nodes).toHaveCount(0);
+  });
+});
+
+test.describe('adjacency list / matrix switch', () => {
+  const listTab = (page: Page) => page.getByRole('tab', { name: 'Adjacency list' });
+  const matrixTab = (page: Page) => page.getByRole('tab', { name: 'Adjacency matrix' });
+  const matrix = (page: Page) => page.getByRole('table', { name: 'Adjacency matrix' });
+
+  /** The matrix as text rows: header row first, e.g. [['', '0', '1'], ['0', '0', '1'], …]. */
+  async function matrixText(page: Page): Promise<string[][]> {
+    return matrix(page)
+      .locator('tr')
+      .evaluateAll((rows) => rows.map((r) => [...r.children].map((c) => c.textContent ?? '')));
+  }
+
+  test.beforeEach(async ({ page }) => {
+    await page.getByRole('button', { name: 'Help and adjacency list' }).click();
+  });
+
+  test('shows the adjacency list first, with the matrix on the right', async ({ page }) => {
+    await expect(page.getByRole('tablist', { name: 'Graph representation' })).toBeVisible();
+    await expect(listTab(page)).toHaveAttribute('aria-selected', 'true');
+    await expect(matrixTab(page)).toHaveAttribute('aria-selected', 'false');
+    await expect(page.locator('#adjacency')).toBeVisible();
+    await expect(page.locator('#rep-matrix')).toBeHidden();
+
+    const l = (await listTab(page).boundingBox())!;
+    const m = (await matrixTab(page).boundingBox())!;
+    expect(l.x + l.width).toBeLessThanOrEqual(m.x); // left / right
+    expect(Math.abs(l.y - m.y)).toBeLessThan(1);
+  });
+
+  test('switches to the adjacency matrix and back', async ({ page }) => {
+    await matrixTab(page).click();
+    await expect(matrixTab(page)).toHaveAttribute('aria-selected', 'true');
+    await expect(listTab(page)).toHaveAttribute('aria-selected', 'false');
+    await expect(page.locator('#rep-matrix')).toBeVisible();
+    await expect(page.locator('#adjacency')).toBeHidden();
+    await expect(page.locator('#rep-matrix')).toContainText('No nodes yet.');
+
+    await listTab(page).click();
+    await expect(page.locator('#adjacency')).toBeVisible();
+    await expect(page.locator('#rep-matrix')).toBeHidden();
+  });
+
+  test('arrow keys move between the two views', async ({ page }) => {
+    await listTab(page).focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(matrixTab(page)).toBeFocused();
+    await expect(matrixTab(page)).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('ArrowLeft');
+    await expect(listTab(page)).toBeFocused();
+    await expect(listTab(page)).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('End');
+    await expect(matrixTab(page)).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('Home');
+    await expect(listTab(page)).toHaveAttribute('aria-selected', 'true');
+  });
+
+  test('the matrix is a symmetric 0/1 table of the graph, updated live', async ({ page }) => {
+    await matrixTab(page).click();
+    await addTriangleNodes();
+    await connect(P.a, P.b);
+    await connect(P.b, P.c);
+
+    expect(await matrixText(page)).toEqual([
+      ['', '0', '1', '2'],
+      ['0', '0', '1', '0'],
+      ['1', '1', '0', '1'],
+      ['2', '0', '1', '0'],
+    ]);
+    // Edge cells are highlighted, and the diagonal is marked.
+    await expect(matrix(page).locator('td.on')).toHaveCount(4);
+    await expect(matrix(page).locator('td.diag')).toHaveCount(3);
+
+    // Deleting an edge clears both symmetric cells.
+    await cv.click(...mid(P.a, P.b));
+    await expect(matrix(page).locator('td.on')).toHaveCount(2);
+    expect((await matrixText(page))[1]).toEqual(['0', '0', '0', '0']);
+  });
+
+  test('both views describe the same graph, labelled by node id', async ({ page }) => {
+    await addTriangleNodes();
+    await connect(P.a, P.c);
+    await cv.click(...P.b, 'right'); // remove node 1: ids are now 0 and 2
+    await expect(page.locator('#adjacency')).toHaveText('0: 2\n2: 0');
+
+    await matrixTab(page).click();
+    expect(await matrixText(page)).toEqual([
+      ['', '0', '2'],
+      ['0', '0', '1'],
+      ['2', '1', '0'],
+    ]);
+  });
+
+  test('a large matrix scrolls inside the panel instead of widening the page', async ({ page }) => {
+    await matrixTab(page).click();
+    for (let i = 0; i < 16; i++) await cv.click(80 + (i % 8) * 70, 160 + Math.floor(i / 8) * 90);
+    await expect(matrix(page).locator('thead th')).toHaveCount(16);
+
+    const scroller = page.locator('#adjacency-matrix');
+    const overflow = await scroller.evaluate((el) => el.scrollWidth - el.clientWidth);
+    expect(overflow).toBeGreaterThan(0);
+    const p = (await page.locator('#info-panel').boundingBox())!;
+    const c = (await cv.canvas.boundingBox())!;
+    expect(p.x + p.width).toBeLessThanOrEqual(c.x + c.width);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
   });
 });
 

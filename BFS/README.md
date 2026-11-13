@@ -79,7 +79,8 @@ The image tag in `docker/playwright.Dockerfile` must match the exact `@playwrigh
 | Right-click a node, or select it and press Delete | Delete the node and its edges |
 | Esc, or click empty space while a node is selected | Cancel the selection |
 | **Auto-layout** button (top-left of the canvas) | Turn automatic spacing on/off |
-| **☰** button (top-right of the canvas), or Esc to close | Show/hide the help and the live adjacency list, floating over the canvas |
+| **☰** button (top-right of the canvas), or Esc to close | Show/hide the help and the live graph representation, floating over the canvas |
+| **Adjacency list / Adjacency matrix** switch (in the ☰ panel; ← / → when focused) | Choose which representation of the graph to show |
 
 ## Auto-layout
 
@@ -125,5 +126,6 @@ Freivalds, Dogrusoz & Kikusts study this approach in *Disconnected Graph Layout 
 - `src/editor.ts` — `GraphEditor`: SVG rendering, pointer/keyboard interaction, and driving the auto-layout animation.
 - `src/layout.ts` — `ForceLayout` (per-component force-directed layout, fitting and packing) and `packRows`; pure, no DOM.
 - `src/main.ts` — wires the editor to the stats, status message, Auto-layout toggle and the ☰ help/adjacency-list panel.
+- `src/representations.ts` — renders the adjacency list and adjacency matrix views, and the list/matrix switch (ARIA tabs). The data comes from `Graph.adjacencyList()` and `Graph.adjacencyMatrix()`.
 - `src/style.css` — styles, linked directly from `index.html`.
 - `build/` — compiled JavaScript loaded by the page. It is committed so the page works from a fresh clone, so rebuild it before committing changes to `src/`. Imports in `src/` use `.js` extensions because the browser loads them unbundled.

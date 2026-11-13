@@ -65,8 +65,38 @@
             </ul>
           </section>
           <section>
-            <h2>Adjacency list</h2>
-            <pre id="adjacency" class="adjacency"></pre>
+            <!-- Left/right switch between the two standard graph representations (ARIA tabs). -->
+            <div class="rep-tabs" role="tablist" aria-label="Graph representation">
+              <button
+                id="tab-list"
+                class="rep-tab"
+                type="button"
+                role="tab"
+                aria-selected="true"
+                aria-controls="rep-list"
+              >
+                Adjacency list
+              </button>
+              <button
+                id="tab-matrix"
+                class="rep-tab"
+                type="button"
+                role="tab"
+                aria-selected="false"
+                aria-controls="rep-matrix"
+                tabindex="-1"
+              >
+                Adjacency matrix
+              </button>
+            </div>
+            <div id="rep-list" class="rep-panel" role="tabpanel" aria-labelledby="tab-list">
+              <pre id="adjacency" class="adjacency"></pre>
+              <p class="rep-note">Each node followed by its neighbours.</p>
+            </div>
+            <div id="rep-matrix" class="rep-panel" role="tabpanel" aria-labelledby="tab-matrix" hidden>
+              <div id="adjacency-matrix" class="matrix-scroll"></div>
+              <p class="rep-note">1 marks an edge between the row and column nodes. The matrix is symmetric because edges are undirected.</p>
+            </div>
           </section>
         </aside>
 

@@ -2,10 +2,12 @@
 // Imports use .js extensions because browsers resolve them verbatim (no bundler).
 import { Graph } from './graph.js';
 import { GraphEditor } from './editor.js';
+import { renderAdjacencyList, renderAdjacencyMatrix, setupTabs } from './representations.js';
 const svg = document.querySelector('#canvas');
 const stats = document.querySelector('#stats');
 const messageEl = document.querySelector('#message');
 const adjacencyEl = document.querySelector('#adjacency');
+const matrixEl = document.querySelector('#adjacency-matrix');
 const clearBtn = document.querySelector('#clear-btn');
 const layoutBtn = document.querySelector('#layout-toggle');
 const layoutState = layoutBtn.querySelector('.state');
@@ -17,16 +19,10 @@ function refreshPanels() {
     const m = graph.edgeCount;
     stats.textContent = `${n} node${n === 1 ? '' : 's'} · ${m} edge${m === 1 ? '' : 's'}`;
     clearBtn.disabled = n === 0;
-    const nodes = graph.getNodes();
-    adjacencyEl.textContent = nodes.length
-        ? nodes
-            .map((node) => {
-            const nbrs = graph.neighbors(node.id);
-            return `${node.id}: ${nbrs.length ? nbrs.join(', ') : '—'}`;
-        })
-            .join('\n')
-        : 'No nodes yet.';
+    renderAdjacencyList(adjacencyEl, graph);
+    renderAdjacencyMatrix(matrixEl, graph);
 }
+setupTabs(document.querySelector('.rep-tabs'));
 function showMessage(text, tone = 'info') {
     messageEl.textContent = text;
     messageEl.dataset.tone = tone;

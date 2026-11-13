@@ -136,6 +136,64 @@ describe('Graph', () => {
     });
   });
 
+  describe('representations', () => {
+    beforeEach(() => {
+      for (let i = 0; i < 4; i++) g.addNode(0, 0);
+      g.addEdge(0, 1);
+      g.addEdge(0, 2);
+      g.addEdge(2, 3);
+    });
+
+    it('adjacencyList gives every node with its sorted neighbours', () => {
+      expect(g.adjacencyList()).toEqual([
+        { id: 0, neighbors: [1, 2] },
+        { id: 1, neighbors: [0] },
+        { id: 2, neighbors: [0, 3] },
+        { id: 3, neighbors: [2] },
+      ]);
+    });
+
+    it('adjacencyMatrix is a symmetric 0/1 matrix with an empty diagonal', () => {
+      const { ids, matrix } = g.adjacencyMatrix();
+      expect(ids).toEqual([0, 1, 2, 3]);
+      expect(matrix).toEqual([
+        [0, 1, 1, 0],
+        [1, 0, 0, 0],
+        [1, 0, 0, 1],
+        [0, 0, 1, 0],
+      ]);
+      matrix.forEach((row, i) => row.forEach((v, j) => expect(v).toBe(matrix[j][i])));
+    });
+
+    it('labels matrix rows and columns by id when ids have gaps', () => {
+      g.removeNode(1);
+      const { ids, matrix } = g.adjacencyMatrix();
+      expect(ids).toEqual([0, 2, 3]);
+      expect(matrix).toEqual([
+        [0, 1, 0],
+        [1, 0, 1],
+        [0, 1, 0],
+      ]);
+    });
+
+    it('both representations agree on every edge', () => {
+      const { ids, matrix } = g.adjacencyMatrix();
+      const list = g.adjacencyList();
+      ids.forEach((a, i) =>
+        ids.forEach((b, j) => {
+          expect(matrix[i][j] === 1).toBe(list[i].neighbors.includes(b));
+          expect(matrix[i][j] === 1).toBe(g.hasEdge(a, b));
+        }),
+      );
+    });
+
+    it('are empty for an empty graph', () => {
+      g.clear();
+      expect(g.adjacencyList()).toEqual([]);
+      expect(g.adjacencyMatrix()).toEqual({ ids: [], matrix: [] });
+    });
+  });
+
   describe('connectedComponents', () => {
     it('returns nothing for an empty graph', () => {
       expect(g.connectedComponents()).toEqual([]);

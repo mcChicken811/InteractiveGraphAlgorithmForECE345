@@ -82,6 +82,20 @@ export class Graph {
         this.adjacency.get(b)?.delete(a);
         return removed;
     }
+    /** Adjacency-list representation: every node (by id) with its sorted neighbours. */
+    adjacencyList() {
+        return this.getNodes().map(({ id }) => ({ id, neighbors: this.neighbors(id) }));
+    }
+    /**
+     * Adjacency-matrix representation. `ids` (ascending) label the rows and columns;
+     * `matrix[i][j]` is 1 when ids[i] and ids[j] share an edge. For an undirected graph
+     * the matrix is symmetric, and its diagonal is 0 because self-loops are not allowed.
+     */
+    adjacencyMatrix() {
+        const ids = this.getNodes().map((n) => n.id);
+        const matrix = ids.map((a) => ids.map((b) => (this.hasEdge(a, b) ? 1 : 0)));
+        return { ids, matrix };
+    }
     /**
      * Connected components, found by breadth-first search.
      * Ordered largest first (ties: smallest node id first); each component lists its
