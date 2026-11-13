@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FLAT, cutShape, loopsPath, polylinesPath, type CutFeature, type Point, type Side } from '../src/voronoi.js';
+import { FLAT, cutShape, groupSeams, loopsPath, polylinesPath, type CutFeature, type Point, type Side } from '../src/voronoi.js';
 
 const BOUNDS = { width: 800, height: 600 };
 
@@ -244,6 +244,48 @@ describe('cutShape (moving from one cut to the next)', () => {
     expect(end.border).toEqual([]);
     expect(inRegion(end.region, { x: 790, y: 590 })).toBe(true);
     expect(FLAT).toBeGreaterThan(0);
+  });
+});
+
+describe('groupSeams (borders between several groups)', () => {
+  const box = { width: 600, height: 400 };
+  const length = (lines: Point[][]) =>
+    lines.reduce((sum, line) => sum + line.slice(1).reduce((s, q, k) => s + Math.hypot(q.x - line[k].x, q.y - line[k].y), 0), 0);
+  const seg = (ax: number, ay: number, bx: number, by: number, group: number) => ({ a: { x: ax, y: ay }, b: { x: bx, y: by }, group });
+
+  it('two groups: the bisector between them, traced once', () => {
+    // Two vertical edges at x = 100 and x = 300: the seam is the line x = 200, top to bottom.
+    const seams = groupSeams([seg(100, 50, 100, 350, 1), seg(300, 50, 300, 350, 2)], box);
+    const points = seams.flat();
+    expect(points.length).toBeGreaterThan(10);
+    for (const p of points) expect(p.x).toBeCloseTo(200, 0);
+    expect(length(seams)).toBeCloseTo(400, -1); // once, not twice
+  });
+
+  it('three groups: each border once, meeting where all three are equally near', () => {
+    // Three points far apart: a Y of three seams.
+    const at = (x: number, y: number, group: number) => ({ a: { x, y }, group });
+    const sites = [at(150, 100, 1), at(450, 100, 2), at(300, 350, 3)];
+    const seams = groupSeams(sites, box);
+    const near = (p: Point) => sites.map((s) => Math.hypot(p.x - s.a.x, p.y - s.a.y)).sort((x, y) => x - y);
+    for (const p of seams.flat()) {
+      const [d1, d2] = near(p);
+      expect(d2 - d1).toBeLessThan(1); // on a border: the two nearest are as near
+    }
+    // No stretch is traced twice: no two segments share both ends.
+    const keys = seams.flatMap((line) =>
+      line.slice(1).map((q, k) => {
+        const a = `${Math.round(line[k].x)},${Math.round(line[k].y)}`;
+        const b = `${Math.round(q.x)},${Math.round(q.y)}`;
+        return a < b ? `${a}|${b}` : `${b}|${a}`;
+      }),
+    );
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('fewer than two groups have no seams', () => {
+    expect(groupSeams([], box)).toEqual([]);
+    expect(groupSeams([seg(100, 50, 100, 350, 1), seg(300, 50, 300, 350, 1)], box)).toEqual([]);
   });
 });
 

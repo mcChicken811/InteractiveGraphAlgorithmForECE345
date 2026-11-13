@@ -56,6 +56,13 @@ export interface Highlight {
    * is no border, and no territory, until S takes every vertex and floods the canvas.
    */
   cutEdgesOnly?: boolean;
+  /**
+   * S split into groups (Kruskal: its trees), each with a territory of its own: all are
+   * shaded alike, with borders between them as well as with V − S's territory. An edge
+   * joining two groups crosses a border, as one crossing the cut does. Left out, S is
+   * one group.
+   */
+  cutGroups?: NodeId[][];
 }
 
 export interface ExploredEdge {

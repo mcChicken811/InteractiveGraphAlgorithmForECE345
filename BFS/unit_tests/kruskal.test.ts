@@ -118,22 +118,23 @@ describe('KruskalSimulation (weighted, CLRS MST-KRUSKAL)', () => {
     expect(sim.treeCount).toBe(1);
   });
 
-  it('highlight: white next edge, the cut around its first end with grey crossing edges, A green, cycle edges dashed green', () => {
+  it('highlight: white next edge, grey edges crossing the cut around its first end, A green, cycle edges dashed green', () => {
     expect(sim.highlight()).toMatchObject({
       current: null,
       compact: true,
       done: [], // no vertex is in a tree with an edge yet
       activeEdges: [[1, 2]],
       labels: { 0: '0', 1: '1', 2: '2', 3: '3', 4: '4' },
-      cut: [1], // 1's tree: just 1
-      cutEdgesOnly: true, // only non-crossing edges shape the border: none around a lone vertex
+      cut: [], // no tree with an edge yet: no territory
+      cutGroups: [],
+      cutEdgesOnly: true, // only non-crossing edges shape the borders: none around a lone vertex
     });
     sim.step();
     sim.step();
     sim.step(); // A = {1—2, 3—4, 0—1}; next 1—3
     const h = sim.highlight();
     expect(h.activeEdges).toEqual([[1, 3]]);
-    expect(h.cut).toEqual([0, 1, 2]);
+    expect(h.cut).toEqual([0, 1, 2, 3, 4]);
     expect(h.done).toEqual([0, 1, 2, 3, 4]);
     expect(h.exploredEdges).toEqual([
       { from: 1, to: 2, done: true },
@@ -151,17 +152,27 @@ describe('KruskalSimulation (weighted, CLRS MST-KRUSKAL)', () => {
     expect(labels[0]).not.toBe(labels[3]);
   });
 
-  it('when the next edge would close a cycle, its cut holds both its ends (it crosses nothing)', () => {
+  it('the cut is every tree with an edge so far, each a group of its own (a territory with its own border)', () => {
+    sim.step(); // A = {1—2}
+    expect(sim.highlight()).toMatchObject({ cut: [1, 2], cutGroups: [[1, 2]] });
+    sim.step(); // A = {1—2, 3—4}: two trees, two groups; 0 is in neither
+    expect(sim.highlight()).toMatchObject({ cut: [1, 2, 3, 4], cutGroups: [[1, 2], [3, 4]] });
+    sim.step(); // 0—1 joins 0 to 1's tree
+    expect(sim.highlight()).toMatchObject({ cut: [0, 1, 2, 3, 4], cutGroups: [[0, 1, 2], [3, 4]] });
+    sim.step(); // 1—3 joins the two trees into one
+    expect(sim.highlight()).toMatchObject({ cut: [0, 1, 2, 3, 4], cutGroups: [[0, 1, 2, 3, 4]] });
+  });
+
+  it('when the next edge would close a cycle, it crosses no cut', () => {
     for (let i = 0; i < 4; i++) sim.step(); // next: 0—2, both ends in the one tree
     const h = sim.highlight();
     expect(h.activeEdges).toEqual([[0, 2]]);
-    expect(h.cut).toEqual([0, 1, 2, 3, 4]);
     expect(sim.crossingEdges()).toEqual([]);
   });
 
   it('at the end of a connected graph the cut is everything (the territory floods), and no edge is next', () => {
     runToEnd(sim);
-    expect(sim.highlight()).toMatchObject({ activeEdges: [], cut: [0, 1, 2, 3, 4] });
+    expect(sim.highlight()).toMatchObject({ activeEdges: [], cut: [0, 1, 2, 3, 4], cutGroups: [[0, 1, 2, 3, 4]] });
   });
 
   it('edge queue snapshot: the remaining edges, and what happened to the one just taken', () => {
@@ -184,7 +195,7 @@ describe('KruskalSimulation (weighted, CLRS MST-KRUSKAL)', () => {
 });
 
 describe('KruskalSimulation on other graphs', () => {
-  it('a graph that is not connected gives a minimum spanning forest; the cut vanishes at the end', () => {
+  it('a graph that is not connected gives a minimum spanning forest; the cut keeps its trees (a lone vertex has none)', () => {
     g.addNode(50, 0); // 5, on its own
     const sim = new KruskalSimulation(weighted(g));
     runToEnd(sim);
@@ -192,7 +203,7 @@ describe('KruskalSimulation on other graphs', () => {
     expect(sim.describe()).toBe(
       'Kruskal finished: the graph is not connected, so this is a minimum spanning forest of 2 trees, 4 edges, total weight 14. Press Finish.',
     );
-    expect(sim.highlight().cut).toBeUndefined();
+    expect(sim.highlight()).toMatchObject({ cut: [0, 1, 2, 3, 4], cutGroups: [[0, 1, 2, 3, 4]] });
   });
 
   it('a graph with no edges is finished at once', () => {

@@ -3,7 +3,7 @@ import { ForceLayout } from './layout.js';
 import type { ArcDiagram, ForestDiagram, Highlight } from './algorithms/types.js';
 import { fitFontSize } from './label-fit.js';
 import { halfEllipse, rowLayout, treeLayout } from './arc-diagram.js';
-import { cutShape, loopsPath, polylinesPath, type CutFeature, type CutMode, type Side } from './voronoi.js';
+import { cutShape, groupSeams, loopsPath, polylinesPath, type CutFeature, type CutMode, type Side } from './voronoi.js';
 import { nodeCountFor, randomArcs, randomPositions } from './random-graph.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -25,6 +25,8 @@ const SIM_LABEL_WIDTH = NODE_RADIUS * 2 - 8;
 const ARRANGE_MS = 750;
 /** How long a cut's border takes to move to its new place when the cut changes. */
 const CUT_MS = 650;
+/** Numbers the editors' clip paths apart (an id must be unique on the page). */
+let clipIds = 0;
 const BEND_MS = 450;
 
 interface Point {
@@ -145,14 +147,29 @@ export class GraphEditor {
   private readonly cutLayer: SVGGElement;
   private readonly cutRegion: SVGPathElement;
   private readonly cutBorder: SVGPathElement;
+  /**
+   * The borders between S's groups (Kruskal: between trees), clipped to S's territory
+   * (cutClip): those of the groups before the latest change fade out (cutSeamsFrom) as
+   * those after fade in (cutSeamsTo).
+   */
+  private readonly cutClip: SVGPathElement;
+  private readonly cutSeamsFrom: SVGPathElement;
+  private readonly cutSeamsTo: SVGPathElement;
   /** The geometry the cut was last drawn for, to skip redrawing it when nothing moved. */
   private cutKey = '';
+  /** The geometry the seams were last traced for (they don't depend on cutT). */
+  private seamKey = '';
+  /** The seams before the latest change, while they fade out ('' when they stay as they were). */
+  private seamsFromPath = '';
   /**
    * The cut being drawn: its S before (cutFrom) and after (cutTo) the latest change, and
    * how far the border has moved between them (cutT, 0 → 1). null: no cut.
    */
   private cutFrom: ReadonlySet<NodeId> | null = null;
   private cutTo: ReadonlySet<NodeId> | null = null;
+  /** The group of each vertex of S (its smallest vertex), before and after; null: one group. */
+  private cutGroupsFrom: ReadonlyMap<NodeId, NodeId> | null = null;
+  private cutGroupsTo: ReadonlyMap<NodeId, NodeId> | null = null;
   private cutT = 1;
   private cutTween: Tween<number> | null = null;
   private readonly edgeLayer: SVGGElement;
@@ -169,7 +186,15 @@ export class GraphEditor {
     this.cutLayer = svgEl('g', { class: 'cut', 'aria-hidden': 'true' });
     this.cutRegion = svgEl('path', { class: 'cut-region' });
     this.cutBorder = svgEl('path', { class: 'cut-border' });
-    this.cutLayer.append(this.cutRegion, this.cutBorder);
+    const clipId = `cut-clip-${++clipIds}`;
+    const clip = svgEl('clipPath', { id: clipId });
+    this.cutClip = svgEl('path', { 'clip-rule': 'evenodd' });
+    clip.append(this.cutClip);
+    this.cutSeamsFrom = svgEl('path', { class: 'cut-seam' });
+    this.cutSeamsTo = svgEl('path', { class: 'cut-seam' });
+    const seams = svgEl('g', { 'clip-path': `url(#${clipId})` });
+    seams.append(this.cutSeamsFrom, this.cutSeamsTo);
+    this.cutLayer.append(clip, this.cutRegion, seams, this.cutBorder);
     this.edgeLayer = svgEl('g', { class: 'edges' });
     this.previewLine = svgEl('line', { class: 'preview-line' });
     this.nodeLayer = svgEl('g', { class: 'nodes' });
@@ -267,26 +292,37 @@ export class GraphEditor {
     this.svg.classList.toggle('sim-labels', !!highlight?.labels);
     this.svg.classList.toggle('sim-compact', !!highlight?.compact);
     if (!highlight) this.setPeek(null);
-    this.setCut(highlight?.cut ? new Set(highlight.cut) : null);
+    this.setCut(highlight?.cut ? new Set(highlight.cut) : null, highlight?.cutGroups);
     this.render();
   }
 
   /**
-   * Takes the highlight's cut. When it changes, the border moves continuously to its new
-   * place (CUT_MS) instead of jumping; a cut appearing grows from nothing.
+   * Takes the highlight's cut (and S's groups, if given). When it changes, the border
+   * moves continuously to its new place (CUT_MS) instead of jumping; a cut appearing grows
+   * from nothing.
    */
-  private setCut(next: ReadonlySet<NodeId> | null): void {
+  private setCut(next: ReadonlySet<NodeId> | null, groups?: NodeId[][]): void {
     if (!next) {
       this.cutFrom = this.cutTo = null;
+      this.cutGroupsFrom = this.cutGroupsTo = null;
       this.cutTween = null;
       this.cutT = 1;
       return;
     }
+    const nextGroups = groups
+      ? new Map(groups.flatMap((group) => group.map((id): [NodeId, NodeId] => [id, Math.min(...group)])))
+      : null;
     const prev = this.cutTo;
-    if (prev && prev.size === next.size && [...next].every((id) => prev.has(id))) return;
+    const prevGroups = this.cutGroupsTo;
+    const sameGroups =
+      (prevGroups === null) === (nextGroups === null) &&
+      (!nextGroups || (prevGroups!.size === nextGroups.size && [...nextGroups].every(([id, g]) => prevGroups!.get(id) === g)));
+    if (prev && prev.size === next.size && [...next].every((id) => prev.has(id)) && sameGroups) return;
     // From the previous target: a change during a move continues from where it was headed.
     this.cutFrom = prev ?? new Set();
     this.cutTo = next;
+    this.cutGroupsFrom = prev ? prevGroups : null;
+    this.cutGroupsTo = nextGroups;
     if (prefersReducedMotion()) {
       this.cutTween = null;
       this.cutT = 1;
@@ -956,35 +992,41 @@ export class GraphEditor {
    * side — nearer to one of its vertices, or to one of its edges whose ends are both on
    * that side (it does not cross the cut). So only crossing edges cross the border.
    *
+   * With S split into groups (Kruskal: trees), an edge counts for a group when both its ends
+   * are in it; an edge between two groups crosses, like one crossing the cut. Every group is
+   * shaded, and the borders between groups (seams: where the nearest group changes) are
+   * drawn inside the shading as well.
+   *
    * While the cut changes, the border moves continuously: the new territory is revealed by
-   * a front spreading out from the old S (see voronoi.ts). When S ends up with every vertex, its territory floods the
-   * canvas and then fades out. It follows the vertices as they move.
+   * a front spreading out from the old S (see voronoi.ts), and the seams cross-fade. When S
+   * ends up as one group with every vertex, its territory floods the canvas and then fades
+   * out. It follows the vertices as they move.
    */
   private renderCut(): void {
     const to = this.cutTo;
     if (!to) {
-      this.cutKey = '';
+      this.cutKey = this.seamKey = this.seamsFromPath = '';
       this.svg.classList.remove('has-cut', 'cut-moving');
-      this.cutRegion.removeAttribute('d');
-      this.cutBorder.removeAttribute('d');
+      for (const path of [this.cutRegion, this.cutBorder, this.cutClip, this.cutSeamsFrom, this.cutSeamsTo]) path.removeAttribute('d');
       return;
     }
     const from = this.cutFrom ?? to;
+    const fromGroups = this.cutFrom ? this.cutGroupsFrom : this.cutGroupsTo;
+    const toGroups = this.cutGroupsTo;
     const t = this.cutTween ? this.cutT : 1;
     const nodes = this.graph.getNodes();
-    const modeOf = (set: ReadonlySet<NodeId>): CutMode => {
-      const inside = nodes.filter((n) => set.has(n.id)).length;
-      return inside === 0 ? 'empty' : inside === nodes.length ? 'all' : 'split';
-    };
-    const toMode = modeOf(to);
-    // Shown while both sides have vertices, and while moving; a full (or empty) cut that
-    // has finished moving fades out.
-    this.svg.classList.toggle('has-cut', toMode === 'split' || t < 1);
-    this.svg.classList.toggle('cut-moving', t < 1);
+    const edgesOnly = !!this.highlight?.cutEdgesOnly;
 
     const sideIn = (set: ReadonlySet<NodeId>, id: NodeId): Side => (set.has(id) ? 'in' : 'out');
-    const edgeSide = (set: ReadonlySet<NodeId>, a: NodeId, b: NodeId): Side | null =>
-      set.has(a) === set.has(b) ? sideIn(set, a) : null; // crossing edges belong to neither
+    /** The group of an edge with both ends in one group of S (null otherwise). */
+    const groupOf = (set: ReadonlySet<NodeId>, groups: ReadonlyMap<NodeId, NodeId> | null, a: NodeId, b: NodeId) => {
+      if (!set.has(a) || !set.has(b)) return null;
+      const [ga, gb] = groups ? [groups.get(a) ?? a, groups.get(b) ?? b] : [0, 0];
+      return ga === gb ? ga : null;
+    };
+    // Crossing edges, and edges between two groups, belong to neither side.
+    const edgeSide = (set: ReadonlySet<NodeId>, groups: ReadonlyMap<NodeId, NodeId> | null, a: NodeId, b: NodeId): Side | null =>
+      !set.has(a) && !set.has(b) ? 'out' : groupOf(set, groups, a, b) !== null ? 'in' : null;
     // A vertex joining S with no edge to the old S (the first one, or a new tree's root)
     // grows a territory of its own; the rest of the new territory spreads from the old S.
     const touchesFrom = new Set<NodeId>();
@@ -993,7 +1035,7 @@ export class GraphEditor {
       if (from.has(b)) touchesFrom.add(a);
     }
     // Kruskal draws the border from the non-crossing edges alone (cutEdgesOnly).
-    const features: CutFeature[] = this.highlight?.cutEdgesOnly
+    const features: CutFeature[] = edgesOnly
       ? []
       : nodes.map((node) => ({
           a: node,
@@ -1001,29 +1043,83 @@ export class GraphEditor {
           to: sideIn(to, node.id),
           seed: !from.has(node.id) && to.has(node.id) && !touchesFrom.has(node.id),
         }));
+    /** Each edge feature's group before and after (null: not in S). */
+    const featureGroups: Array<{ from: NodeId | null; to: NodeId | null }> = [];
     for (const [a, b] of this.graph.getEdges()) {
-      const f = edgeSide(from, a, b);
-      const g = edgeSide(to, a, b);
-      if (f || g) features.push({ a: this.graph.getNode(a)!, b: this.graph.getNode(b)!, from: f, to: g });
+      const f = edgeSide(from, fromGroups, a, b);
+      const g = edgeSide(to, toGroups, a, b);
+      if (!f && !g) continue;
+      // Edges only: an edge joining S with neither end in the old S (a new tree) grows a
+      // territory of its own.
+      const seed = edgesOnly && f !== 'in' && g === 'in' && !from.has(a) && !from.has(b);
+      features.push({ a: this.graph.getNode(a)!, b: this.graph.getNode(b)!, from: f, to: g, seed });
+      featureGroups.push({ from: groupOf(from, fromGroups, a, b), to: groupOf(to, toGroups, a, b) });
     }
+    const edgeFeatures = features.slice(features.length - featureGroups.length); // after the vertices, if any
+
+    const modeOf = (set: ReadonlySet<NodeId>, which: 'from' | 'to'): CutMode => {
+      const inside = nodes.filter((n) => set.has(n.id)).length;
+      if (inside === nodes.length) return inside === 0 ? 'empty' : 'all';
+      if (!edgesOnly) return inside === 0 ? 'empty' : 'split';
+      // Edges only: a territory needs edges of its own, and a border a second territory to
+      // meet — the rest's, or another group's (then S's groups share the whole canvas).
+      const groups = new Set(featureGroups.map((g) => g[which]).filter((g) => g !== null));
+      if (groups.size === 0) return 'empty';
+      if (!edgeFeatures.some((f) => f[which] === 'out')) return groups.size > 1 ? 'all' : 'empty';
+      return 'split';
+    };
+    const toMode = modeOf(to, 'to');
+    const fromMode = modeOf(from, 'from');
 
     const rect = this.svg.getBoundingClientRect();
-    const key = [
-      rect.width,
-      rect.height,
-      t,
-      ...features.map((f) => `${f.a.x},${f.a.y},${f.b?.x},${f.b?.y},${f.from},${f.to}`),
-    ].join('|');
+    const bounds = { width: rect.width, height: rect.height };
+    const where = features.map((f) => `${f.a.x},${f.a.y},${f.b?.x},${f.b?.y}`);
+    // The seams: where the nearest group changes (the rest left out), each traced once.
+    // Traced again only when something moved.
+    const seamsOf = (which: 'from' | 'to'): string =>
+      polylinesPath(
+        groupSeams(
+          edgeFeatures.flatMap((f, k) => {
+            const group = featureGroups[k][which];
+            return group === null ? [] : [{ a: f.a, b: f.b, group }];
+          }),
+          bounds,
+        ),
+      );
+    const firstEdge = features.length - featureGroups.length;
+    const seamKey = [rect.width, rect.height, ...featureGroups.map((g, k) => `${where[firstEdge + k]},${g.from},${g.to}`)].join('|');
+    let seamsTo = this.cutSeamsTo.getAttribute('d') ?? '';
+    if (seamKey !== this.seamKey) {
+      this.seamKey = seamKey;
+      seamsTo = seamsOf('to');
+      this.cutSeamsTo.setAttribute('d', seamsTo);
+      // Seams that stay as they were don't fade.
+      const seamsFrom = t < 1 ? seamsOf('from') : '';
+      this.seamsFromPath = seamsFrom === seamsTo ? '' : seamsFrom;
+    }
+    const fading = t < 1 && this.seamsFromPath !== '';
+    this.cutSeamsFrom.setAttribute('d', fading ? this.seamsFromPath : '');
+    this.cutSeamsFrom.style.opacity = fading ? String(1 - t) : '';
+    this.cutSeamsTo.style.opacity = fading ? String(t) : '';
+
+    // Shown while both sides have territory, while moving, and while there are seams; a
+    // full (or empty) cut that has finished moving fades out.
+    this.svg.classList.toggle('has-cut', toMode === 'split' || t < 1 || (toMode === 'all' && seamsTo !== ''));
+    this.svg.classList.toggle('cut-moving', t < 1);
+
+    const key = [rect.width, rect.height, t, ...features.map((f, k) => `${where[k]},${f.from},${f.to}`)].join('|');
     if (key === this.cutKey) return; // nothing moved
     this.cutKey = key;
-    const { region, border } = cutShape(features, { width: rect.width, height: rect.height }, {
+    const { region, border } = cutShape(features, bounds, {
       t,
-      from: modeOf(from),
+      from: fromMode,
       to: toMode,
       // Edges only: a side with no edge of its own has no border with the other.
-      needBoth: !!this.highlight?.cutEdgesOnly,
+      needBoth: edgesOnly,
     });
-    this.cutRegion.setAttribute('d', loopsPath(region));
+    const regionPath = loopsPath(region);
+    this.cutRegion.setAttribute('d', regionPath);
+    this.cutClip.setAttribute('d', regionPath);
     this.cutBorder.setAttribute('d', polylinesPath(border));
   }
 

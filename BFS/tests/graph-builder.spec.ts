@@ -3613,12 +3613,11 @@ test.describe("algorithm simulation (Kruskal's minimum spanning tree)", () => {
     for (const name of ['Undirected', 'Directed', 'Unweighted', 'Weighted']) await expect(radio(page, name)).toBeEnabled();
   });
 
-  test('presents like Prim: compact dots, the next edge white, the cut around it drawn with grey crossing edges', async ({ page }) => {
+  test('presents like Prim: compact dots, the next edge white, grey edges crossing the cut around it', async ({ page }) => {
     await build(page);
     await run(page);
     await expect(cv.canvas).toHaveClass(/sim-compact/);
     await expect(cv.canvas.locator('.node.sim-current, .node.sim-running')).toHaveCount(0);
-    await expect(cv.canvas).toHaveClass(/has-cut/); // around 1, the next edge's first end
     expect(await edgeLook(page)).toEqual({
       '0-1': 'crossing',
       '0-2': 'dashed',
@@ -3656,9 +3655,10 @@ test.describe("algorithm simulation (Kruskal's minimum spanning tree)", () => {
     await expect(cv.canvas).not.toHaveClass(/has-cut/);
   });
 
-  test('only the non-crossing edges shape the border: none while the next edge’s tree is a lone vertex', async ({ page }) => {
+  test('every tree is a territory of its own, all green, with borders between trees as well as with the rest', async ({ page }) => {
     const region = cv.canvas.locator('.cut-region');
     const border = cv.canvas.locator('.cut-border');
+    const seam = cv.canvas.locator('.cut-seam').last();
     /** Whether a canvas-local point lies in the shaded territory. */
     const inTerritory = (x: number, y: number) =>
       region.evaluate((el, [px, py]) => {
@@ -3669,24 +3669,53 @@ test.describe("algorithm simulation (Kruskal's minimum spanning tree)", () => {
         p.y = py;
         return path.isPointInFill(p);
       }, [x, y]);
+    const mid = (a: number, b: number): [number, number] => [(S[a][0] + S[b][0]) / 2, (S[a][1] + S[b][1]) / 2];
+    const toSegment = (p: { x: number; y: number }, a: [number, number], b: [number, number]) => {
+      const [dx, dy] = [b[0] - a[0], b[1] - a[1]];
+      const t = Math.max(0, Math.min(1, ((p.x - a[0]) * dx + (p.y - a[1]) * dy) / (dx * dx + dy * dy)));
+      return Math.hypot(p.x - (a[0] + dx * t), p.y - (a[1] + dy * t));
+    };
+    const seamPoints = async () =>
+      [...((await seam.getAttribute('d')) ?? '').matchAll(/(-?[\d.]+) (-?[\d.]+)/g)].map((m) => ({ x: Number(m[1]), y: Number(m[2]) }));
+
     await build(page);
     await run(page);
-    // Every tree is a single vertex: no edges inside the cut around 1, so no territory, no border.
+    // Every tree is a single vertex: no edges of its own, so no territory and no border.
     await cutSettled(page);
     await expect(border).toHaveAttribute('d', '');
     await expect(region).toHaveAttribute('d', '');
-    await steps(page, 2); // adds 1—2 and 3—4; next 0—1, around 0: still a lone vertex
-    await cutSettled(page);
-    await expect(border).toHaveAttribute('d', '');
-    await update(page); // adds 0—1; next 1—3, around {0, 1, 2} with its edges 0—1, 1—2, 0—2
+
+    await update(page); // adds 1—2: its tree's territory, against the rest's edge 3—4
     await expect(cv.canvas).toHaveClass(/cut-moving/);
     await cutSettled(page);
     await expect(border).not.toHaveAttribute('d', '');
-    // The territory is the side nearer the tree's edges than to the other side's edge 3—4.
-    const mid = (a: number, b: number): [number, number] => [(S[a][0] + S[b][0]) / 2, (S[a][1] + S[b][1]) / 2];
     expect(await inTerritory(...mid(1, 2))).toBe(true);
-    expect(await inTerritory(...mid(0, 1))).toBe(true);
     expect(await inTerritory(...mid(3, 4))).toBe(false);
+    await expect(seam).toHaveAttribute('d', ''); // one tree: nothing to separate
+
+    await update(page); // adds 3—4: two trees, both green, and no edge left among the rest
+    await cutSettled(page);
+    expect(await inTerritory(...mid(1, 2))).toBe(true);
+    expect(await inTerritory(...mid(3, 4))).toBe(true);
+    await expect(border).toHaveAttribute('d', '');
+    // The border between them: everywhere as near to 1—2 as to 3—4.
+    const between = await seamPoints();
+    expect(between.length).toBeGreaterThan(5);
+    for (const p of between) expect(Math.abs(toSegment(p, S[1], S[2]) - toSegment(p, S[3], S[4]))).toBeLessThan(3);
+    await expect(cv.canvas).toHaveClass(/has-cut/);
+
+    await update(page); // adds 0—1: {0, 1, 2} (with 0—2 inside it) and {3, 4}
+    await cutSettled(page);
+    const tree = [S[0], S[1], S[2]];
+    for (const p of await seamPoints()) {
+      const near012 = Math.min(toSegment(p, tree[0], tree[1]), toSegment(p, tree[1], tree[2]), toSegment(p, tree[0], tree[2]));
+      expect(Math.abs(near012 - toSegment(p, S[3], S[4]))).toBeLessThan(3);
+    }
+
+    await update(page); // adds 1—3: one tree with every vertex; the border between the trees goes
+    await cutSettled(page);
+    await expect(seam).toHaveAttribute('d', '');
+    await expect(cv.canvas).not.toHaveClass(/has-cut/); // it floods the canvas and fades
   });
 
   test('unweighted: counts every edge as 1', async ({ page }) => {

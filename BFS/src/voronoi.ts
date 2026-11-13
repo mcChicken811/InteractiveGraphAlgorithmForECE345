@@ -200,7 +200,8 @@ export function cutShape(features: CutFeature[], bounds: Bounds, options: CutSha
       }
     }
   }
-  const sweep = grows && r0 <= r1 && Number.isFinite(r1);
+  // Disappearing altogether (the new cut has no territory) fades by the blend instead.
+  const sweep = grows && to !== 'empty' && r0 <= r1 && Number.isFinite(r1);
   const radius = r0 - 0.5 + (r1 - r0 + 1) * t;
   /** The field drawn at blend t. */
   const blend = (fo: number, fn: number, sd: number): number => {
@@ -374,6 +375,66 @@ export function cutShape(features: CutFeature[], bounds: Bounds, options: CutSha
     if (run.length > 1) border.push(run);
   }
   return { region, border };
+}
+
+/** A vertex (`a` only) or an edge (`a`–`b`) of one of several groups. */
+export interface GroupFeature {
+  a: Point;
+  b?: Point;
+  group: number;
+}
+
+/**
+ * The borders between groups of features (seams): where the nearest group changes — the
+ * Voronoi borders of the groups. Each group's territory is traced against all the others
+ * together (as a cut), and of its border only the parts facing a later group are kept,
+ * so each seam is traced once. Fewer than two groups have none.
+ */
+export function groupSeams(features: GroupFeature[], bounds: Bounds, step?: number): Point[][] {
+  const groups = [...new Set(features.map((f) => f.group))].sort((x, y) => x - y);
+  if (groups.length < 2) return [];
+  const distanceTo = (p: Point, group: number): number => {
+    let d = Infinity;
+    for (const f of features) {
+      if (f.group !== group) continue;
+      const b = f.b ?? f.a;
+      d = Math.min(d, segmentDistance(p.x, p.y, f.a.x, f.a.y, b.x, b.y));
+    }
+    return d;
+  };
+  /** The group nearest to p other than `group`. */
+  const across = (p: Point, group: number): number => {
+    let best = Infinity;
+    let nearest = group;
+    for (const h of groups) {
+      if (h === group) continue;
+      const d = distanceTo(p, h);
+      if (d < best) [best, nearest] = [d, h];
+    }
+    return nearest;
+  };
+  const seams: Point[][] = [];
+  for (const group of groups) {
+    const cut: CutFeature[] = features.map((f) => {
+      const side: Side = f.group === group ? 'in' : 'out';
+      return { a: f.a, b: f.b, from: side, to: side };
+    });
+    for (const line of cutShape(cut, bounds, { t: 1, from: 'split', to: 'split', step }).border) {
+      let run: Point[] = [];
+      for (let k = 1; k < line.length; k++) {
+        const [p, q] = [line[k - 1], line[k]];
+        if (across({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 }, group) > group) {
+          if (!run.length) run.push(p);
+          run.push(q);
+        } else {
+          if (run.length > 1) seams.push(run);
+          run = [];
+        }
+      }
+      if (run.length > 1) seams.push(run);
+    }
+  }
+  return seams;
 }
 
 /** SVG path data for closed loops. */

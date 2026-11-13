@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { Graph } from '../src/graph.js';
+import type { Highlight } from '../src/algorithms/types.js';
 import { GraphEditor, NODE_RADIUS, WEIGHT_PER_PAGE, type EditorCallbacks } from '../src/editor.js';
 
 const WIDTH = 800;
@@ -1520,6 +1521,91 @@ describe('GraphEditor cut transitions', () => {
     settle();
     expect(border()).toBe('');
     expect(svg.querySelector('.cut-region')!.getAttribute('d')).toBe('');
+  });
+
+  it('cutGroups: each group is a territory of its own, all shaded, with a seam between them', () => {
+    // 0 — 1 — 2 — 3 along the row (3 at x = 550), and 4 — 5 below, at y = 500.
+    clickBackground(550, 300);
+    clickNode(2);
+    clickNode(3);
+    clickBackground(100, 500);
+    clickBackground(400, 500);
+    clickNode(4);
+    clickNode(5);
+    const settle = () => {
+      for (let i = 0; i < 80 && frames.length; i++) frame(16);
+    };
+    const seams = () => svg.querySelector('.cut-seam:last-child')!.getAttribute('d') ?? '';
+    const points = (d: string) => [...d.matchAll(/(-?[\d.]+) (-?[\d.]+)/g)].map((m) => ({ x: Number(m[1]), y: Number(m[2]) }));
+    const shaded = (p: { x: number; y: number }) => {
+      let inside = false;
+      for (const loop of svg.querySelector('.cut-region')!.getAttribute('d')!.split('Z').filter((part) => part.trim())) {
+        const ps = points(loop);
+        for (let i = 0, j = ps.length - 1; i < ps.length; j = i++) {
+          const [a, b] = [ps[i], ps[j]];
+          if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+        }
+      }
+      return inside;
+    };
+    // Two trees, {0, 1} and {2, 3}; 1 — 2 joins them, so it crosses; 4 — 5 is the rest's.
+    const two = { current: null, done: [], activeEdges: [], cut: [0, 1, 2, 3], cutEdgesOnly: true } satisfies Highlight;
+    editor.setHighlight({ ...two, cutGroups: [[0, 1], [2, 3]] });
+    settle();
+    // Both trees are shaded; the rest (around 4 — 5) is not.
+    expect(shaded({ x: 175, y: 300 })).toBe(true);
+    expect(shaded({ x: 475, y: 300 })).toBe(true);
+    expect(shaded({ x: 250, y: 500 })).toBe(false);
+    expect(border()).not.toBe('');
+    // The seam between them: the bisector of the gap 250 … 400, x = 325, inside the shading.
+    const seam = points(seams());
+    expect(seam.length).toBeGreaterThan(2);
+    const upper = seam.filter((p) => p.y < 380);
+    expect(upper.length).toBeGreaterThan(0);
+    for (const p of upper) expect(p.x).toBeCloseTo(325, 0);
+    expect(svg.querySelector('clipPath path')!.getAttribute('d')).toBe(svg.querySelector('.cut-region')!.getAttribute('d'));
+
+    // As one group (no groups given), the same S has no seam.
+    editor.setHighlight({ ...two });
+    settle();
+    expect(seams()).toBe('');
+    expect(svg.querySelector('.cut-seam')!.getAttribute('d')).toBe(''); // the old seam has faded out
+
+    // With no rest left (4 and 5 in a third tree), the trees share the whole canvas: shaded
+    // everywhere, with seams between them and no border with the rest. It does not fade out.
+    editor.setHighlight({ ...two, cut: [0, 1, 2, 3, 4, 5], cutGroups: [[0, 1], [2, 3], [4, 5]] });
+    settle();
+    expect(shaded({ x: 250, y: 500 })).toBe(true);
+    expect(shaded({ x: 790, y: 10 })).toBe(true);
+    expect(border()).toBe('');
+    expect(seams()).not.toBe('');
+    expect(svg.classList.contains('has-cut')).toBe(true);
+    // One tree with every vertex floods the canvas and fades out, as before.
+    editor.setHighlight({ ...two, cut: [0, 1, 2, 3, 4, 5], cutGroups: [[0, 1, 2, 3, 4, 5]] });
+    settle();
+    expect(seams()).toBe('');
+    expect(svg.classList.contains('has-cut')).toBe(false);
+  });
+
+  it('cutGroups: when two groups merge, the seam between them fades out', () => {
+    clickBackground(550, 300);
+    clickNode(2);
+    clickNode(3);
+    const base = { current: null, done: [], activeEdges: [], cut: [0, 1, 2, 3], cutEdgesOnly: true } satisfies Highlight;
+    editor.setHighlight({ ...base, cutGroups: [[0, 1], [2, 3]] });
+    for (let i = 0; i < 80 && frames.length; i++) frame(16);
+    const [fromSeam, toSeam] = [...svg.querySelectorAll<SVGPathElement>('.cut-seam')];
+    const before = toSeam.getAttribute('d');
+    expect(before).not.toBe('');
+    editor.setHighlight({ ...base, cutGroups: [[0, 1, 2, 3]] });
+    frame(200);
+    expect(toSeam.getAttribute('d')).toBe('');
+    expect(fromSeam.getAttribute('d')).toBe(before); // still there, fading
+    const opacity = Number(fromSeam.style.opacity);
+    expect(opacity).toBeGreaterThan(0);
+    expect(opacity).toBeLessThan(1);
+    for (let i = 0; i < 80 && frames.length; i++) frame(16);
+    expect(fromSeam.getAttribute('d')).toBe('');
   });
 
   it('moves the border continuously to its new place instead of jumping', () => {

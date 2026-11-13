@@ -81,6 +81,16 @@ export class KruskalSimulation implements Simulation {
     return this.view.nodeIds().filter((x) => this.sets.representative(x) === r);
   }
 
+  /** The forest's trees (one per set), each in id order, ordered by their smallest vertex. */
+  trees(): NodeId[][] {
+    const byRoot = new Map<NodeId, NodeId[]>();
+    for (const v of this.view.nodeIds()) {
+      const r = this.sets.representative(v);
+      byRoot.set(r, [...(byRoot.get(r) ?? []), v]);
+    }
+    return [...byRoot.values()];
+  }
+
   /** How many trees the forest has (one per set). */
   get treeCount(): number {
     return new Set(this.view.nodeIds().map((v) => this.sets.representative(v))).size;
@@ -126,7 +136,8 @@ export class KruskalSimulation implements Simulation {
       .filter(([a, b]) => !inForest.has(`${a}-${b}`) && this.sets.representative(a) === this.sets.representative(b));
     const ids = this.view.nodeIds();
     const touched = new Set(this.forest.flatMap((e) => [e.from, e.to]));
-    const oneTree = this.finished && this.treeCount === 1;
+    // The trees with an edge, each a territory of its own (a lone vertex has none).
+    const trees = this.trees().filter((tree) => tree.length > 1);
     return {
       current: null,
       compact: true,
@@ -140,11 +151,12 @@ export class KruskalSimulation implements Simulation {
         ),
         ...within.filter(([a, b]) => !crossKey.has(`${a}-${b}`)).map(([from, to]): ExploredEdge => ({ from, to, within: true })),
       ],
-      // The cut around the upcoming edge's u (Corollary 21.2); at the end, the whole graph
-      // when it is one tree (the territory floods the canvas, as with Prim).
-      cut: edge ? this.treeOf(edge.from) : oneTree ? ids : undefined,
-      // Only the non-crossing edges shape the border: none at first, when every tree is a
-      // single vertex.
+      // Every tree of A so far, green, with a border around each: between two trees as well
+      // as with the rest. At the end, a spanning tree floods the canvas, as with Prim.
+      cut: trees.flat(),
+      cutGroups: trees,
+      // Only the edges within a tree (or among the vertices in none) shape the borders:
+      // none at first, when every tree is a single vertex.
       cutEdgesOnly: true,
     };
   }

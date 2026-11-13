@@ -1163,7 +1163,8 @@ button:disabled {
   fill: color-mix(in srgb, var(--sim-done) 9%, transparent);
 }
 
-.cut-border {
+.cut-border,
+.cut-seam {
   fill: none;
   stroke: var(--sim-done);
   stroke-width: 2;
