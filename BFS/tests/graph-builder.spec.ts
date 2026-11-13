@@ -2505,7 +2505,10 @@ test.describe("algorithm simulation (Prim's minimum spanning tree)", () => {
   const labels = (page: Page) =>
     page.locator('#canvas [data-node-id]').evaluateAll((nodes) => nodes.map((g) => g.querySelector('.sim-label')!.textContent));
 
-  /** Edge "a-b" → 'tree' (in the tree), 'next' (the white light edge), 'crossing' (grey) or 'dashed' (the rest). */
+  /**
+   * Edge "a-b" → 'tree' (in the tree), 'within' (between tree vertices, not a tree edge:
+   * dashed green), 'next' (the white light edge), 'crossing' (grey) or 'dashed' (the rest).
+   */
   const edgeLook = (page: Page) =>
     page.locator('#canvas .edge').evaluateAll((edges) =>
       Object.fromEntries(
@@ -2518,7 +2521,9 @@ test.describe("algorithm simulation (Prim's minimum spanning tree)", () => {
               ? 'next'
               : g.classList.contains('sim-crossing')
                 ? 'crossing'
-                : dashed
+                : g.classList.contains('sim-within')
+                  ? 'within'
+                  : dashed
                   ? 'dashed'
                   : 'plain';
           return [`${g.dataset.edgeA}-${g.dataset.edgeB}`, look];
@@ -2526,7 +2531,7 @@ test.describe("algorithm simulation (Prim's minimum spanning tree)", () => {
       ),
     );
 
-  /** Priority queue tokens: 'min', then ids (+ '*' smallest key, '~' yellow ring), with their keys. */
+  /** Priority queue tokens: 'min', then ids (+ '*' smallest key, '~' yellow ring — never expected), with their keys. */
   const pqTokens = (page: Page) =>
     page.locator('#pq-strip > [data-key]:not(.exiting)').evaluateAll((els) =>
       els.map((el) => {
@@ -2572,17 +2577,20 @@ test.describe("algorithm simulation (Prim's minimum spanning tree)", () => {
     );
   });
 
-  test('white marks the next vertex and the edge that will join it; the tree is green, other edges dashed', async ({ page }) => {
+  test('white marks only the edge that will join the next vertex; the tree is green; no white or yellow rings', async ({ page }) => {
     await build(page);
     await run(page);
-    expect(await strokeOf(0)).toBe(WHITE); // extracted first, by no edge
+    await expect(cv.canvas.locator('.node.sim-current, .node.sim-running')).toHaveCount(0);
+    expect(await strokeOf(0)).not.toBe(WHITE); // extracted first, but not ringed
     expect(Object.values(await edgeLook(page)).every((l) => l === 'dashed')).toBe(true);
 
     await update(page); // 0 in the tree → next: 1, by 0—1
     expect(await strokeOf(0)).toBe(GREEN);
-    expect(await strokeOf(1)).toBe(WHITE);
-    expect(await strokeOf(2)).toBe(YELLOW); // has a key, still in the queue
-    expect(await strokeOf(3)).not.toBe(YELLOW); // key ∞
+    expect(await strokeOf(1)).not.toBe(WHITE); // extracted next: only its edge is white
+    // Still in the queue, with a key or not: the normal ring, never yellow.
+    expect(await strokeOf(2)).toBe(await strokeOf(4));
+    expect(await strokeOf(2)).not.toBe(YELLOW);
+    await expect(cv.canvas.locator('.node.sim-running')).toHaveCount(0);
     expect(await edgeLook(page)).toMatchObject({ '0-1': 'next', '0-2': 'crossing', '1-2': 'dashed' });
 
     await update(page); // 1 in the tree → next: 2, by 1—2 (lighter than 0—2)
@@ -2590,8 +2598,9 @@ test.describe("algorithm simulation (Prim's minimum spanning tree)", () => {
     await expect(cv.edge(0, 1).locator('.edge-line')).toHaveCSS('stroke', GREEN); // tree edges: green, solid
     await expect(cv.edge(0, 1).locator('.edge-line')).toHaveCSS('stroke-dasharray', 'none');
     await expect(cv.edge(1, 2).locator('.edge-line')).toHaveCSS('stroke', WHITE);
-    expect(await strokeOf(2)).toBe(WHITE);
-    expect(await strokeOf(3)).toBe(YELLOW);
+    expect(await strokeOf(2)).not.toBe(WHITE);
+    expect(await strokeOf(3)).not.toBe(YELLOW);
+    await expect(cv.canvas.locator('.node.sim-current, .node.sim-running')).toHaveCount(0);
   });
 
   test('between updates, edges crossing the cut are solid grey; the white one is the lightest of them', async ({ page }) => {
@@ -2749,18 +2758,32 @@ test.describe("algorithm simulation (Prim's minimum spanning tree)", () => {
     expect(await inTerritory(page)).toEqual([true, true, false, false, false]); // still the same split
   });
 
+  test('edges between tree vertices that are not tree edges turn dashed green as soon as both ends are in', async ({
+    page,
+  }) => {
+    await build(page);
+    await run(page);
+    await steps(page, 3); // tree {0, 1, 2}: 0 — 2 is inside the tree's side but not a tree edge
+    expect(await edgeLook(page)).toMatchObject({ '0-1': 'tree', '1-2': 'tree', '0-2': 'within' });
+    const line = cv.edge(0, 2).locator('.edge-line');
+    await expect(line).toHaveCSS('stroke', GREEN);
+    await expect(line).not.toHaveCSS('stroke-dasharray', 'none');
+    await expect(cv.edge(0, 1).locator('.edge-line')).toHaveCSS('stroke-dasharray', 'none'); // tree edges solid
+  });
+
   test('finishes with the minimum spanning tree and its total weight', async ({ page }) => {
     await build(page);
     await run(page);
     await steps(page, 5);
     await expect(page.getByRole('button', { name: 'Finish', exact: true })).toBeVisible();
     await expect(message(page)).toHaveText('Prim finished: a minimum spanning tree of 4 edges, total weight 14. Press Finish.');
+    // Every vertex is in the tree, so the left-out edges lie within it: dashed green.
     expect(await edgeLook(page)).toEqual({
       '0-1': 'tree',
-      '0-2': 'dashed',
+      '0-2': 'within',
       '1-2': 'tree',
       '1-3': 'tree',
-      '2-3': 'dashed',
+      '2-3': 'within',
       '3-4': 'tree',
     });
     for (const id of [0, 1, 2, 3, 4]) expect(await strokeOf(id)).toBe(GREEN);
@@ -2793,7 +2816,7 @@ test.describe("algorithm simulation (Prim's minimum spanning tree)", () => {
     await build(page, { spots }); // vertex 5 has no edges
     await run(page);
     await steps(page, 5);
-    expect(await strokeOf(5)).toBe(WHITE); // key ∞: starts a new tree
+    expect(await strokeOf(5)).not.toBe(WHITE); // key ∞: starts a new tree (not ringed)
     await expect(cv.canvas.locator('.edge.sim-active')).toHaveCount(0);
     await update(page);
     await expect(message(page)).toHaveText(
@@ -2831,9 +2854,9 @@ test.describe("algorithm simulation (Prim's minimum spanning tree)", () => {
       await run(page);
       expect(await pqTokens(page)).toEqual(['min', '0*:0', '1:∞', '2:∞', '3:∞', '4:∞']);
       await update(page);
-      expect(await pqTokens(page)).toEqual(['min', '1*:4', '2~:8', '3:∞', '4:∞']);
+      expect(await pqTokens(page)).toEqual(['min', '1*:4', '2:8', '3:∞', '4:∞']);
       await update(page); // 2's key drops to 2, 3's to 5
-      expect(await pqTokens(page)).toEqual(['min', '2*:2', '3~:5', '4:∞']);
+      expect(await pqTokens(page)).toEqual(['min', '2*:2', '3:5', '4:∞']);
       await expect(pqStrip(page).getByRole('listitem').first()).toHaveAttribute(
         'aria-label',
         '2, key 2, smallest key, next to be extracted',
@@ -2842,14 +2865,16 @@ test.describe("algorithm simulation (Prim's minimum spanning tree)", () => {
       await expect(page.locator('#pq-empty')).toBeVisible();
     });
 
-    test('the extracted vertex slides out green; its ring colours match the canvas', async ({ page }) => {
+    test('the extracted vertex slides out green; no ring is white or yellow, as on the canvas', async ({ page }) => {
       await build(page);
       await run(page);
       await update(page);
       await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => {}))));
       const border = (sel: string) => page.locator(sel).first().evaluate((el) => getComputedStyle(el).borderTopColor);
-      expect(await border('#pq-strip .q-node.front')).toBe(WHITE);
-      expect(await border('#pq-strip .q-node.running')).toBe(YELLOW);
+      expect(await border('#pq-strip .q-node.front')).not.toBe(WHITE); // first in line, but not ringed
+      expect(await border('#pq-strip .q-node.front')).toBe(await border('#pq-strip .q-node:not(.front)'));
+      expect(await border('#pq-strip .q-node:not(.front)')).not.toBe(YELLOW);
+      await expect(page.locator('#pq-strip .q-node.running')).toHaveCount(0);
       await update(page);
       const leaving = page.locator('#pq-strip > .exiting');
       await expect(leaving).toHaveCount(1);

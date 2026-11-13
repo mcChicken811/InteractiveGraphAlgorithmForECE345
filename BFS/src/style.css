@@ -1093,6 +1093,20 @@ button:disabled {
   opacity: 0.75;
 }
 
+/* Edges between finished vertices that are not part of the result (Prim: inside the tree's
+   side, but not tree edges): dashed, in the finished green. */
+.edge.sim-within:not(.sim-active) .edge-line {
+  stroke: var(--sim-done);
+  stroke-dasharray: 7 6;
+  opacity: 0.75;
+}
+
+/* Prim's priority queue: no white ring on the front (it is marked by its place at the min end). */
+.strip-priority .q-node.front:not(.popped) {
+  border-color: var(--accent);
+  filter: none;
+}
+
 /* Edges crossing the algorithm's cut (Prim: tree to queue): solid grey, full strength.
    The lightest one is the white active edge, which keeps its own style. */
 .edge.sim-crossing:not(.sim-active) .edge-line {
@@ -1157,6 +1171,11 @@ button:disabled {
 
 #canvas.locked .edge.sim-crossing:not(.sim-active, .sim-spine):hover .edge-line {
   stroke: var(--sim-crossing);
+}
+
+#canvas.locked .edge.sim-within:not(.sim-active, .sim-spine):hover .edge-line {
+  stroke: var(--sim-done);
+  stroke-dasharray: 7 6;
 }
 
 #canvas.directed.locked .edge.sim-tree:not(.sim-active, .sim-spine):hover .edge-line {

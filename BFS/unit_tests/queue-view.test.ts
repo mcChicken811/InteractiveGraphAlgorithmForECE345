@@ -190,7 +190,7 @@ describe('QueueView as a min-priority queue', () => {
     pq = new QueueView(strip, empty, { kind: 'priority' });
   });
 
-  /** Tokens: 'min', then '<id>' (+ '*' smallest key, '~' ringed yellow). */
+  /** Tokens: 'min', then '<id>' (+ '*' smallest key, '~' ringed yellow, which never happens). */
   function pqTokens(): string[] {
     return [...strip.querySelectorAll<HTMLElement>(':scope > [data-key]:not(.exiting)')].map((el) => {
       if (el.dataset.key === 'pop') return el.textContent!;
@@ -202,9 +202,9 @@ describe('QueueView as a min-priority queue', () => {
     });
   }
 
-  it('draws ← min, then the vertices in extraction order; no push arrow', () => {
-    pq.update({ items: [2, 0, 1], incoming: [], running: [2, 0] }, false);
-    expect(pqTokens()).toEqual(['min', '2*', '0~', '1']); // 2 is white (front), 0 yellow, 1 plain (key ∞)
+  it('draws ← min, then the vertices in extraction order; no push arrow, no yellow rings', () => {
+    pq.update({ items: [2, 0, 1], incoming: [] }, false);
+    expect(pqTokens()).toEqual(['min', '2*', '0', '1']); // 2 is white (front); the rest plain
     expect(strip.querySelector('.q-push')).toBeNull();
     expect(strip.classList.contains('strip-priority')).toBe(true);
   });
@@ -212,8 +212,8 @@ describe('QueueView as a min-priority queue', () => {
   it('re-orders the same elements when keys change, so they can glide to their new places', () => {
     pq.update({ items: [0, 1, 2], incoming: [] }, false);
     const two = strip.querySelector('[data-key="v2"]');
-    pq.update({ items: [2, 1], incoming: [], running: [2, 1] }, false); // 0 extracted; 2's key dropped below 1's
-    expect(pqTokens()).toEqual(['min', '2*', '1~']);
+    pq.update({ items: [2, 1], incoming: [] }, false); // 0 extracted; 2's key dropped below 1's
+    expect(pqTokens()).toEqual(['min', '2*', '1']);
     expect(strip.querySelector('[data-key="v2"]')).toBe(two);
   });
 

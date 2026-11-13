@@ -40,14 +40,15 @@ import type { AlgorithmDefinition, ExploredEdge, Highlight, QueueSnapshot, Simul
  * vertex's key is the weight of its lightest edge into S — makes the next vertex's joining
  * edge (v.π, v) a light edge.
  *
- * The display shows what the next step will do: white is the vertex it will extract and
- * its joining edge — the light edge. The other crossing edges are solid grey. The cut
+ * The display shows what the next step will do: the white edge is the vertex's joining
+ * edge — the light edge — that the next step adds (no vertex is ringed white). The other
+ * crossing edges are solid grey. The cut
  * itself is drawn as a border on the canvas: the tree's territory (the canvas nearer to a
  * tree vertex than to any queued vertex) is shaded, so the border shows even when no edge
  * crosses the cut (a graph that is not connected). Vertices in
- * the tree are green, as are the tree's edges; every other edge is dashed. Vertices still
- * in the queue with a finite key (they touch the tree) are yellow. Each vertex is labelled
- * with its key.
+ * the tree are green, as are the tree's edges (solid) and the other edges between tree
+ * vertices (dashed green); every other edge is dashed. Vertices still in the queue keep
+ * their normal ring. Each vertex is labelled with its key.
  */
 export interface TreeEdge {
   from: NodeId;
@@ -117,6 +118,20 @@ export class PrimSimulation implements Simulation {
     return crossing;
   }
 
+  /**
+   * Edges with both ends in the tree that are not tree edges (they would close a cycle),
+   * as [smaller id, larger id], sorted.
+   */
+  withinEdges(): Array<[NodeId, NodeId]> {
+    const inTree = new Set(this.order);
+    const tree = new Set(this.treeEdges.map(({ from, to }) => `${Math.min(from, to)}-${Math.max(from, to)}`));
+    const within: Array<[NodeId, NodeId]> = [];
+    for (const [a, b] of this.view.edges()) {
+      if (inTree.has(a) && inTree.has(b) && !tree.has(`${a}-${b}`)) within.push([a, b]);
+    }
+    return within;
+  }
+
   /** Sum of the tree edges' weights so far. */
   get totalWeight(): number {
     return this.treeEdges.reduce((sum, e) => sum + e.weight, 0);
@@ -150,15 +165,15 @@ export class PrimSimulation implements Simulation {
     const next = queue[0] ?? null;
     const via = next === null ? null : this.parent.get(next)!;
     return {
-      current: next,
+      // No vertex is ringed white: the white light edge shows where the tree grows next.
+      current: null,
       done: [...this.order],
-      // In the queue and touching the tree: a finite key.
-      running: queue.filter((v) => Number.isFinite(this.key.get(v)!)),
       activeEdges: next !== null && via !== null ? [[via, next]] : [],
       labels: Object.fromEntries([...this.key].map(([id, k]) => [id, formatKey(k)])),
       exploredEdges: [
         ...this.treeEdges.map(({ from, to }): ExploredEdge => ({ from, to, done: true })),
         ...this.crossingEdges().map(([from, to]): ExploredEdge => ({ from, to, crossing: true })),
+        ...this.withinEdges().map(([from, to]): ExploredEdge => ({ from, to, within: true })),
       ],
       // The cut (S, V − S), while both sides have vertices.
       cut: this.order.length > 0 && !this.finished ? [...this.order] : undefined,
@@ -166,8 +181,7 @@ export class PrimSimulation implements Simulation {
   }
 
   priorityQueueSnapshot(): QueueSnapshot {
-    const items = this.queued;
-    return { items, incoming: [], running: items.filter((v) => Number.isFinite(this.key.get(v)!)) };
+    return { items: this.queued, incoming: [] };
   }
 
   describe(): string {

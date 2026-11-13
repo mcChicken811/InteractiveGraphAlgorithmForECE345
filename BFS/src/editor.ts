@@ -677,6 +677,7 @@ export class GraphEditor {
       g.classList.toggle('sim-explored', explored?.has(key) ?? false);
       g.classList.toggle('sim-tree', explored?.get(key)?.done ?? false);
       g.classList.toggle('sim-crossing', explored?.get(key)?.crossing ?? false);
+      g.classList.toggle('sim-within', explored?.get(key)?.within ?? false);
       for (const el of g.querySelectorAll('.edge-hit, .edge-line')) setAttrs(el, attrs);
 
       const tag = explored?.get(key)?.label ?? '';

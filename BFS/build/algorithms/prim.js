@@ -50,6 +50,20 @@ export class PrimSimulation {
         }
         return crossing;
     }
+    /**
+     * Edges with both ends in the tree that are not tree edges (they would close a cycle),
+     * as [smaller id, larger id], sorted.
+     */
+    withinEdges() {
+        const inTree = new Set(this.order);
+        const tree = new Set(this.treeEdges.map(({ from, to }) => `${Math.min(from, to)}-${Math.max(from, to)}`));
+        const within = [];
+        for (const [a, b] of this.view.edges()) {
+            if (inTree.has(a) && inTree.has(b) && !tree.has(`${a}-${b}`))
+                within.push([a, b]);
+        }
+        return within;
+    }
     /** Sum of the tree edges' weights so far. */
     get totalWeight() {
         return this.treeEdges.reduce((sum, e) => sum + e.weight, 0);
@@ -84,23 +98,22 @@ export class PrimSimulation {
         const next = queue[0] ?? null;
         const via = next === null ? null : this.parent.get(next);
         return {
-            current: next,
+            // No vertex is ringed white: the white light edge shows where the tree grows next.
+            current: null,
             done: [...this.order],
-            // In the queue and touching the tree: a finite key.
-            running: queue.filter((v) => Number.isFinite(this.key.get(v))),
             activeEdges: next !== null && via !== null ? [[via, next]] : [],
             labels: Object.fromEntries([...this.key].map(([id, k]) => [id, formatKey(k)])),
             exploredEdges: [
                 ...this.treeEdges.map(({ from, to }) => ({ from, to, done: true })),
                 ...this.crossingEdges().map(([from, to]) => ({ from, to, crossing: true })),
+                ...this.withinEdges().map(([from, to]) => ({ from, to, within: true })),
             ],
             // The cut (S, V − S), while both sides have vertices.
             cut: this.order.length > 0 && !this.finished ? [...this.order] : undefined,
         };
     }
     priorityQueueSnapshot() {
-        const items = this.queued;
-        return { items, incoming: [], running: items.filter((v) => Number.isFinite(this.key.get(v))) };
+        return { items: this.queued, incoming: [] };
     }
     describe() {
         const last = this.last;

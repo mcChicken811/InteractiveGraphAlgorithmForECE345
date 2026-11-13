@@ -14,8 +14,7 @@ import { fitFontSize } from './label-fit.js';
  * will land. A stack's other vertices are still running, so they have the canvas's
  * yellow ring; its two arrows share the open (left) end, and the one the next step uses
  * is highlighted. A priority queue is drawn in extraction order, so vertices glide to
- * their new places when their keys change; a snapshot can also name vertices to ring
- * yellow (`running`).
+ * their new places when their keys change.
  *
  * `update()` animates the change from the previous snapshot (FLIP): the popped vertex
  * turns green and slides out to the left, the rest glide into their new places,
@@ -43,8 +42,6 @@ export class QueueView {
     /** Stack only: whether the next step pops the top / pushes something (lights its arrow). */
     popping = false;
     pushing = false;
-    /** Vertices the snapshot asks to ring yellow. */
-    running = new Set();
     constructor(strip, emptyNote, options = {}) {
         this.strip = strip;
         this.emptyNote = emptyNote;
@@ -70,7 +67,6 @@ export class QueueView {
         this.labels = labels;
         this.popping = !!snapshot && 'popping' in snapshot && snapshot.popping;
         this.pushing = !!snapshot && snapshot.incoming.length > 0;
-        this.running = new Set(snapshot && 'running' in snapshot ? snapshot.running : []);
         this.strip.classList.toggle('has-labels', !!labels);
         const motion = animate && canAnimate() && !prefersReducedMotion();
         const live = this.liveElements();
@@ -208,7 +204,7 @@ export class QueueView {
         el.classList.toggle('front', item.kind === 'front');
         el.classList.toggle('incoming', item.kind === 'incoming');
         // A stack's vertices below the top are still running (DFS: gray).
-        el.classList.toggle('running', item.kind === 'queued' && (stack || this.running.has(item.id)));
+        el.classList.toggle('running', stack && item.kind === 'queued');
         const label = this.labels?.[item.id];
         const labelEl = el.querySelector('.q-label');
         labelEl.textContent = label ?? '';

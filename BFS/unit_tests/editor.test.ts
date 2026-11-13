@@ -940,6 +940,21 @@ describe('GraphEditor lock and algorithm highlight', () => {
     expect(region.hasAttribute('d')).toBe(false);
   });
 
+  it('edges between finished vertices outside the result (Prim) are marked to draw dashed green', () => {
+    const edge = (a: number, b: number) => svg.querySelector<SVGGElement>(`[data-edge-a="${a}"][data-edge-b="${b}"]`)!;
+    editor.setHighlight({
+      current: null,
+      done: [0, 1],
+      activeEdges: [],
+      exploredEdges: [{ from: 0, to: 1, within: true }],
+    });
+    expect(edge(0, 1).classList.contains('sim-within')).toBe(true);
+    expect(edge(0, 1).classList.contains('sim-tree')).toBe(false);
+    expect(edge(0, 1).classList.contains('sim-unexplored')).toBe(false);
+    editor.setHighlight(null);
+    expect(svg.querySelectorAll('.sim-within')).toHaveLength(0);
+  });
+
   it('crossing edges (e.g. Prim’s cut) are marked so they draw solid grey', () => {
     const edge = (a: number, b: number) => svg.querySelector<SVGGElement>(`[data-edge-a="${a}"][data-edge-b="${b}"]`)!;
     editor.setHighlight({

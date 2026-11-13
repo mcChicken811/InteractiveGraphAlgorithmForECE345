@@ -56,6 +56,12 @@ export interface ExploredEdge {
    * the other still in the queue). The white `activeEdges` entry may be one of these.
    */
   crossing?: boolean;
+  /**
+   * Draw the edge dashed in the finished (green) colour: both ends are finished, but the
+   * edge is not part of the result (Prim: an edge between two tree vertices that is not a
+   * tree edge).
+   */
+  within?: boolean;
 }
 
 /** A queue-like structure for the side panel (BFS's queue). */
@@ -64,8 +70,6 @@ export interface QueueSnapshot {
   items: NodeId[];
   /** Vertices the next step will push onto the back, in push order. */
   incoming: NodeId[];
-  /** Vertices drawn with the running (yellow) ring, as on the canvas (Prim: finite keys). */
-  running?: NodeId[];
 }
 
 /** A recursion stack for the side panel (DFS). */

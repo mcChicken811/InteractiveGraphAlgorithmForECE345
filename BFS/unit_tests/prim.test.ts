@@ -61,9 +61,8 @@ describe('PrimSimulation (weighted, CLRS MST-PRIM)', () => {
     expect([...sim.parent.values()]).toEqual([null, null, null, null, null]);
     expect(sim.queued).toEqual([0, 1, 2, 3, 4]);
     expect(sim.highlight()).toEqual({
-      current: 0, // extracted next
+      current: null, // no vertex is ringed white (0 is extracted next)
       done: [],
-      running: [0],
       activeEdges: [], // the root joins by no edge
       labels: { 0: '0', 1: '∞', 2: '∞', 3: '∞', 4: '∞' },
       exploredEdges: [],
@@ -102,12 +101,11 @@ describe('PrimSimulation (weighted, CLRS MST-PRIM)', () => {
     expect(sim.roots).toEqual([0]);
   });
 
-  it('white marks the vertex extracted next and the edge that joins it; tree green; finite keys yellow', () => {
+  it('white marks only the edge that joins the next vertex; the tree is green; no white or yellow vertices', () => {
     sim.step(); // 0 in the tree; 1 (key 4) is next, by 0—1
     expect(sim.highlight()).toMatchObject({
-      current: 1,
+      current: null,
       done: [0],
-      running: [1, 2], // 3 and 4 still have key ∞
       activeEdges: [[0, 1]],
       labels: { 0: '0', 1: '4', 2: '8', 3: '∞', 4: '∞' },
       exploredEdges: [
@@ -117,9 +115,8 @@ describe('PrimSimulation (weighted, CLRS MST-PRIM)', () => {
     });
     sim.step(); // 1 joins; 2's key drops to 2, so 2 is next, by 1—2 (not 0—2)
     expect(sim.highlight()).toMatchObject({
-      current: 2,
+      current: null,
       done: [0, 1],
-      running: [2, 3],
       activeEdges: [[1, 2]],
       labels: { 0: '0', 1: '4', 2: '2', 3: '5', 4: '∞' },
       exploredEdges: [
@@ -130,9 +127,28 @@ describe('PrimSimulation (weighted, CLRS MST-PRIM)', () => {
       ],
     });
     runToEnd(sim);
-    expect(sim.highlight()).toMatchObject({ current: null, done: [0, 1, 2, 3, 4], running: [], activeEdges: [] });
-    expect(sim.highlight().exploredEdges).toHaveLength(4); // the tree; nothing crosses an empty cut
-    expect(sim.highlight().exploredEdges!.every((e) => e.done)).toBe(true);
+    expect(sim.highlight()).toMatchObject({ current: null, done: [0, 1, 2, 3, 4], activeEdges: [] });
+    // The tree, and the two edges between tree vertices that it left out; nothing crosses.
+    expect(sim.highlight().exploredEdges!.filter((e) => e.done)).toHaveLength(4);
+    expect(sim.highlight().exploredEdges!.filter((e) => e.within)).toEqual([
+      { from: 0, to: 2, within: true },
+      { from: 2, to: 3, within: true },
+    ]);
+    expect(sim.highlight().exploredEdges!.some((e) => e.crossing)).toBe(false);
+  });
+
+  it('edges between tree vertices that are not tree edges are reported (drawn dashed green)', () => {
+    sim.step();
+    sim.step(); // tree {0, 1}: its only inner edge is the tree edge 0 — 1
+    expect(sim.withinEdges()).toEqual([]);
+    sim.step(); // 2 joins by 1 — 2: now 0 — 2 lies inside the tree's side, but is not a tree edge
+    expect(sim.withinEdges()).toEqual([[0, 2]]);
+    expect(sim.highlight().exploredEdges).toContainEqual({ from: 0, to: 2, within: true });
+    runToEnd(sim);
+    expect(sim.withinEdges()).toEqual([
+      [0, 2],
+      [2, 3],
+    ]);
   });
 
   it('reports the cut (the tree’s vertices) while both sides have vertices', () => {
@@ -165,19 +181,26 @@ describe('PrimSimulation (weighted, CLRS MST-PRIM)', () => {
     ]);
   });
 
-  it('priority queue snapshot: smallest key first, re-ordered as keys drop', () => {
-    expect(sim.priorityQueueSnapshot()).toEqual({ items: [0, 1, 2, 3, 4], incoming: [], running: [0] });
-    sim.step();
-    expect(sim.priorityQueueSnapshot()).toEqual({ items: [1, 2, 3, 4], incoming: [], running: [1, 2] });
-    sim.step(); // keys: 2 → 2, 3 → 5
-    expect(sim.priorityQueueSnapshot()).toEqual({ items: [2, 3, 4], incoming: [], running: [2, 3] });
-    runToEnd(sim);
-    expect(sim.priorityQueueSnapshot()).toEqual({ items: [], incoming: [], running: [] });
+  it('never marks vertices as running (no yellow rings)', () => {
+    do expect(sim.highlight().running).toBeUndefined();
+    while (sim.step());
   });
 
-  it('the front of the queue is always the white vertex', () => {
+  it('priority queue snapshot: smallest key first, re-ordered as keys drop', () => {
+    expect(sim.priorityQueueSnapshot()).toEqual({ items: [0, 1, 2, 3, 4], incoming: [] });
+    sim.step();
+    expect(sim.priorityQueueSnapshot()).toEqual({ items: [1, 2, 3, 4], incoming: [] });
+    sim.step(); // keys: 2 → 2, 3 → 5
+    expect(sim.priorityQueueSnapshot()).toEqual({ items: [2, 3, 4], incoming: [] });
+    runToEnd(sim);
+    expect(sim.priorityQueueSnapshot()).toEqual({ items: [], incoming: [] });
+  });
+
+  it('no vertex is ever white; the white edge always leads to the front of the queue', () => {
     do {
-      expect(sim.highlight().current).toBe(sim.queued[0] ?? null);
+      const h = sim.highlight();
+      expect(h.current).toBeNull();
+      if (h.activeEdges.length) expect(h.activeEdges[0][1]).toBe(sim.queued[0]);
     } while (sim.step());
   });
 
@@ -240,7 +263,8 @@ describe('PrimSimulation on a graph that is not connected', () => {
     sim.step(); // the first tree is complete
     expect(sim.describe()).toContain('No edge crosses the cut, so 5 will start a new tree.');
     expect(sim.crossingEdges()).toEqual([]);
-    expect(sim.highlight()).toMatchObject({ current: 5, activeEdges: [], running: [] }); // key ∞: joins by no edge
+    expect(sim.queued[0]).toBe(5);
+    expect(sim.highlight()).toMatchObject({ current: null, activeEdges: [] }); // key ∞: joins by no edge
     sim.step();
     expect(sim.describe()).toBe(
       '5 has key ∞: no edge joins it to the tree, so it starts a new tree. Lowered keys: 6 to 1. ' +
