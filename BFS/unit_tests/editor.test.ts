@@ -341,21 +341,54 @@ describe('GraphEditor randomise', () => {
     }
     expect(graph.connectedComponents()).toHaveLength(1);
     expect(svg.querySelectorAll('.node')).toHaveLength(nodes.length);
-    expect(lastMessage()[0]).toBe(`Random graph: ${nodes.length} nodes and ${graph.getArcs().length} edges.`);
+    expect(lastMessage()[0]).toBe(
+      `Random undirected, unweighted graph: ${nodes.length} nodes and ${graph.getArcs().length} edges.`,
+    );
   });
 
-  it('stores every edge as a weighted directed arc, one per pair', () => {
-    editor.randomise(seeded(3));
+  /** The stored arcs grouped by pair: how many pairs are joined both ways, and every weight. */
+  const arcSummary = () => {
     const arcs = graph.getArcs();
-    expect(arcs.length).toBeGreaterThanOrEqual(graph.nodeCount - 1);
     const pairs = new Set(arcs.map(([a, b]) => `${Math.min(a, b)}-${Math.max(a, b)}`));
-    expect(pairs.size).toBe(arcs.length);
-    for (const [a, b] of arcs) {
-      const w = graph.arcWeight(a, b)!;
-      expect(Number.isInteger(w) && w >= 1 && w <= 20).toBe(true);
-    }
-    // Both directions turn up: the arcs are not all drawn from lower to higher ids.
+    return { arcs, bothWays: arcs.length - pairs.size, weights: arcs.map(([a, b]) => graph.arcWeight(a, b)!) };
+  };
+
+  it('undirected, unweighted: one arc per pair (either way round), all of weight 0', () => {
+    editor.randomise(seeded(3));
+    const { arcs, bothWays, weights } = arcSummary();
+    expect(arcs.length).toBeGreaterThanOrEqual(graph.nodeCount - 1);
+    expect(bothWays).toBe(0);
+    expect(weights.every((w) => w === 0)).toBe(true);
+    // Stored as directed arcs, not all from the lower id to the higher.
     expect(arcs.some(([a, b]) => a > b) && arcs.some(([a, b]) => a < b)).toBe(true);
+  });
+
+  it('undirected, weighted: one arc per pair, weights 1–20', () => {
+    editor.setWeighted(true);
+    editor.randomise(seeded(3));
+    const { bothWays, weights } = arcSummary();
+    expect(bothWays).toBe(0);
+    expect(weights.every((w) => Number.isInteger(w) && w >= 1 && w <= 20)).toBe(true);
+    expect(lastMessage()[0]).toMatch(/^Random undirected, weighted graph: /);
+  });
+
+  it('directed: some pairs are joined both ways; the edge count is the arc count', () => {
+    editor.setDirected(true);
+    let seen = 0;
+    for (let seed = 1; seed <= 10 && !seen; seed++) {
+      editor.clear();
+      editor.randomise(seeded(seed));
+      const { arcs, bothWays, weights } = arcSummary();
+      seen = bothWays;
+      expect(weights.every((w) => w === 0)).toBe(true);
+      expect(graph.edgeCount).toBe(arcs.length);
+      expect(lastMessage()[0]).toBe(`Random directed, unweighted graph: ${graph.nodeCount} nodes and ${arcs.length} edges.`);
+    }
+    expect(seen).toBeGreaterThan(0);
+    // Weighted: each arc of a two-way pair has its own weight.
+    editor.setWeighted(true);
+    editor.randomise(seeded(2));
+    expect(arcSummary().weights.every((w) => w >= 1 && w <= 20)).toBe(true);
   });
 
   it('with nodes placed: keeps them where they are and replaces their edges', () => {
@@ -375,7 +408,7 @@ describe('GraphEditor randomise', () => {
     expect(graph.connectedComponents()).toHaveLength(1);
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(svg.querySelectorAll('.selected')).toHaveLength(0);
-    expect(lastMessage()[0]).toBe(`Random edges between the 4 nodes: ${graph.getArcs().length} edges.`);
+    expect(lastMessage()[0]).toBe(`Random undirected, unweighted edges between the 4 nodes: ${graph.getArcs().length} edges.`);
   });
 
   it('a single node has nothing to connect to', () => {

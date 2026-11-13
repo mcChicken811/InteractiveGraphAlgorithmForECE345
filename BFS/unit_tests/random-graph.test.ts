@@ -60,11 +60,11 @@ describe('nodeCountFor', () => {
 describe('randomArcs', () => {
   const clearance = 26;
 
-  it('connects the points with one weighted arc per pair, none passing through another node', () => {
+  it('undirected: connects the points with one arc per pair, none passing through another node', () => {
     for (let seed = 1; seed <= 30; seed++) {
       const rand = rng(seed);
       const points = randomPositions(8, AREA, GAP, rand);
-      const arcs = randomArcs(points, rand, { clearance });
+      const arcs = randomArcs(points, rand, { clearance, weighted: true });
       expect(components(points.length, arcs)).toBe(1);
       const pairs = new Set(arcs.map(({ from, to }) => `${Math.min(from, to)}-${Math.max(from, to)}`));
       expect(pairs.size).toBe(arcs.length);
@@ -81,9 +81,54 @@ describe('randomArcs', () => {
     }
   });
 
+  it('unweighted: every weight is 0, as for an edge added by hand', () => {
+    for (const directed of [false, true]) {
+      const rand = rng(4);
+      const arcs = randomArcs(randomPositions(8, AREA, GAP, rand), rand, { clearance, directed });
+      expect(arcs.length).toBeGreaterThan(0);
+      for (const a of arcs) expect(a.weight).toBe(0);
+    }
+  });
+
+  it('directed: pairs are joined one way or the other, or both ways, each arc with its own weight', () => {
+    const rand = rng(8);
+    let pairs = 0;
+    let both = 0;
+    let differ = 0;
+    for (let k = 0; k < 20; k++) {
+      const points = randomPositions(8, AREA, GAP, rand);
+      const arcs = randomArcs(points, rand, { clearance, directed: true, weighted: true });
+      const keys = arcs.map((a) => `${a.from}-${a.to}`);
+      expect(new Set(keys).size).toBe(keys.length); // never the same arc twice
+      expect(components(points.length, arcs)).toBe(1); // connected, ignoring direction
+      const byPair = new Map<string, typeof arcs>();
+      for (const a of arcs) {
+        const key = `${Math.min(a.from, a.to)}-${Math.max(a.from, a.to)}`;
+        byPair.set(key, [...(byPair.get(key) ?? []), a]);
+      }
+      for (const group of byPair.values()) {
+        pairs++;
+        if (group.length === 2) {
+          both++;
+          if (group[0].weight !== group[1].weight) differ++;
+        }
+      }
+    }
+    // About a quarter of the pairs go both ways; the rest one way.
+    expect(both / pairs).toBeGreaterThan(0.12);
+    expect(both / pairs).toBeLessThan(0.4);
+    expect(differ).toBeGreaterThan(both / 2);
+    // Undirected never joins a pair both ways.
+    const r = rng(8);
+    const und = randomArcs(randomPositions(8, AREA, GAP, r), r, { clearance, bothWays: 1 });
+    expect(new Set(und.map((a) => `${Math.min(a.from, a.to)}-${Math.max(a.from, a.to)}`)).size).toBe(und.length);
+  });
+
   it('points both ways and spreads the weights', () => {
     const rand = rng(5);
-    const all = Array.from({ length: 20 }, () => randomArcs(randomPositions(8, AREA, GAP, rand), rand, { clearance }));
+    const all = Array.from({ length: 20 }, () =>
+      randomArcs(randomPositions(8, AREA, GAP, rand), rand, { clearance, weighted: true }),
+    );
     const arcs = all.flat();
     expect(arcs.filter((a) => a.from < a.to).length).toBeGreaterThan(arcs.length * 0.3);
     expect(arcs.filter((a) => a.from > a.to).length).toBeGreaterThan(arcs.length * 0.3);
@@ -95,7 +140,7 @@ describe('randomArcs', () => {
   it('follows the options: weight range and no extra edges', () => {
     const rand = rng(9);
     const points = randomPositions(8, AREA, GAP, rand);
-    const arcs = randomArcs(points, rand, { clearance, extraPerNode: 0, maxWeight: 3 });
+    const arcs = randomArcs(points, rand, { clearance, weighted: true, extraPerNode: 0, maxWeight: 3 });
     expect(arcs).toHaveLength(points.length - 1);
     for (const a of arcs) expect(a.weight).toBeLessThanOrEqual(3);
   });

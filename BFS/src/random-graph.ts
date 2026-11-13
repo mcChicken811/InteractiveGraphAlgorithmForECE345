@@ -7,9 +7,15 @@
  *  - randomArcs: edges between given points that stay readable on the canvas. A spanning
  *    tree of short edges first (Kruskal's algorithm on lengths jittered by ±30%, so the
  *    graph is connected but not always the same), then a few more short edges that cross
- *    nothing already drawn. No edge passes through another node. Every edge is stored the
- *    way the graph stores all edges: a directed arc (random direction) with a weight
- *    (a random whole number), so every reading of the graph has something to show.
+ *    nothing already drawn. No edge passes through another node.
+ *
+ * The graph is random for the kind of graph being edited (`directed`, `weighted`), while
+ * it is stored, like every edge, as weighted directed arcs:
+ *  - undirected: one arc per connected pair, in either direction (which one does not
+ *    matter in that reading);
+ *  - directed: each connected pair gets an arc one way, the other way, or both ways;
+ *  - weighted: each arc gets a random whole-number weight; unweighted: the weight is 0,
+ *    the weight of an edge added by hand.
  */
 
 export interface Point {
@@ -33,6 +39,12 @@ export interface RandomArc {
 export interface ArcOptions {
   /** How close (px) an edge may pass to a node that is not one of its ends. */
   clearance: number;
+  /** A directed graph: pairs may be joined both ways (default false). */
+  directed?: boolean;
+  /** A weighted graph: random weights; otherwise every weight is 0 (default false). */
+  weighted?: boolean;
+  /** Directed: the chance that a connected pair is joined both ways (default 0.25). */
+  bothWays?: number;
   /** Extra edges beyond the spanning tree, per node (default 0.5). */
   extraPerNode?: number;
   /** Weights are whole numbers from 1 to this (default 20). */
@@ -65,6 +77,8 @@ export function randomArcs(points: readonly Point[], rand: () => number, options
   const n = points.length;
   const { clearance } = options;
   const maxWeight = options.maxWeight ?? 20;
+  const bothWays = options.directed ? (options.bothWays ?? 0.25) : 0;
+  const weight = () => (options.weighted ? 1 + Math.floor(rand() * maxWeight) : 0);
   const extra = Math.round(n * (options.extraPerNode ?? 0.5));
 
   // Candidate pairs: those whose straight edge keeps clear of every other node.
@@ -110,9 +124,10 @@ export function randomArcs(points: readonly Point[], rand: () => number, options
     }
   }
 
-  return chosen.map(({ a, b }) => {
+  return chosen.flatMap(({ a, b }) => {
+    if (rand() < bothWays) return [{ from: a, to: b, weight: weight() }, { from: b, to: a, weight: weight() }];
     const [from, to] = rand() < 0.5 ? [a, b] : [b, a];
-    return { from, to, weight: 1 + Math.floor(rand() * maxWeight) };
+    return [{ from, to, weight: weight() }];
   });
 }
 

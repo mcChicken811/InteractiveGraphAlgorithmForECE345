@@ -58,7 +58,7 @@ Pass Playwright options after `--`, e.g. `npm run test:e2e -- --grep "edge"`.
 - `unit_tests/select-menu.test.ts`: the picker's mouse and keyboard behaviour, disabling, and outside clicks.
 - `unit_tests/bfs.test.ts`: the BFS simulation (order, steps, highlights, messages, unreachable vertices, directed vs. undirected).
 - `unit_tests/graph.test.ts`: the `Graph` model (ids, edges, neighbors, removal).
-- `unit_tests/random-graph.test.ts`: the Randomise generator (nodes spaced apart inside the area; connected, one arc per pair, none through another node; directions and weights).
+- `unit_tests/random-graph.test.ts`: the Randomise generator (nodes spaced apart inside the area; connected, none through another node; one arc per pair when undirected, some pairs both ways when directed; weights 1–20 when weighted, 0 when not).
 - `unit_tests/editor.test.ts`: `GraphEditor` interactions driven by synthetic pointer and keyboard events in a simulated DOM, including auto-layout with manually stepped animation frames.
 - `unit_tests/layout.test.ts`: `ForceLayout` behaviour:
   - pair spacing and equilateral triangles
@@ -117,7 +117,7 @@ Checking that a test can fail: break the feature in `src/`, not in `build/`. Pla
 | Drag a node | Move it |
 | Right-click a node, or select it and press Delete | Delete the node and its edges |
 | Esc, or click empty space while a node is selected | Cancel the selection |
-| **Randomise** button (header, left of Clear graph) | Empty canvas: a random graph of 5–10 nodes. Nodes already placed: keep them where they are and replace their edges with a random set |
+| **Randomise** button (header, left of Clear graph) | Empty canvas: a random graph of 5–10 nodes. Nodes already placed: keep them where they are and replace their edges with a random set. The graph is random for the selected mode (see `src/random-graph.ts` below) |
 | **Clear graph** button (header) | Remove every node and edge |
 | **Auto-layout** button (top-left of the canvas) | Turn automatic spacing on/off |
 | **Undirected / Directed** switch (top-left, next to Auto-layout) | Choose how edges are interpreted (see below) |
@@ -408,7 +408,10 @@ Freivalds, Dogrusoz & Kikusts study this approach in *Disconnected Graph Layout 
 - `src/random-graph.ts` — the Randomise button's generator; pure, no DOM:
   - **Nodes:** `randomPositions` scatters them over the canvas (clear of the toolbar and status bar), no two closer than 96 px, by dart throwing.
   - **Edges:** `randomArcs` first takes a spanning tree of short edges (Kruskal's algorithm on lengths jittered by ±30%, so the graph is connected but varies), then adds about one more short edge per two nodes, each crossing no edge already chosen. No edge passes through another node.
-  - **Storage:** like every edge, each is a directed arc with a weight: a random direction and a whole-number weight from 1 to 20. Directed or Weighted mode then shows them.
+  - **For the selected mode:** the graph is random for the kind of graph being edited, while it is stored, like every edge, as weighted directed arcs.
+    - Undirected: one arc per connected pair, either way round (the direction doesn't matter in that reading).
+    - Directed: each connected pair is joined one way, the other way, or (a quarter of the time) both ways, which Directed mode draws as two curved arrows.
+    - Weighted: each arc gets a whole-number weight from 1 to 20 (the two arcs of a two-way pair separately). Unweighted: every weight is 0, the weight of an edge added by hand.
 - `src/layout.ts` — `ForceLayout` (per-component force-directed layout, fitting and packing) and `packRows`; pure, no DOM.
 - `src/main.ts` — wires the editor to the stats, status message, Auto-layout toggle and the ☰ help/adjacency-list panel.
 - `src/representations.ts` — renders the adjacency list (a column of vertex boxes, then each vertex's neighbours as a joined strip of boxes) and the adjacency matrix, and the list/matrix switch (ARIA tabs). The data comes from `Graph.adjacencyList()` and `Graph.adjacencyMatrix()`.

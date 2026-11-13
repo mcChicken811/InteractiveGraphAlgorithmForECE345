@@ -322,7 +322,9 @@ test.describe('Randomise', () => {
     await randomBtn(page).click();
     const n = await cv.nodes.count();
     expect(n).toBeGreaterThanOrEqual(5);
-    await expect(page.locator('#message')).toHaveText(new RegExp(`^Random graph: ${n} nodes and \\d+ edges\\.$`));
+    await expect(page.locator('#message')).toHaveText(
+      new RegExp(`^Random undirected, unweighted graph: ${n} nodes and \\d+ edges\\.$`),
+    );
     const boxes = await cv.nodes.locator('circle').evaluateAll((els) => els.map((el) => el.getBoundingClientRect()));
     const canvas = (await cv.canvas.boundingBox())!;
     const toolbar = (await page.locator('.canvas-toolbar').boundingBox())!;
@@ -339,13 +341,43 @@ test.describe('Randomise', () => {
     await expect(page.getByRole('button', { name: 'Clear graph' })).toBeEnabled();
   });
 
-  test('every edge is a directed arc with a weight, shown when Directed and Weighted are on', async ({ page }) => {
+  test('undirected, unweighted: one stored arc per pair, each of weight 0', async ({ page }) => {
     await randomBtn(page).click();
     const undirected = await cv.edges.count();
     const arcs = await storedArcs(page);
-    expect(arcs).toHaveLength(undirected); // one arc per connected pair
-    for (const [, , w] of arcs) expect(w >= 1 && w <= 20 && Number.isInteger(w)).toBe(true);
-    await expect(cv.canvas.locator('.edge .edge-weight').first()).toBeVisible();
+    expect(arcs).toHaveLength(undirected); // never both ways
+    for (const [, , w] of arcs) expect(w).toBe(0);
+  });
+
+  test('undirected, weighted: weights from 1 to 20 on the canvas', async ({ page }) => {
+    await page.locator('label[for="weights-on"]').click();
+    await randomBtn(page).click();
+    await expect(page.locator('#message')).toHaveText(/^Random undirected, weighted graph: /);
+    const weights = await cv.canvas.locator('.edge .edge-weight text').allTextContents();
+    expect(weights.length).toBe(await cv.edges.count());
+    for (const w of weights.map(Number)) expect(Number.isInteger(w) && w >= 1 && w <= 20).toBe(true);
+  });
+
+  test('directed: some pairs are joined both ways, drawn as two curved arrows', async ({ page }) => {
+    await page.locator('label[for="mode-directed"]').click();
+    await page.locator('label[for="weights-on"]').click();
+    let twoWay = 0;
+    for (let k = 0; k < 10 && !twoWay; k++) {
+      await randomBtn(page).click();
+      await expect(page.locator('#message')).toHaveText(/^Random directed, weighted graph: /);
+      const arcs = await storedArcs(page);
+      const pairs = new Set(arcs.map(([a, b]) => `${Math.min(a, b)}-${Math.max(a, b)}`));
+      twoWay = arcs.length - pairs.size;
+      for (const [, , w] of arcs) expect(w >= 1 && w <= 20).toBe(true);
+      await expect(page.locator('#stats')).toHaveText(new RegExp(` · ${arcs.length} edges$`));
+      if (twoWay) {
+        const [a, b] = arcs.find(([x, y]) => arcs.some(([p, q]) => p === y && q === x))!;
+        for (const [p, q] of [[a, b], [b, a]]) await expect(cv.edge(p, q)).toHaveAttribute('data-shape', 'path');
+      } else {
+        await page.getByRole('button', { name: 'Clear graph' }).click();
+      }
+    }
+    expect(twoWay).toBeGreaterThan(0);
   });
 
   test('with nodes placed: keeps them where they are and replaces their edges', async ({ page }) => {
@@ -356,7 +388,7 @@ test.describe('Randomise', () => {
     await expect(cv.nodes).toHaveCount(4);
     await expect(cv.node(0)).toHaveAttribute('transform', `translate(${P.a[0]} ${P.a[1]})`);
     await expect(cv.node(3)).toHaveAttribute('transform', `translate(${P.d[0]} ${P.d[1]})`);
-    await expect(page.locator('#message')).toHaveText(/^Random edges between the 4 nodes: \d+ edges\.$/);
+    await expect(page.locator('#message')).toHaveText(/^Random undirected, unweighted edges between the 4 nodes: \d+ edges\.$/);
     expect(await cv.edges.count()).toBeGreaterThanOrEqual(3);
     // Pressing again gives a new set of edges on the same nodes, sooner or later.
     const first = JSON.stringify(await storedArcs(page));

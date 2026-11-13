@@ -171,9 +171,9 @@ export class GraphEditor {
   /**
    * Randomise: on an empty canvas, scatters a handful of nodes and connects them; with
    * nodes already placed, keeps them where they are and replaces their edges with a
-   * random set. Every edge is stored as a weighted directed arc (random direction, weight
-   * 1–20), as all edges are, so each Undirected / Directed and Unweighted / Weighted
-   * reading has something to show. See random-graph.ts.
+   * random set. The graph is random for the current mode: directed graphs may join a
+   * pair both ways, weighted ones get weights 1–20, unweighted ones weight 0. It is still
+   * stored as weighted directed arcs, as every edge is. See random-graph.ts.
    */
   randomise(rand: () => number = Math.random): void {
     if (this.locked) return;
@@ -185,16 +185,19 @@ export class GraphEditor {
     }
     const nodes = this.graph.getNodes();
     this.graph.clearEdges();
-    const arcs = randomArcs(nodes, rand, { clearance: NODE_RADIUS + 6 });
+    const { directed, weighted } = this.graph;
+    const arcs = randomArcs(nodes, rand, { clearance: NODE_RADIUS + 6, directed, weighted });
     for (const arc of arcs) this.graph.addEdge(nodes[arc.from].id, nodes[arc.to].id, arc.weight);
     this.selected = null;
     this.pending = null;
     this.render();
     this.changed();
-    const edges = `${arcs.length} edge${arcs.length === 1 ? '' : 's'}`;
-    if (fresh) this.message(`Random graph: ${nodes.length} nodes and ${edges}.`);
+    const m = this.graph.edgeCount;
+    const edges = `${m} edge${m === 1 ? '' : 's'}`;
+    const kind = `${directed ? 'directed' : 'undirected'}, ${weighted ? 'weighted' : 'unweighted'}`;
+    if (fresh) this.message(`Random ${kind} graph: ${nodes.length} nodes and ${edges}.`);
     else if (nodes.length < 2) this.message('Randomise needs at least two nodes to connect.', 'warn');
-    else this.message(`Random edges between the ${nodes.length} nodes: ${edges}.`);
+    else this.message(`Random ${kind} edges between the ${nodes.length} nodes: ${edges}.`);
   }
 
   /** The canvas minus a node's margin and the overlays at the top and bottom. */
