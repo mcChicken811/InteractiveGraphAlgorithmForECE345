@@ -43,14 +43,9 @@ describe('BfsSimulation (undirected)', () => {
     sim = new BfsSimulation(g.undirectedView, 0);
   });
 
-  it('starts with nothing highlighted and asks for the first step', () => {
+  it('starts with the source at the front of the queue: white, with the edges it will travel', () => {
     expect(sim.finished).toBe(false);
-    expect(sim.highlight()).toEqual({ current: null, done: [], activeEdges: [] });
-    expect(sim.describe()).toBe('BFS from 0: press Update to take the first step.');
-  });
-
-  it('first step: the source becomes current, with its edges active', () => {
-    sim.step();
+    expect(sim.queued).toEqual([0]);
     expect(sim.highlight()).toEqual({
       current: 0,
       done: [],
@@ -59,26 +54,37 @@ describe('BfsSimulation (undirected)', () => {
         [0, 2],
       ],
     });
-    expect(sim.queued).toEqual([1, 2]);
-    expect(sim.describe()).toBe('Visiting 0: discovered 1, 2. Queue: 1, 2.');
+    expect(sim.describe()).toBe('BFS from 0. Queue: 0. Press Update to pop 0.');
   });
 
-  it('each step finishes the previous vertex (green) and moves on in queue order', () => {
-    sim.step(); // 0
-    sim.step(); // 1
+  it('a step pops the front vertex (green) and the new front turns white', () => {
+    sim.step(); // pop 0, discover 1, 2
+    expect(sim.queued).toEqual([1, 2]);
     expect(sim.highlight()).toEqual({
-      current: 1,
+      current: 1, // next to be popped
       done: [0],
-      activeEdges: [
-        [1, 0],
-        [1, 3],
-      ],
+      activeEdges: [[1, 3]], // 1 → 0 is not travelled: 0 is already discovered
     });
-    expect(sim.describe()).toBe('Visiting 1: discovered 3. Queue: 2, 3.');
-    sim.step(); // 2
-    expect(sim.highlight().current).toBe(2);
-    expect(sim.highlight().done).toEqual([0, 1]);
-    expect(sim.describe()).toBe('Visiting 2: nothing new. Queue: 3.');
+    expect(sim.describe()).toBe('Popped 0: discovered 1, 2. Queue: 1, 2.');
+  });
+
+  it('the queue text always includes the white (front) vertex', () => {
+    for (let i = 0; i < 3; i++) {
+      sim.step();
+      const { current } = sim.highlight();
+      expect(sim.queued[0]).toBe(current);
+      expect(sim.describe()).toContain(`Queue: ${sim.queued.join(', ')}.`);
+    }
+  });
+
+  it('white edges are only those the next pop will travel (to undiscovered neighbours)', () => {
+    sim.step(); // pop 0 → queue 1, 2
+    sim.step(); // pop 1 → discovers 3 → queue 2, 3
+    expect(sim.highlight()).toEqual({ current: 2, done: [0, 1], activeEdges: [] }); // 0 and 3 already known
+    expect(sim.describe()).toBe('Popped 1: discovered 3. Queue: 2, 3.');
+    sim.step(); // pop 2 → nothing new → queue 3
+    expect(sim.highlight()).toEqual({ current: 3, done: [0, 1, 2], activeEdges: [] });
+    expect(sim.describe()).toBe('Popped 2: nothing new. Queue: 3.');
   });
 
   it('visits in BFS order with hop distances and a BFS tree', () => {
@@ -88,8 +94,8 @@ describe('BfsSimulation (undirected)', () => {
     expect(Object.fromEntries(sim.parent)).toEqual({ 0: null, 1: 0, 2: 0, 3: 1 });
   });
 
-  it('takes one step per reachable vertex plus a final step that finishes the last one', () => {
-    expect(runToEnd(sim)).toBe(4 + 1);
+  it('takes exactly one step per reachable vertex', () => {
+    expect(runToEnd(sim)).toBe(4);
     expect(sim.finished).toBe(true);
     expect(sim.highlight()).toEqual({ current: null, done: [0, 1, 2, 3], activeEdges: [] });
   });
@@ -115,9 +121,10 @@ describe('BfsSimulation (undirected)', () => {
     expect(from3.order).toEqual([3, 1, 2, 0]);
   });
 
-  it('an isolated source finishes after two steps', () => {
+  it('an isolated source finishes after one step', () => {
     const lonely = new BfsSimulation(g.undirectedView, 4);
-    expect(runToEnd(lonely)).toBe(2);
+    expect(lonely.highlight()).toEqual({ current: 4, done: [], activeEdges: [] });
+    expect(runToEnd(lonely)).toBe(1);
     expect(lonely.order).toEqual([4]);
     expect(lonely.describe()).toContain('visited 1 of 5 vertices');
   });
@@ -132,11 +139,12 @@ describe('BfsSimulation (undirected)', () => {
 describe('BfsSimulation (directed)', () => {
   it('follows arcs only forwards, and highlights only out-edges', () => {
     const sim = new BfsSimulation(g.directedView, 0);
-    sim.step();
     expect(sim.highlight().activeEdges).toEqual([
       [0, 1],
       [0, 2],
     ]);
+    sim.step(); // pop 0 → queue 1, 2; 1's only out-arc leads to 3
+    expect(sim.highlight()).toEqual({ current: 1, done: [0], activeEdges: [[1, 3]] });
     runToEnd(sim);
     // 2 has no out-arcs; 3 is reached via 1 → 3. 3 → 2 is not needed (2 already found).
     expect(sim.order).toEqual([0, 1, 2, 3]);

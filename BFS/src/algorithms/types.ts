@@ -9,13 +9,13 @@ import type { GraphView } from '../graph-views.js';
 
 /** What the canvas should highlight after a step. */
 export interface Highlight {
-  /** The vertex being processed (drawn with a white stroke), if any. */
+  /** The vertex the next step will process (drawn with a white stroke), if any. */
   current: NodeId | null;
   /** Vertices the algorithm has finished with (drawn with a green stroke). */
   done: NodeId[];
   /**
-   * Edges to highlight (drawn white), as [from, to] in the view's orientation. In an
-   * undirected view [a, b] and [b, a] mean the same edge.
+   * Edges the next step will travel (drawn white), as [from, to] in the view's
+   * orientation. In an undirected view [a, b] and [b, a] mean the same edge.
    */
   activeEdges: Array<[NodeId, NodeId]>;
 }

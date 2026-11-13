@@ -1264,7 +1264,7 @@ test.describe('algorithm simulation (BFS)', () => {
     await expect(updateBtn(page)).toBeVisible();
     await expect(stopBtn(page)).toBeVisible();
     await expect(picker(page)).toBeDisabled();
-    await expect(page.locator('#message')).toHaveText('BFS from 0: press Update to take the first step.');
+    await expect(page.locator('#message')).toHaveText('BFS from 0. Queue: 0. Press Update to pop 0.');
 
     // Forced unweighted, shown by the greyed-out switch.
     for (const radio of await weightRadios(page).all()) await expect(radio).toBeDisabled();
@@ -1276,33 +1276,48 @@ test.describe('algorithm simulation (BFS)', () => {
     await expect(page.getByRole('button', { name: 'Clear graph' })).toBeDisabled();
   });
 
-  test('Update steps through BFS: current white with its edges, finished green', async ({ page }) => {
-    await buildPathAndIsland();
+  test('white marks what the next Update pops and travels; popped vertices are green', async ({ page }) => {
+    await buildPathAndIsland(); // 0 — 1 — 2, and 3 on its own
     await runBtn(page).click();
 
-    await updateBtn(page).click();
+    // Before any Update: the source is at the front of the queue, with the edge it will travel.
     expect(await simState(page)).toEqual({ current: [0], done: [], edges: ['0-1'] });
-    await expect(page.locator('#message')).toHaveText('Visiting 0: discovered 1. Queue: 1.');
     expect(await strokeOf(0)).toBe('rgb(255, 255, 255)');
     await expect(cv.edge(0, 1).locator('.edge-line')).toHaveCSS('stroke', 'rgb(255, 255, 255)');
 
-    await updateBtn(page).click();
-    expect(await simState(page)).toEqual({ current: [1], done: [0], edges: ['0-1', '1-2'] });
+    await updateBtn(page).click(); // pops 0, discovers 1
+    expect(await simState(page)).toEqual({ current: [1], done: [0], edges: ['1-2'] });
+    await expect(page.locator('#message')).toHaveText('Popped 0: discovered 1. Queue: 1.');
     expect(await strokeOf(0)).toBe('rgb(47, 158, 68)'); // green
     expect(await strokeOf(1)).toBe('rgb(255, 255, 255)');
-
-    await updateBtn(page).click();
-    expect(await simState(page)).toEqual({ current: [2], done: [0, 1], edges: ['1-2'] });
     await expect(cv.edge(0, 1).locator('.edge-line')).not.toHaveCSS('stroke', 'rgb(255, 255, 255)');
+
+    await updateBtn(page).click(); // pops 1, discovers 2
+    expect(await simState(page)).toEqual({ current: [2], done: [0, 1], edges: [] }); // 2 has nothing left to travel
+    await expect(page.locator('#message')).toHaveText('Popped 1: discovered 2. Queue: 2.');
+  });
+
+  test('the queue in the message always starts with the white vertex', async ({ page }) => {
+    await addTriangleNodes();
+    await connect(P.a, P.b);
+    await connect(P.a, P.c); // 0 has two neighbours: the queue holds two vertices at once
+    await runBtn(page).click();
+    await expect(page.locator('#message')).toContainText('Queue: 0.');
+    await updateBtn(page).click();
+    await expect(page.locator('#message')).toHaveText('Popped 0: discovered 1, 2. Queue: 1, 2.');
+    expect((await simState(page)).current).toEqual([1]); // the front of "1, 2"
+    await updateBtn(page).click();
+    await expect(page.locator('#message')).toHaveText('Popped 1: nothing new. Queue: 2.');
+    expect((await simState(page)).current).toEqual([2]);
   });
 
   test('after the last step, Update becomes Finish; Finish ends the run and unlocks', async ({ page }) => {
     await page.locator('label[for="weights-on"]').click();
     await buildPathAndIsland();
     await runBtn(page).click();
-    for (let i = 0; i < 3; i++) await updateBtn(page).click();
+    for (let i = 0; i < 2; i++) await updateBtn(page).click();
     await expect(updateBtn(page)).toBeVisible();
-    await updateBtn(page).click(); // finishes vertex 2: nothing left
+    await updateBtn(page).click(); // pops 2, the last reachable vertex: the queue is empty
 
     await expect(finishBtn(page)).toBeVisible();
     await expect(updateBtn(page)).toBeHidden();
@@ -1357,8 +1372,7 @@ test.describe('algorithm simulation (BFS)', () => {
     await buildPathAndIsland();
     await cv.click(...P.c); // select node 2
     await runBtn(page).click();
-    await expect(page.locator('#message')).toHaveText('BFS from 2: press Update to take the first step.');
-    await updateBtn(page).click();
+    await expect(page.locator('#message')).toHaveText('BFS from 2. Queue: 2. Press Update to pop 2.');
     expect((await simState(page)).current).toEqual([2]);
   });
 
@@ -1368,12 +1382,11 @@ test.describe('algorithm simulation (BFS)', () => {
     await connect(P.a, P.b); // 0 → 1
     await connect(P.c, P.b); // 2 → 1 (cannot be followed from 1)
     await runBtn(page).click();
-    await updateBtn(page).click(); // 0
     expect(await simState(page)).toEqual({ current: [0], done: [], edges: ['0-1'] });
     await expect(cv.edge(0, 1).locator('.edge-line')).toHaveCSS('marker-end', 'url("#arrow-active")');
-    await updateBtn(page).click(); // 1 — has no outgoing edges
+    await updateBtn(page).click(); // pops 0; 1 is next, and has no outgoing edges
     expect(await simState(page)).toEqual({ current: [1], done: [0], edges: [] });
-    await updateBtn(page).click();
+    await updateBtn(page).click(); // pops 1: done
     await expect(finishBtn(page)).toBeVisible();
     await expect(page.locator('#message')).toContainText('visited 2 of 3 vertices');
   });

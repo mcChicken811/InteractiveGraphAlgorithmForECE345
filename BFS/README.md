@@ -101,18 +101,19 @@ The header's picker lists the available algorithms; for now there is one, **Brea
   - **Undirected / Directed** is locked.
   - **Weighting:** the weighting the algorithm needs is forced and its switch is greyed out. BFS forces **Unweighted**, and Stop / Finish restore your previous choice.
 
-**BFS steps.** Each Update:
+**BFS steps.** The canvas always shows what the next Update will do:
 
-1. the previous vertex is marked finished, with a **green** stroke;
-2. the next vertex from the queue becomes current, with a **white** stroke, and the edges BFS explores from it turn **white**: all of its edges when undirected, its outgoing edges when directed;
-3. its undiscovered neighbours join the queue, in ascending id order.
+- **White:** the vertex at the front of the queue, which the next Update pops, and the edges that Update will travel (from it to neighbours not discovered yet). Right after Run, that's the start vertex.
+- **Green:** vertices already popped.
 
-The status message narrates each step, for example "Visiting 3: discovered 4. Queue: 2, 4." BFS runs from a single source, so vertices it can't reach stay uncoloured, and the final message counts them. On the light theme, white highlights get a thin dark outline so they stay visible.
+Each Update pops the front vertex (it turns green) and appends its undiscovered neighbours to the queue in ascending id order; the new front vertex turns white. The status message lists the whole queue, front (white) vertex first, for example "Popped 0: discovered 1, 2. Queue: 1, 2." A start vertex with *n* reachable vertices takes exactly *n* Updates, then Update becomes Finish.
+
+BFS runs from a single source, so vertices it can't reach stay uncoloured, and the final message counts them. On the light theme, white highlights get a thin dark outline so they stay visible.
 
 ### Adding another algorithm
 
 1. Implement `Simulation` (in `src/algorithms/types.ts`). It works on a read-only `GraphView`, takes one step per `step()`, and reports `highlight()` (current vertex, finished vertices, active edges) and `describe()` (the status message).
-2. Export an `AlgorithmDefinition` from its own file: `id`, `name`, `requires` (e.g. `{ weighted: true }` for Dijkstra), and `create(view, start)`.
+2. Export an `AlgorithmDefinition` from its own file: `id`, `name`, `requires` (e.g. `{ weighted: true }` for Dijkstra), and `create(view, start)`. By convention `highlight()` previews the *next* step: `current` is what it will process and `activeEdges` what it will travel.
 3. Add it to `ALGORITHMS` in `src/algorithms/index.ts`. The picker, the locks and the drawing then work without further changes.
 
 ## Directed and undirected mode

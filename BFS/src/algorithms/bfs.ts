@@ -3,28 +3,31 @@ import type { GraphView } from '../graph-views.js';
 import type { AlgorithmDefinition, Highlight, Simulation } from './types.js';
 
 /**
- * Breadth-first search from a single source, one vertex per step.
+ * Breadth-first search from a single source, one queue pop per step.
  *
- * Each step:
- *  1. the vertex processed in the previous step (if any) is finished → shown green;
- *  2. the next vertex is taken from the front of the queue and becomes current → shown
- *     white, together with the edges BFS explores from it (its neighbours in the view:
- *     all incident edges when undirected, out-edges when directed);
- *  3. its not-yet-discovered neighbours are discovered and appended to the queue, in
- *     ascending id order (the views return sorted neighbours, so runs are deterministic).
+ * The display always shows what the *next* step will do:
+ *  - white: the vertex at the front of the queue (popped next step), and the edges that
+ *    step will travel — from it to its not-yet-discovered neighbours;
+ *  - green: vertices already popped (finished).
  *
- * The step after the last vertex only finishes it; the simulation is then `finished`.
- * Vertices not reachable from the source are never discovered.
+ * Each step pops the front vertex (it turns green), then discovers its undiscovered
+ * neighbours and appends them to the queue in ascending id order (views return sorted
+ * neighbours, so runs are deterministic). The new front vertex turns white.
+ *
+ * Right after creation the source is the only vertex in the queue, so it is already
+ * white. A source with n reachable vertices finishes after exactly n steps; vertices not
+ * reachable from it are never discovered.
  */
 export class BfsSimulation implements Simulation {
   private readonly queue: NodeId[];
+  /** Vertices that have been put in the queue (including those already popped). */
   private readonly discovered: Set<NodeId>;
-  private readonly finishedSet = new Set<NodeId>();
-  private current: NodeId | null = null;
+  /** Vertices that have been popped. */
+  private readonly popped = new Set<NodeId>();
+  private lastPopped: NodeId | null = null;
   private lastDiscovered: NodeId[] = [];
-  private steps = 0;
 
-  /** Visit order so far. */
+  /** Pop order so far. */
   readonly order: NodeId[] = [];
   /** BFS tree: discovered vertex → the vertex it was discovered from (source → null). */
   readonly parent = new Map<NodeId, NodeId | null>();
@@ -41,47 +44,52 @@ export class BfsSimulation implements Simulation {
     this.distance.set(source, 0);
   }
 
+  /** True once the queue is empty: every reachable vertex has been popped. */
   get finished(): boolean {
-    return this.current === null && this.queue.length === 0 && this.steps > 0;
+    return this.queue.length === 0;
+  }
+
+  /** The vertices in the queue, front (next to be popped) first. */
+  get queued(): NodeId[] {
+    return [...this.queue];
   }
 
   step(): boolean {
-    if (this.finished) return false;
-    this.steps++;
-    if (this.current !== null) this.finishedSet.add(this.current);
-
-    this.current = this.queue.shift() ?? null;
+    const v = this.queue.shift();
+    if (v === undefined) return false;
+    this.popped.add(v);
+    this.order.push(v);
+    this.lastPopped = v;
     this.lastDiscovered = [];
-    if (this.current !== null) {
-      this.order.push(this.current);
-      for (const w of this.view.neighbors(this.current)) {
-        if (this.discovered.has(w)) continue;
-        this.discovered.add(w);
-        this.parent.set(w, this.current);
-        this.distance.set(w, this.distance.get(this.current)! + 1);
-        this.queue.push(w);
-        this.lastDiscovered.push(w);
-      }
+    for (const w of this.view.neighbors(v)) {
+      if (this.discovered.has(w)) continue;
+      this.discovered.add(w);
+      this.parent.set(w, v);
+      this.distance.set(w, this.distance.get(v)! + 1);
+      this.queue.push(w);
+      this.lastDiscovered.push(w);
     }
     return true;
   }
 
   highlight(): Highlight {
-    const current = this.current;
+    const next = this.queue[0] ?? null;
     return {
-      current,
-      done: [...this.finishedSet],
-      activeEdges: current === null ? [] : this.view.neighbors(current).map((w) => [current, w] as [NodeId, NodeId]),
+      current: next,
+      done: [...this.popped],
+      activeEdges:
+        next === null
+          ? []
+          : this.view
+              .neighbors(next)
+              .filter((w) => !this.discovered.has(w))
+              .map((w) => [next, w] as [NodeId, NodeId]),
     };
   }
 
-  /** Vertices waiting in the queue, front first. */
-  get queued(): NodeId[] {
-    return [...this.queue];
-  }
-
   describe(): string {
-    if (this.steps === 0) return `BFS from ${this.source}: press Update to take the first step.`;
+    const queue = `Queue: ${this.queue.length ? this.queue.join(', ') : 'empty'}.`;
+    if (this.lastPopped === null) return `BFS from ${this.source}. ${queue} Press Update to pop ${this.source}.`;
     if (this.finished) {
       const total = this.view.nodeIds().length;
       const reached = this.order.length;
@@ -93,8 +101,7 @@ export class BfsSimulation implements Simulation {
       );
     }
     const found = this.lastDiscovered.length ? `discovered ${this.lastDiscovered.join(', ')}` : 'nothing new';
-    const queue = this.queue.length ? this.queue.join(', ') : 'empty';
-    return `Visiting ${this.current}: ${found}. Queue: ${queue}.`;
+    return `Popped ${this.lastPopped}: ${found}. ${queue}`;
   }
 }
 
