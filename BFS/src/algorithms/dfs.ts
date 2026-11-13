@@ -4,6 +4,7 @@ import type {
   AlgorithmDefinition,
   ArcDiagram,
   ExploredEdge,
+  ForestDiagram,
   Highlight,
   Simulation,
   StackSnapshot,
@@ -51,7 +52,9 @@ import type {
  *
  * Once finished, `topologicalSort()` gives TOPOLOGICAL-SORT (CLRS §20.4): the vertices by
  * decreasing finish time — available only when no back edge was found, which by
- * Lemma 20.11 is exactly when the directed graph is acyclic.
+ * Lemma 20.11 is exactly when the directed graph is acyclic. `searchForest()` gives the
+ * depth-first forest G_π (§20.3) — the vertices joined by the tree edges — drawn as trees
+ * the way the timestamp chart nests their intervals (always available once finished).
  */
 
 type Color = 'white' | 'gray' | 'black';
@@ -210,6 +213,23 @@ export class DfsSimulation implements Simulation {
   }
 
   /**
+   * The depth-first forest G_π (CLRS §20.3: the vertices and the tree edges (v.π, v)),
+   * laid out as on the timestamp chart: each vertex on the row of its depth, above the
+   * middle of its interval [d, f]. Once finished; otherwise null.
+   */
+  searchForest(): ForestDiagram | null {
+    if (!this.finished) return null;
+    return {
+      places: [...this.discovery].map(([id, d]) => ({
+        id,
+        column: (d + this.finish.get(id)!) / 2,
+        row: this.depth.get(id)!,
+      })),
+      spine: this.edges.filter((e) => e.kind === 'tree').map((e): [NodeId, NodeId] => [e.from, e.to]),
+    };
+  }
+
+  /**
    * Each discovered vertex's interval [d, f] (f null while running), on the row of its
    * depth in the forest — so, by the parenthesis theorem, a descendant's interval sits
    * below and inside its ancestor's — plus the clock.
@@ -251,8 +271,8 @@ export class DfsSimulation implements Simulation {
         `${trees} ${trees === 1 ? 'tree' : 'trees'}; ${count('tree')} tree, ${count('back')} backward, ` +
         `${count('forward')} forward, ${count('cross')} crossed edges. ` +
         (this.hasCycle
-          ? 'A backward edge means a cycle, so there is no topological order. Press Finish.'
-          : 'No backward edge, so the graph is acyclic: press Topological sort, or Finish.')
+          ? 'A backward edge means a cycle, so there is no topological order. Press Show as forest, or Finish.'
+          : 'No backward edge, so the graph is acyclic: press Topological sort, Show as forest, or Finish.')
       );
     }
     switch (last.type) {

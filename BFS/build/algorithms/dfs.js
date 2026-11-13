@@ -119,6 +119,23 @@ export class DfsSimulation {
         };
     }
     /**
+     * The depth-first forest G_π (CLRS §20.3: the vertices and the tree edges (v.π, v)),
+     * laid out as on the timestamp chart: each vertex on the row of its depth, above the
+     * middle of its interval [d, f]. Once finished; otherwise null.
+     */
+    searchForest() {
+        if (!this.finished)
+            return null;
+        return {
+            places: [...this.discovery].map(([id, d]) => ({
+                id,
+                column: (d + this.finish.get(id)) / 2,
+                row: this.depth.get(id),
+            })),
+            spine: this.edges.filter((e) => e.kind === 'tree').map((e) => [e.from, e.to]),
+        };
+    }
+    /**
      * Each discovered vertex's interval [d, f] (f null while running), on the row of its
      * depth in the forest — so, by the parenthesis theorem, a descendant's interval sits
      * below and inside its ancestor's — plus the clock.
@@ -160,8 +177,8 @@ export class DfsSimulation {
                 `${trees} ${trees === 1 ? 'tree' : 'trees'}; ${count('tree')} tree, ${count('back')} backward, ` +
                 `${count('forward')} forward, ${count('cross')} crossed edges. ` +
                 (this.hasCycle
-                    ? 'A backward edge means a cycle, so there is no topological order. Press Finish.'
-                    : 'No backward edge, so the graph is acyclic: press Topological sort, or Finish.'));
+                    ? 'A backward edge means a cycle, so there is no topological order. Press Show as forest, or Finish.'
+                    : 'No backward edge, so the graph is acyclic: press Topological sort, Show as forest, or Finish.'));
         }
         switch (last.type) {
             case 'root': {

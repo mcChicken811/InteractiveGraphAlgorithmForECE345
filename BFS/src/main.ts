@@ -167,6 +167,7 @@ runner = new AlgorithmRunner(
     step: document.querySelector<HTMLButtonElement>('#step-btn')!,
     stop: document.querySelector<HTMLButtonElement>('#stop-btn')!,
     topo: document.querySelector<HTMLButtonElement>('#topo-btn')!,
+    forest: document.querySelector<HTMLButtonElement>('#forest-btn')!,
     weightSwitch: document.querySelector<HTMLFieldSetElement>('#weight-switch')!,
     directionSwitch: document.querySelector<HTMLFieldSetElement>('#direction-switch')!,
     queueCard: document.querySelector<HTMLElement>('#queue-card')!,
@@ -198,11 +199,14 @@ for (const input of weightInputs) {
 }
 
 layoutBtn.addEventListener('click', () => {
-  // Turning auto-layout on leaves the topological order (the run itself goes on).
-  const leavingSort = editor.arcDiagramActive && !editor.autoLayoutEnabled;
+  // Turning auto-layout on leaves the topological order or the forest (the run itself goes on).
+  const leaving = editor.autoLayoutEnabled ? null : editor.arrangement;
   editor.setAutoLayout(!editor.autoLayoutEnabled);
-  if (leavingSort) {
+  runner?.refresh();
+  if (leaving === 'line') {
     showMessage('Auto-layout on: left the topological order. Press Topological sort to line the vertices up again.');
+  } else if (leaving === 'forest') {
+    showMessage('Auto-layout on: left the forest. Press Show as forest to arrange the vertices as trees again.');
   }
 });
 

@@ -1292,6 +1292,107 @@ describe('GraphEditor arc diagram (topological sort)', () => {
     expect(edgeEl(3, 2)!.dataset.shape).toBe('path');
     expect(Math.max(...pathYs(3, 2))).toBeGreaterThan(graph.getNode(3)!.y + 50);
   });
+
+  describe('forest view', () => {
+    /** DFS from 0: 0 (1,6) → 1 (2,5) → 2 (3,4), then 3 (7,8) on its own; 0 → 2 forward, 3 → 2 cross. */
+    const FOREST = {
+      places: [
+        { id: 0, column: 3.5, row: 0 },
+        { id: 1, column: 3.5, row: 1 },
+        { id: 2, column: 3.5, row: 2 },
+        { id: 3, column: 7.5, row: 0 },
+      ],
+      spine: [
+        [0, 1],
+        [1, 2],
+      ] as Array<[number, number]>,
+    };
+    const ys = (ids: number[]) => ids.map((id) => graph.getNode(id)!.y);
+    /** The x coordinates along an edge's drawn path. */
+    const pathXs = (a: number, b: number) =>
+      [...edgeEl(a, b)!.querySelector('.edge-line')!.getAttribute('d')!.matchAll(/(-?[\d.]+) (-?[\d.]+)/g)].map((m) =>
+        Number(m[1]),
+      );
+
+    it('glides the vertices into trees: rows by depth, columns by time, centred', () => {
+      editor.showForest(FOREST);
+      expect(editor.arrangement).toBe('forest');
+      expect(editor.arcDiagramActive).toBe(true);
+      expect(svg.classList.contains('forest-view')).toBe(true);
+      expect(onAutoLayoutChange).not.toHaveBeenCalledWith(true);
+      flush();
+      const [x0, x1, x2, x3] = xs([0, 1, 2, 3]);
+      expect(x1).toBeCloseTo(x0);
+      expect(x2).toBeCloseTo(x0);
+      expect(x3 - x0).toBeCloseTo(4 * 72); // 4 time units at the widest unit
+      expect((x0 + x3) / 2).toBeCloseTo(WIDTH / 2);
+      const [y0, y1, y2, y3] = ys([0, 1, 2, 3]);
+      expect(y3).toBeCloseTo(y0);
+      expect(y1 - y0).toBeCloseTo(y2 - y1);
+      expect(y1).toBeGreaterThan(y0);
+    });
+
+    it('tree edges are straight and white; other edges bow out to the left of their direction', () => {
+      editor.showForest(FOREST);
+      flush();
+      expect(edgeEl(0, 1)!.classList.contains('sim-spine')).toBe(true);
+      expect(edgeEl(0, 2)!.classList.contains('sim-spine')).toBe(false);
+      const x0 = graph.getNode(0)!.x;
+      // 0 → 1 runs straight down (as a path, so it can blend between views).
+      expect(edgeEl(0, 1)!.dataset.shape).toBe('path');
+      expect(pathXs(0, 1).every((x) => Math.abs(x - x0) < 0.01)).toBe(true);
+      // 0 → 2 runs down the chain past 1: it bows to the left of downward, i.e. to the right.
+      expect(Math.max(...pathXs(0, 2))).toBeGreaterThan(x0 + 30);
+      expect(Math.min(...pathXs(0, 2))).toBeGreaterThan(x0 - 0.01);
+    });
+
+    it('switches from the topological sort straight over, blending each edge into its new shape', () => {
+      editor.showArcDiagram(DIAGRAM);
+      flush();
+      // In the line, 0 → 2 skips 1 and arcs above it.
+      const above = Math.min(...pathYs(0, 2));
+      expect(above).toBeLessThan(graph.getNode(0)!.y - 50);
+      editor.showForest(FOREST);
+      expect(editor.arrangement).toBe('forest');
+      expect(svg.classList.contains('arc-diagram')).toBe(true);
+      // Part-way, 0 → 2 is still curved: it never snaps straight (the bend stays at 1).
+      now += 200;
+      frames.shift()!(now);
+      const yMid = pathYs(0, 2);
+      const xMid = pathXs(0, 2);
+      const sag = Math.max(...xMid) - Math.min(...xMid) + Math.max(...yMid) - Math.min(...yMid);
+      expect(sag).toBeGreaterThan(40);
+      flush();
+      const x0 = graph.getNode(0)!.x;
+      expect(Math.max(...pathXs(0, 2))).toBeGreaterThan(x0 + 30);
+      // And back to the line.
+      editor.showArcDiagram(DIAGRAM);
+      expect(editor.arrangement).toBe('line');
+      expect(svg.classList.contains('forest-view')).toBe(false);
+      flush();
+      expect(Math.min(...pathYs(0, 2))).toBeCloseTo(above, 0);
+    });
+
+    it('leaves like the line: edges straighten, vertices stay where they are', () => {
+      editor.showForest(FOREST);
+      flush();
+      const placed = xs([0, 1, 2, 3]);
+      editor.showArcDiagram(null);
+      expect(editor.arrangement).toBe(null);
+      expect(svg.classList.contains('forest-view')).toBe(false);
+      flush();
+      expect(xs([0, 1, 2, 3])).toEqual(placed);
+      expect(editor.arcDiagramActive).toBe(false);
+      expect(svg.querySelectorAll('.sim-spine')).toHaveLength(0);
+    });
+
+    it('auto-layout leaves it too', () => {
+      editor.showForest(FOREST);
+      flush();
+      editor.setAutoLayout(true);
+      expect(editor.arrangement).toBe(null);
+    });
+  });
 });
 
 describe('GraphEditor cut transitions', () => {

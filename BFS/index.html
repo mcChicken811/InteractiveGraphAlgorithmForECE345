@@ -48,6 +48,8 @@
         <button id="run-btn" class="primary" type="button">Run</button>
         <!-- DFS, after the last Update: lines the vertices up in topological order (greyed out if there is a cycle). -->
         <button id="topo-btn" type="button" hidden>Topological sort</button>
+        <!-- DFS, after the last Update: arranges the vertices as the depth-first forest, as on the timestamp chart. -->
+        <button id="forest-btn" type="button" hidden>Show as forest</button>
         <button id="step-btn" class="primary" type="button" hidden>Update</button>
         <button id="stop-btn" type="button" hidden>Stop</button>
       </div>
@@ -175,6 +177,12 @@
                   the vertices up by decreasing finish time. Tree edges run along the line in white; the other
                   edges arc above (forward) or below (crossed). Auto-layout leaves this view; press the button
                   again to come back.
+                </li>
+                <li>
+                  When DFS is done, <strong>Show as forest</strong> arranges the vertices as the depth-first
+                  forest, laid out like the timestamp chart: one row per depth, each vertex above the middle of
+                  its [d, f] interval. Tree edges are white; the other edges curve. Auto-layout leaves this view
+                  too, and the two buttons switch between the views.
                 </li>
                 <li>
                   While any algorithm runs, <strong>hover the adjacency list or matrix</strong> to see the vertex

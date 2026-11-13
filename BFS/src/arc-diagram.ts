@@ -1,8 +1,9 @@
 /**
  * Geometry for drawing the graph as an arc diagram (DFS's topological sort): the
  * vertices in a left-to-right line, wrapping into rows like text when they don't fit,
- * and edges as half circles whose diameter runs from one vertex to the other. Pure
- * functions, no DOM.
+ * and edges as half circles whose diameter runs from one vertex to the other. Also the
+ * layout of DFS's forest view (forestLayout), whose curved edges are flatter half
+ * ellipses. Pure functions, no DOM.
  */
 
 export interface Point {
@@ -60,6 +61,48 @@ export function rowLayout(count: number, bounds: Bounds, options: Partial<RowLay
     positions.push({ x: left + (i % perRow) * gap, y: top + rowHeight * (row + 0.5) });
   }
   return { positions, rows, maxBulge: Math.max(0, rowHeight / 2 - 4) };
+}
+
+export interface ForestLayoutOptions {
+  padX: number;
+  padTop: number;
+  padBottom: number;
+  /** Widest a time unit may be (px): siblings are at least two units apart. */
+  maxUnit: number;
+  /** Tallest a row may be (px). */
+  maxRowHeight: number;
+}
+
+export const FOREST_DEFAULTS: ForestLayoutOptions = { padX: 56, padTop: 80, padBottom: 96, maxUnit: 72, maxRowHeight: 120 };
+
+export interface ForestPlace {
+  /** Across, in time units (DFS: the middle of the vertex's [d, f] interval). */
+  column: number;
+  /** Down: the depth (roots 0). */
+  row: number;
+}
+
+/**
+ * Places a forest as on the timestamp chart: rows top to bottom by depth, and columns
+ * left to right on a time scale, both as large as fits (up to `maxUnit` px per time unit
+ * and `maxRowHeight` per row) and centred in `bounds`.
+ */
+export function forestLayout(places: readonly ForestPlace[], bounds: Bounds, options: Partial<ForestLayoutOptions> = {}): Point[] {
+  const o = { ...FOREST_DEFAULTS, ...options };
+  if (places.length === 0) return [];
+  const columns = places.map((p) => p.column);
+  const [first, last] = [Math.min(...columns), Math.max(...columns)];
+  const rows = Math.max(...places.map((p) => p.row)) + 1;
+  const usableX = Math.max(0, bounds.width - 2 * o.padX);
+  const unit = last > first ? Math.min(o.maxUnit, usableX / (last - first)) : 0;
+  const usableY = Math.max(0, bounds.height - o.padTop - o.padBottom);
+  const rowHeight = Math.min(o.maxRowHeight, usableY / rows);
+  const top = o.padTop + (usableY - rowHeight * rows) / 2;
+  const centre = (first + last) / 2;
+  return places.map((p) => ({
+    x: bounds.width / 2 + (p.column - centre) * unit,
+    y: top + rowHeight * (p.row + 0.5),
+  }));
 }
 
 export interface ArcPath {

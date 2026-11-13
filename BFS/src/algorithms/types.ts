@@ -106,6 +106,20 @@ export interface ArcDiagram {
   below: Array<[NodeId, NodeId]>;
 }
 
+/**
+ * The search forest drawn as trees (DFS's "Show as forest"), laid out like the timestamp
+ * chart: each vertex on the row of its depth (roots at the top), and across, above the
+ * middle of its [d, f] interval on the time axis. By the parenthesis theorem a vertex's
+ * descendants then sit below it, within its interval, and siblings and trees go left to
+ * right in discovery order.
+ */
+export interface ForestDiagram {
+  /** Each vertex's place: `column` in time units ((d + f) / 2), `row` its depth. */
+  places: Array<{ id: NodeId; column: number; row: number }>;
+  /** Tree edges: straight, from parent down to child, highlighted white. All other edges curve. */
+  spine: Array<[NodeId, NodeId]>;
+}
+
 /** One vertex's [discovery, finish] interval on a timestamp chart (DFS). */
 export interface TimestampInterval {
   id: NodeId;
@@ -172,6 +186,11 @@ export interface Simulation {
    * topological sort leave it out, and the button stays hidden.
    */
   topologicalSort?(): ArcDiagram | null;
+  /**
+   * Offered once finished (DFS): the depth-first forest, laid out as on the timestamp
+   * chart. Algorithms without one leave it out, and the button stays hidden.
+   */
+  searchForest?(): ForestDiagram | null;
 }
 
 /** An entry in the algorithm picker. */

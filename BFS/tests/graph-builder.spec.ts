@@ -2026,7 +2026,7 @@ test.describe('algorithm simulation (DFS)', () => {
     await expect(cv.canvas.locator('.edge-tag:visible')).toHaveText(['forward', 'backward', 'crossed']);
     await expect(message(page)).toHaveText(
       'DFS finished at time 10: 5 vertices in 2 trees; 3 tree, 1 backward, 1 forward, 1 crossed edges. ' +
-        'A backward edge means a cycle, so there is no topological order. Press Finish.',
+        'A backward edge means a cycle, so there is no topological order. Press Show as forest, or Finish.',
     );
   });
 
@@ -2115,7 +2115,7 @@ test.describe('algorithm simulation (DFS)', () => {
       const [t, f] = await Promise.all([topoBtn(page).boundingBox(), finishBtn(page).boundingBox()]);
       expect(t!.x + t!.width).toBeLessThanOrEqual(f!.x); // right before Finish…
       expect(Math.abs(t!.y - f!.y)).toBeLessThan(1); // …on the same line
-      await expect(message(page)).toContainText('No backward edge, so the graph is acyclic: press Topological sort, or Finish.');
+      await expect(message(page)).toContainText('No backward edge, so the graph is acyclic: press Topological sort, Show as forest, or Finish.');
     });
 
     test('is greyed out when DFS found a backward edge (a cycle)', async ({ page }) => {
@@ -2242,6 +2242,121 @@ test.describe('algorithm simulation (DFS)', () => {
         );
         expect(top).toBe(true);
       }
+    });
+
+    test.describe('show as forest', () => {
+      const forestBtn = (page: Page) => page.getByRole('button', { name: 'Show as forest' });
+      const layoutBtn = (page: Page) => page.getByRole('button', { name: /Auto-layout/ });
+
+      test('appears next to Finish after the last Update, even when there is a cycle', async ({ page }) => {
+        await build(page); // with the back edge 2 → 0
+        await run(page);
+        await steps(page, 12);
+        await expect(forestBtn(page)).toBeHidden();
+        await update(page); // the last step
+        await expect(forestBtn(page)).toBeVisible();
+        await expect(forestBtn(page)).toBeEnabled();
+        await expect(topoBtn(page)).toBeDisabled(); // no topological order, but a forest all the same
+        const [b, f] = await Promise.all([forestBtn(page).boundingBox(), finishBtn(page).boundingBox()]);
+        expect(b!.x + b!.width).toBeLessThanOrEqual(f!.x);
+        expect(Math.abs(b!.y - f!.y)).toBeLessThan(1);
+        await expect(message(page)).toContainText('Press Show as forest, or Finish.');
+      });
+
+      test('arranges the trees as on the timestamp chart: rows by depth, columns by time', async ({ page }) => {
+        // 0 (1,6) → 1 (2,5) → 2 (3,4) in one tree; 3 (7,10) → 4 (8,9) in the next.
+        await build(page);
+        await layoutBtn(page).click(); // on, after building so the clicks hit
+        await run(page);
+        await steps(page, 13);
+        await forestBtn(page).click();
+        await expect(layoutBtn(page)).toHaveAttribute('aria-pressed', 'false'); // turned off
+        await expect(forestBtn(page)).toHaveAttribute('aria-pressed', 'true');
+        await expect(message(page)).toContainText('Depth-first forest: 2 trees, rooted at 0, 3.');
+        const [p0, p1, p2, p3, p4] = await settled([0, 1, 2, 3, 4]);
+        // Each vertex above the middle of its interval: a single child sits right below its parent.
+        expect(Math.abs(p1.x - p0.x)).toBeLessThan(1);
+        expect(Math.abs(p2.x - p0.x)).toBeLessThan(1);
+        expect(Math.abs(p4.x - p3.x)).toBeLessThan(1);
+        expect(p3.x).toBeGreaterThan(p0.x + 100); // the second tree to the right (later times)
+        // One row per depth, evenly spaced, the roots on the top row.
+        expect(Math.abs(p3.y - p0.y)).toBeLessThan(1);
+        expect(Math.abs(p4.y - p1.y)).toBeLessThan(1);
+        expect(p1.y - p0.y).toBeGreaterThan(60);
+        expect(Math.abs(p2.y - p1.y - (p1.y - p0.y))).toBeLessThan(1);
+        // Clear of the toolbar and the status bar.
+        const toolbar = (await page.locator('.canvas-toolbar').boundingBox())!;
+        expect(p0.y - 20).toBeGreaterThan(toolbar.y + toolbar.height);
+      });
+
+      test('tree edges are straight and white; the other edges curve and keep their tags', async ({ page }) => {
+        await runToEnd(page, ARCS, 13);
+        await forestBtn(page).click();
+        await settled([0, 1, 2, 3, 4]);
+        await expect(cv.canvas).toHaveClass(/forest-view/);
+        for (const [a, b] of [[0, 1], [1, 2], [3, 4]]) {
+          const e = await edgeShape(a, b);
+          expect(e.spine).toBe(true);
+          expect(e.stroke).toBe(WHITE);
+        }
+        // 0 → 1 and 1 → 2 run straight down the chain: no width to speak of.
+        const down = await cv.edge(0, 1).locator('.edge-line').evaluate((l) => (l as SVGGraphicsElement).getBBox().width);
+        expect(down).toBeLessThan(2);
+        // 2 → 0 (backward) and 0 → 2 (forward) would lie on the chain: they bow out to opposite sides.
+        const sideOf = (a: number, b: number) =>
+          cv.edge(a, b).locator('.edge-line').evaluate((l) => {
+            const box = (l as SVGGraphicsElement).getBBox();
+            return { left: box.x, right: box.x + box.width };
+          });
+        const chainX = (await settled([0]))[0].x - (await cv.canvas.boundingBox())!.x;
+        const [back, forward] = [await sideOf(2, 0), await sideOf(0, 2)];
+        expect(back.left).toBeLessThan(chainX - 20); // up the chain: bulges left of upward, to the left
+        expect(forward.right).toBeGreaterThan(chainX + 20); // down the chain: to the right
+        expect((await edgeShape(2, 0)).spine).toBe(false);
+        await expect(cv.edge(2, 0)).toHaveAttribute('data-tag', 'backward');
+        await expect(cv.edge(0, 2)).toHaveAttribute('data-tag', 'forward');
+        await expect(cv.edge(3, 1)).toHaveAttribute('data-tag', 'crossed');
+      });
+
+      test('switches with the topological sort, both ways', async ({ page }) => {
+        await runToEnd(page); // the acyclic version
+        await forestBtn(page).click();
+        const forest = await settled([0, 1, 2, 3, 4]);
+        await topoBtn(page).click();
+        await expect(topoBtn(page)).toHaveAttribute('aria-pressed', 'true');
+        await expect(forestBtn(page)).toHaveAttribute('aria-pressed', 'false');
+        await expect(cv.canvas).not.toHaveClass(/forest-view/);
+        const line = await settled([3, 4, 0, 1, 2]);
+        for (let i = 1; i < line.length; i++) expect(line[i].x).toBeGreaterThan(line[i - 1].x);
+        expect(new Set(line.map((p) => Math.round(p.y))).size).toBe(1);
+        await forestBtn(page).click();
+        await expect(forestBtn(page)).toHaveAttribute('aria-pressed', 'true');
+        await expect(topoBtn(page)).toHaveAttribute('aria-pressed', 'false');
+        const back = await settled([0, 1, 2, 3, 4]);
+        back.forEach((p, i) => {
+          expect(p.x).toBeCloseTo(forest[i].x, 0);
+          expect(p.y).toBeCloseTo(forest[i].y, 0);
+        });
+      });
+
+      test('auto-layout leaves the forest; the button brings it back; Finish ends the run', async ({ page }) => {
+        await runToEnd(page);
+        await forestBtn(page).click();
+        await settled([0, 1, 2, 3, 4]);
+        await layoutBtn(page).click();
+        await expect(message(page)).toHaveText(
+          'Auto-layout on: left the forest. Press Show as forest to arrange the vertices as trees again.',
+        );
+        await expect(forestBtn(page)).toHaveAttribute('aria-pressed', 'false');
+        await expect(cv.canvas).not.toHaveClass(/forest-view/);
+        await expect(finishBtn(page)).toBeVisible(); // the run goes on
+        await forestBtn(page).click();
+        await expect(layoutBtn(page)).toHaveAttribute('aria-pressed', 'false');
+        await expect(forestBtn(page)).toHaveAttribute('aria-pressed', 'true');
+        await finishBtn(page).click();
+        await expect(forestBtn(page)).toBeHidden();
+        await expect(cv.canvas).not.toHaveClass(/forest-view/);
+      });
     });
 
     test.describe('with reduced motion', () => {

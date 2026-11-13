@@ -86,7 +86,7 @@ describe('DfsSimulation (directed, CLRS)', () => {
       '3 → 4 is a tree edge: discovered 4 at time 8. Stack: 4, 3 (top first).',
       'Finished 4 at time 9. Stack: 3 (top first).',
       'DFS finished at time 10: 5 vertices in 2 trees; 3 tree, 1 backward, 1 forward, 1 crossed edges. ' +
-        'A backward edge means a cycle, so there is no topological order. Press Finish.',
+        'A backward edge means a cycle, so there is no topological order. Press Show as forest, or Finish.',
     ]);
   });
 
@@ -275,7 +275,7 @@ describe('DfsSimulation (directed, CLRS)', () => {
     expect(s.trees).toEqual([1, 0, 2]);
     expect(s.describe()).toBe(
       'DFS finished at time 6: 3 vertices in 3 trees; 0 tree, 0 backward, 0 forward, 0 crossed edges. ' +
-        'No backward edge, so the graph is acyclic: press Topological sort, or Finish.',
+        'No backward edge, so the graph is acyclic: press Topological sort, Show as forest, or Finish.',
     );
   });
 });
@@ -379,6 +379,64 @@ describe('topological sort (CLRS §20.4)', () => {
       for (const [a, b] of r.directedView.edges()) expect(rank.get(a)!).toBeLessThan(rank.get(b)!); // Theorem 20.12
     }
     expect(acyclicSeen).toBeGreaterThan(5);
+  });
+});
+
+describe('search forest (for "Show as forest")', () => {
+  it('is only offered once DFS has finished, cycle or not', () => {
+    const sim = new DfsSimulation(g.directedView, 0); // has the back edge 2 → 0
+    sim.step();
+    expect(sim.searchForest()).toBeNull();
+    runToEnd(sim);
+    expect(sim.hasCycle).toBe(true);
+    expect(sim.searchForest()).not.toBeNull();
+  });
+
+  it('places each vertex on the row of its depth, above the middle of its [d, f], with the tree edges', () => {
+    const sim = new DfsSimulation(g.directedView, 0);
+    runToEnd(sim);
+    // 0 (1,6) → 1 (2,5) → 2 (3,4); 3 (7,10) → 4 (8,9).
+    expect(sim.searchForest()).toEqual({
+      places: [
+        { id: 0, column: 3.5, row: 0 },
+        { id: 1, column: 3.5, row: 1 },
+        { id: 2, column: 3.5, row: 2 },
+        { id: 3, column: 8.5, row: 0 },
+        { id: 4, column: 8.5, row: 1 },
+      ],
+      spine: [
+        [0, 1],
+        [1, 2],
+        [3, 4],
+      ],
+    });
+  });
+
+  it('on random graphs: every child sits one row below its parent, within its parent’s interval', () => {
+    for (let seed = 1; seed <= 30; seed++) {
+      const h = new Graph();
+      h.directed = true;
+      let s = seed;
+      const rand = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+      for (let i = 0; i < 9; i++) h.addNode(0, 0);
+      for (let a = 0; a < 9; a++) for (let b = 0; b < 9; b++) if (a !== b && rand() < 0.2) h.addEdge(a, b);
+      const sim = new DfsSimulation(h.directedView, 0);
+      runToEnd(sim);
+      const forest = sim.searchForest()!;
+      const at = new Map(forest.places.map((p) => [p.id, p]));
+      expect(forest.places).toHaveLength(9);
+      for (const [u, v] of forest.spine) {
+        expect(sim.parent.get(v)).toBe(u);
+        expect(at.get(v)!.row).toBe(at.get(u)!.row + 1);
+        expect(at.get(v)!.column).toBeGreaterThan(sim.discovery.get(u)!);
+        expect(at.get(v)!.column).toBeLessThan(sim.finish.get(u)!);
+      }
+      // Vertices on one row never share a column (their intervals are disjoint).
+      const rows = new Map<number, number[]>();
+      for (const p of forest.places) rows.set(p.row, [...(rows.get(p.row) ?? []), p.column]);
+      for (const cols of rows.values()) expect(new Set(cols).size).toBe(cols.length);
+      expect(forest.spine).toHaveLength(9 - sim.trees.length);
+    }
   });
 });
 

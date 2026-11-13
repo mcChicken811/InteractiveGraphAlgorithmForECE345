@@ -10,6 +10,10 @@ const LOCKED_TITLE = 'Locked while the algorithm runs. Press Stop to change it.'
  *   Topological sort → (DFS, once finished) lines the vertices up in topological order
  *            as an arc diagram; greyed out when the graph has a cycle. The run goes on
  *            until Finish or Stop;
+ *   Show as forest → (DFS, once finished) arranges the vertices as the depth-first forest,
+ *            laid out like the timestamp chart (rows by depth, columns by time), with the
+ *            tree edges white and straight. It and Topological sort switch between each
+ *            other; auto-layout leaves either. The run goes on until Finish or Stop;
  *   Stop / Finish → ends the run, clears the highlighting and releases every lock
  *            (restoring the weighting and direction that were selected before).
  */
@@ -32,6 +36,7 @@ export class AlgorithmRunner {
         el.step.addEventListener('click', () => this.step());
         el.stop.addEventListener('click', () => this.stop('Stopped.'));
         el.topo?.addEventListener('click', () => this.topologicalSort());
+        el.forest?.addEventListener('click', () => this.showForest());
         this.updateControls();
     }
     get running() {
@@ -87,8 +92,25 @@ export class AlgorithmRunner {
         if (!diagram)
             return;
         this.editor.showArcDiagram(diagram);
+        this.updateControls();
         this.hooks.message(`Topological order (decreasing finish time): ${diagram.order.join(', ')}. Every edge points left to right: ` +
             'tree edges in white, forward edges arc above, crossed edges below. Press Finish or Stop to end.');
+    }
+    /**
+     * Arranges the vertices as the simulation's depth-first forest (DFS), as its timestamp
+     * chart nests them. The run is not over: Finish or Stop ends it.
+     */
+    showForest() {
+        const forest = this.simulation?.searchForest?.() ?? null;
+        if (!forest)
+            return;
+        this.editor.showForest(forest);
+        this.updateControls();
+        const roots = forest.places.filter((p) => p.row === 0).sort((p, q) => p.column - q.column).map((p) => p.id);
+        const trees = roots.length === 1 ? `1 tree, rooted at ${roots[0]}` : `${roots.length} trees, rooted at ${roots.join(', ')}`;
+        this.hooks.message(`Depth-first forest: ${trees}. As on the timestamp chart, each row is a depth and each vertex ` +
+            'sits above the middle of its [d, f] interval, its descendants below it. Tree edges in white; ' +
+            'the other edges curve. Press Finish or Stop to end.');
     }
     /** Ends the run and releases every lock. */
     stop(message = 'Stopped.') {
@@ -180,6 +202,14 @@ export class AlgorithmRunner {
                 topo.title = 'No topological order: a backward edge means the graph has a cycle.';
             else
                 topo.removeAttribute('title');
+            topo.setAttribute('aria-pressed', String(this.editor.arrangement === 'line'));
+        }
+        // Show as forest: next to Finish once the simulation offers a forest.
+        const forest = this.el.forest;
+        if (forest) {
+            const simulation = this.simulation;
+            forest.hidden = !(simulation?.finished && typeof simulation.searchForest === 'function');
+            forest.setAttribute('aria-pressed', String(this.editor.arrangement === 'forest'));
         }
     }
     /** Re-checks Run's availability (e.g. after nodes were added or removed). */

@@ -1,6 +1,6 @@
 import { ForceLayout } from './layout.js';
 import { fitFontSize } from './label-fit.js';
-import { halfEllipse, rowLayout } from './arc-diagram.js';
+import { forestLayout, halfEllipse, rowLayout } from './arc-diagram.js';
 import { cutShape, loopsPath, polylinesPath } from './voronoi.js';
 import { nodeCountFor, randomArcs, randomPositions } from './random-graph.js';
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -23,6 +23,10 @@ const ARRANGE_MS = 750;
 /** How long a cut's border takes to move to its new place when the cut changes. */
 const CUT_MS = 650;
 const BEND_MS = 450;
+/** In the forest view, how far a curved edge bulges, as a share of its half length. */
+const FOREST_BULGE = 0.6;
+/** …and at most (px). */
+const FOREST_MAX_BULGE = 110;
 /**
  * Interactive SVG editor:
  *  - click empty space → add node
@@ -59,6 +63,13 @@ export class GraphEditor {
     arc = null;
     /** 0 = edges straight, 1 = full arcs. */
     bend = 0;
+    /**
+     * Switching straight from one arrangement to the other: the one before, so each edge's
+     * bulge can blend from its old shape to its new one over `morphTween` (0 → 1).
+     */
+    arcBefore = null;
+    morph = 1;
+    morphTween = null;
     bendTween = null;
     moveTween = null;
     tweenFrame = null;
@@ -283,9 +294,13 @@ export class GraphEditor {
         }
     }
     // ----------------------------------------------------------- arc diagram
-    /** Whether the arc diagram (DFS's topological sort) is shown. */
+    /** Whether an arrangement (DFS's topological sort or its forest) is shown. */
     get arcDiagramActive() {
         return this.arc !== null && !this.arc.leaving;
+    }
+    /** Which arrangement is shown: the topological sort's line, the forest, or neither. */
+    get arrangement() {
+        return this.arcDiagramActive ? this.arc.kind : null;
     }
     /**
      * Shows `diagram`: the vertices glide into `order`, left to right and centred (wrapping
@@ -302,18 +317,58 @@ export class GraphEditor {
             this.leaveArcDiagram();
             return;
         }
-        this.setAutoLayout(false);
-        const directed = this.graph.directed;
-        const keys = (pairs) => new Set(pairs.map(([a, b]) => this.edgeKey(a, b, directed)));
-        this.arc = {
+        const keys = (pairs) => new Set(pairs.map(([a, b]) => this.edgeKey(a, b, this.graph.directed)));
+        this.enterArrangement({
+            kind: 'line',
             diagram,
+            forest: null,
             rank: new Map(diagram.order.map((id, i) => [id, i])),
             spine: keys(diagram.spine),
             below: keys(diagram.below),
             maxBulge: 0,
             leaving: false,
-        };
+        });
+    }
+    /**
+     * Shows DFS's depth-first forest: the vertices glide to their places in `forest` (rows
+     * by depth, columns by time, as on the timestamp chart), the tree edges (`spine`) are
+     * straight and highlighted white, and every other edge curves (a flat half ellipse,
+     * bulging to the left of its direction, so edges both ways between two vertices part).
+     * Auto-layout is turned off. From the topological sort's line it moves straight over;
+     * showArcDiagram(null) or auto-layout leaves it, as for the line.
+     */
+    showForest(forest) {
+        const keys = (pairs) => new Set(pairs.map(([a, b]) => this.edgeKey(a, b, this.graph.directed)));
+        this.enterArrangement({
+            kind: 'forest',
+            diagram: null,
+            forest,
+            rank: new Map(),
+            spine: keys(forest.spine),
+            below: new Set(),
+            maxBulge: FOREST_MAX_BULGE,
+            leaving: false,
+        });
+    }
+    /** Starts showing `next`, blending the edges over from the arrangement shown before, if any. */
+    enterArrangement(next) {
+        this.setAutoLayout(false);
+        const before = this.arc;
+        if (before && this.bend > 0 && !prefersReducedMotion()) {
+            // Freeze the old arrangement's shapes where they are, then blend to the new ones.
+            before.leaving = true;
+            this.arcBefore = before;
+            this.morph = 0;
+            this.morphTween = { from: 0, to: 1, start: performance.now(), duration: ARRANGE_MS };
+        }
+        else {
+            this.arcBefore = null;
+            this.morph = 1;
+            this.morphTween = null;
+        }
+        this.arc = next;
         this.svg.classList.add('arc-diagram');
+        this.svg.classList.toggle('forest-view', next.kind === 'forest');
         this.placeArcDiagram(true);
         this.tweenBend(1);
     }
@@ -322,19 +377,31 @@ export class GraphEditor {
             return;
         this.arc.leaving = true;
         this.moveTween = null; // vertices stay where they are now
-        this.svg.classList.remove('arc-diagram');
+        this.finishMorph();
+        this.svg.classList.remove('arc-diagram', 'forest-view');
         this.render(); // the white spine goes at once; the arcs straighten out over the tween
         this.tweenBend(0);
     }
-    /** Moves the vertices to their places in the diagram (gliding there if `animate`). */
+    /** Moves the vertices to their places in the arrangement (gliding there if `animate`). */
     placeArcDiagram(animate) {
         const arc = this.arc;
         const rect = this.svg.getBoundingClientRect();
-        const order = arc.diagram.order.filter((id) => this.graph.getNode(id));
+        const bounds = { width: rect.width, height: rect.height };
         const insets = this.callbacks.canvasInsets?.();
-        const { positions, maxBulge } = rowLayout(order.length, { width: rect.width, height: rect.height }, insets ? { padTop: insets.top, padBottom: insets.bottom } : {});
-        arc.maxBulge = maxBulge;
-        const to = new Map(order.map((id, i) => [id, positions[i]]));
+        const pads = insets ? { padTop: insets.top, padBottom: insets.bottom } : {};
+        let to;
+        if (arc.kind === 'forest') {
+            const places = arc.forest.places.filter((p) => this.graph.getNode(p.id));
+            const positions = forestLayout(places, bounds, pads);
+            to = new Map(places.map((p, i) => [p.id, positions[i]]));
+        }
+        else {
+            const order = arc.diagram.order.filter((id) => this.graph.getNode(id));
+            const { positions, maxBulge } = rowLayout(order.length, bounds, pads);
+            arc.maxBulge = maxBulge;
+            to = new Map(order.map((id, i) => [id, positions[i]]));
+        }
+        const order = [...to.keys()];
         if (animate && !prefersReducedMotion()) {
             const from = new Map(order.map((id) => [id, { ...this.graph.getNode(id) }]));
             this.moveTween = { from, to, start: performance.now(), duration: ARRANGE_MS };
@@ -387,6 +454,11 @@ export class GraphEditor {
                 this.cutTween = null;
             }
         }
+        if (this.morphTween) {
+            this.morph = progress(this.morphTween);
+            if (this.morph >= 1)
+                this.finishMorph();
+        }
         if (this.bendTween) {
             const k = progress(this.bendTween);
             this.bend = this.bendTween.from + (this.bendTween.to - this.bendTween.from) * k;
@@ -397,9 +469,15 @@ export class GraphEditor {
             }
         }
         this.render();
-        if (this.moveTween || this.bendTween || this.cutTween)
+        if (this.moveTween || this.bendTween || this.cutTween || this.morphTween)
             this.startTweens();
     };
+    /** Ends a blend between two arrangements: only the new one is left. */
+    finishMorph() {
+        this.arcBefore = null;
+        this.morph = 1;
+        this.morphTween = null;
+    }
     // ---------------------------------------------------------------- events
     onPointerDown = (e) => {
         if (e.button !== 0 || this.pending)
@@ -654,7 +732,8 @@ export class GraphEditor {
             const curved = directed && this.graph.hasArc(b, a);
             const key = this.edgeKey(a, b, directed);
             // Arc diagram: spine edges between neighbouring vertices stay straight; the rest arc.
-            const arcs = arc !== null && !(arc.spine.has(key) && Math.abs(arc.rank.get(a) - arc.rank.get(b)) === 1);
+            // Forest: every edge is a path (tree edges with no bulge), so it can blend to and fro.
+            const arcs = arc !== null && (arc.kind === 'forest' || this.arcBefore !== null || !this.straightSpine(arc, a, b, key));
             const shape = curved || arcs ? 'path' : 'line';
             liveEdges.add(key);
             let g = this.edgeEls.get(key);
@@ -679,7 +758,7 @@ export class GraphEditor {
                 this.edgeEls.set(key, g);
             }
             const { attrs, mid } = arcs
-                ? this.arcGeometry(this.graph.getNode(a), this.graph.getNode(b), directed, arc.below.has(key) ? -1 : 1)
+                ? this.arcGeometry(this.graph.getNode(a), this.graph.getNode(b), directed, key)
                 : this.edgeGeometry(this.graph.getNode(a), this.graph.getNode(b), directed, curved);
             g.classList.toggle('sim-active', this.isActiveEdge(a, b, directed));
             g.classList.toggle('sim-spine', arc !== null && !arc.leaving && arc.spine.has(key));
@@ -864,15 +943,36 @@ export class GraphEditor {
         return { attrs: { d: `M ${start.x} ${start.y} Q ${c.x} ${c.y} ${end.x} ${end.y}` }, mid };
     }
     /**
-     * Arc diagram edge: a half circle from a to b (flattened to fit `maxBulge`), on the
-     * `side` left (+1, above a left-to-right edge) or right (-1) of a → b, scaled by the
-     * current bend (0 = straight).
+     * An edge of an arrangement, as a half ellipse from a to b bulging the edge's way (see
+     * bulgeIn), scaled by the current bend (0 = straight). While switching arrangements,
+     * the bulge blends from the old arrangement's to the new one's.
      */
-    arcGeometry(a, b, directed, side) {
+    arcGeometry(a, b, directed, key) {
         const radius = distance(a, b) / 2;
-        const bulge = side * Math.min(radius, this.arc.maxBulge) * this.bend;
-        const { d, mid } = halfEllipse(a, b, bulge, NODE_RADIUS, directed ? NODE_RADIUS + 1 : NODE_RADIUS);
+        let bulge = this.bulgeIn(this.arc, key, radius);
+        if (this.arcBefore)
+            bulge = this.bulgeIn(this.arcBefore, key, radius) * (1 - this.morph) + bulge * this.morph;
+        const { d, mid } = halfEllipse(a, b, bulge * this.bend, NODE_RADIUS, directed ? NODE_RADIUS + 1 : NODE_RADIUS);
         return { attrs: { d }, mid };
+    }
+    /**
+     * How far an edge bulges in an arrangement (left of its direction; negative: right), for
+     * an edge `radius` (half its length) long.
+     *  - line: a half circle (flattened to fit maxBulge), above the line, or below for
+     *    `below`; spine edges between neighbouring vertices lie straight on the line;
+     *  - forest: tree edges straight; the others a flat half ellipse to the left.
+     */
+    bulgeIn(arc, key, radius) {
+        const [a, b] = key.split(/[>-]/).map(Number);
+        if (arc.kind === 'forest')
+            return arc.spine.has(key) ? 0 : Math.min(radius * FOREST_BULGE, arc.maxBulge);
+        if (this.straightSpine(arc, a, b, key))
+            return 0;
+        return (arc.below.has(key) ? -1 : 1) * Math.min(radius, arc.maxBulge);
+    }
+    /** Line arrangement: a spine edge between neighbouring vertices, which lies on the line. */
+    straightSpine(arc, a, b, key) {
+        return arc.kind === 'line' && arc.spine.has(key) && Math.abs(arc.rank.get(a) - arc.rank.get(b)) === 1;
     }
     /** Dashed line from the selected node to the cursor while choosing an edge target. */
     updatePreview() {

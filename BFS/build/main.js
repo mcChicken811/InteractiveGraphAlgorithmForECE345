@@ -129,6 +129,7 @@ runner = new AlgorithmRunner(graph, editor, {
     step: document.querySelector('#step-btn'),
     stop: document.querySelector('#stop-btn'),
     topo: document.querySelector('#topo-btn'),
+    forest: document.querySelector('#forest-btn'),
     weightSwitch: document.querySelector('#weight-switch'),
     directionSwitch: document.querySelector('#direction-switch'),
     queueCard: document.querySelector('#queue-card'),
@@ -157,11 +158,15 @@ for (const input of weightInputs) {
     });
 }
 layoutBtn.addEventListener('click', () => {
-    // Turning auto-layout on leaves the topological order (the run itself goes on).
-    const leavingSort = editor.arcDiagramActive && !editor.autoLayoutEnabled;
+    // Turning auto-layout on leaves the topological order or the forest (the run itself goes on).
+    const leaving = editor.autoLayoutEnabled ? null : editor.arrangement;
     editor.setAutoLayout(!editor.autoLayoutEnabled);
-    if (leavingSort) {
+    runner?.refresh();
+    if (leaving === 'line') {
         showMessage('Auto-layout on: left the topological order. Press Topological sort to line the vertices up again.');
+    }
+    else if (leaving === 'forest') {
+        showMessage('Auto-layout on: left the forest. Press Show as forest to arrange the vertices as trees again.');
     }
 });
 // Hamburger menu. The panel floats over the canvas and stays open while editing, so the

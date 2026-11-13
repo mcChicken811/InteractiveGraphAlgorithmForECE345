@@ -1,7 +1,44 @@
 import { describe, expect, it } from 'vitest';
-import { ROW_DEFAULTS, halfEllipse, rowLayout, type Point } from '../src/arc-diagram.js';
+import { FOREST_DEFAULTS, ROW_DEFAULTS, forestLayout, halfEllipse, rowLayout, type Point } from '../src/arc-diagram.js';
 
 const BOUNDS = { width: 1000, height: 600 };
+
+describe('forestLayout', () => {
+  const tree = [
+    { column: 3.5, row: 0 },
+    { column: 2.5, row: 1 },
+    { column: 5.5, row: 1 },
+    { column: 9.5, row: 0 },
+  ];
+
+  it('maps columns to x at up to maxUnit per time unit, centred, and rows to evenly spaced y', () => {
+    const p = forestLayout(tree, BOUNDS);
+    expect(p[2].x - p[1].x).toBeCloseTo(3 * FOREST_DEFAULTS.maxUnit);
+    expect((p[1].x + p[3].x) / 2).toBeCloseTo(500); // the span is centred
+    expect(p[0].y).toBeCloseTo(p[3].y);
+    expect(p[1].y - p[0].y).toBeCloseTo(FOREST_DEFAULTS.maxRowHeight);
+    // The rows are centred in the space between the pads.
+    const middle = (FOREST_DEFAULTS.padTop + 600 - FOREST_DEFAULTS.padBottom) / 2;
+    expect((p[0].y + p[1].y) / 2).toBeCloseTo(middle);
+  });
+
+  it('shrinks the unit and the rows to fit', () => {
+    const wide = Array.from({ length: 40 }, (_, i) => ({ column: i * 2 + 1.5, row: i % 12 }));
+    const p = forestLayout(wide, BOUNDS);
+    const xs = p.map((q) => q.x);
+    const ys = p.map((q) => q.y);
+    expect(Math.min(...xs)).toBeCloseTo(FOREST_DEFAULTS.padX);
+    expect(Math.max(...xs)).toBeCloseTo(1000 - FOREST_DEFAULTS.padX);
+    expect(Math.min(...ys)).toBeGreaterThanOrEqual(FOREST_DEFAULTS.padTop);
+    expect(Math.max(...ys)).toBeLessThanOrEqual(600 - FOREST_DEFAULTS.padBottom);
+  });
+
+  it('one vertex sits in the middle; no vertices, no places', () => {
+    const [p] = forestLayout([{ column: 1.5, row: 0 }], BOUNDS, { padTop: 0, padBottom: 0 });
+    expect(p.x).toBeCloseTo(500);
+    expect(forestLayout([], BOUNDS)).toEqual([]);
+  });
+});
 
 describe('rowLayout', () => {
   it('puts a few vertices on one centred row, at most maxGap apart', () => {
