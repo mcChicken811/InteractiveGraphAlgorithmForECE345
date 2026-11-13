@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "test:e2e": "sh scripts/e2e-docker.sh",
     "test:e2e:local": "playwright test",
-    "test:all": "vitest run && sh scripts/e2e-docker.sh"
+    "test:all": "vitest run && sh scripts/e2e-docker.sh",
+    "icons": "node scripts/render-favicons.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.65.0",

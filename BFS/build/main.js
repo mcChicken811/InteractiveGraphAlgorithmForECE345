@@ -3,6 +3,8 @@
 import { Graph } from './graph.js';
 import { GraphEditor } from './editor.js';
 import { renderAdjacencyList, renderAdjacencyMatrix, setupTabs } from './representations.js';
+import { followColorScheme } from './favicon.js';
+followColorScheme();
 const svg = document.querySelector('#canvas');
 const stats = document.querySelector('#stats');
 const messageEl = document.querySelector('#message');

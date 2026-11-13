@@ -912,6 +912,59 @@ test.describe('weighted / unweighted switch', () => {
   });
 });
 
+test.describe('favicon', () => {
+  const iconHrefs = (page: Page) =>
+    page.locator('link[rel="icon"]').evaluateAll((links) => links.map((l) => l.getAttribute('href')));
+
+  /** The page's own node colours in the current scheme, and the colours drawn in an icon file. */
+  async function colours(page: Page, iconHref: string) {
+    const page_ = await page.evaluate(() => {
+      const css = getComputedStyle(document.documentElement);
+      return { fill: css.getPropertyValue('--node-fill').trim(), stroke: css.getPropertyValue('--accent').trim() };
+    });
+    const res = await page.request.get(new URL(iconHref, page.url()).toString());
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('image/svg+xml');
+    const svg = await res.text();
+    return { page: page_, svg };
+  }
+
+  test('light mode: a node icon in the light palette, with no number inside', async ({ page }) => {
+    await expect.poll(() => iconHrefs(page)).toEqual(['./icons/favicon-light.svg', './icons/favicon-light.png']);
+    const { page: c, svg } = await colours(page, './icons/favicon-light.svg');
+    expect(svg).toContain(`fill="${c.fill}"`);
+    expect(svg).toContain(`stroke="${c.stroke}"`);
+    expect(svg).toContain('<circle');
+    expect(svg).not.toContain('<text'); // no index number
+  });
+
+  test.describe('in dark mode', () => {
+    test.use({ colorScheme: 'dark' });
+
+    test('uses the dark palette', async ({ page }) => {
+      await expect.poll(() => iconHrefs(page)).toEqual(['./icons/favicon-dark.svg', './icons/favicon-dark.png']);
+      const { page: c, svg } = await colours(page, './icons/favicon-dark.svg');
+      expect(svg).toContain(`fill="${c.fill}"`);
+      expect(svg).toContain(`stroke="${c.stroke}"`);
+    });
+  });
+
+  test('switches live when the colour scheme changes', async ({ page }) => {
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await expect.poll(() => iconHrefs(page)).toEqual(['./icons/favicon-dark.svg', './icons/favicon-dark.png']);
+    await page.emulateMedia({ colorScheme: 'light' });
+    await expect.poll(() => iconHrefs(page)).toEqual(['./icons/favicon-light.svg', './icons/favicon-light.png']);
+  });
+
+  test('PNG fallbacks exist for both palettes', async ({ page }) => {
+    for (const theme of ['light', 'dark']) {
+      const res = await page.request.get(new URL(`./icons/favicon-${theme}.png`, page.url()).toString());
+      expect(res.status()).toBe(200);
+      expect(res.headers()['content-type']).toBe('image/png');
+    }
+  });
+});
+
 test.describe('on a phone-sized screen', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 
