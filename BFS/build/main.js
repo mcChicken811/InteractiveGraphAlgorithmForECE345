@@ -9,6 +9,7 @@ import { AlgorithmRunner } from './runner.js';
 import { SelectMenu } from './select-menu.js';
 import { QueueView } from './queue-view.js';
 import { StatusBar } from './status-bar.js';
+import { TimelineView } from './timeline-view.js';
 followColorScheme();
 const svg = document.querySelector('#canvas');
 const stats = document.querySelector('#stats');
@@ -96,6 +97,13 @@ const stackView = new QueueView(document.querySelector('#stack-strip'), document
     },
 });
 stackView.onPeek = (peek) => editor.setLabelPeek(peek);
+// DFS's timestamps as a chart; its corner button expands it to the middle of the screen.
+const timelineView = new TimelineView({
+    card: document.querySelector('#timestamps-card'),
+    scroll: document.querySelector('#timestamps-chart'),
+    expand: document.querySelector('#timestamps-expand'),
+    dialog: document.querySelector('#timestamps-dialog'),
+});
 // Algorithm simulation (header, top right). `runner` is declared above so refreshPanels,
 // which can run before this point, can check it.
 runner = new AlgorithmRunner(graph, editor, {
@@ -110,6 +118,8 @@ runner = new AlgorithmRunner(graph, editor, {
     queueView,
     stackCard: document.querySelector('#stack-card'),
     stackView,
+    timestampsCard: document.querySelector('#timestamps-card'),
+    timelineView,
 }, { message: (text) => showMessage(text), onStateChange: refreshPanels });
 // Undirected / Directed switch: only changes how the stored arcs are interpreted.
 for (const input of modeInputs) {

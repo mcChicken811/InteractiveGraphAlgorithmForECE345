@@ -28,6 +28,8 @@ export class DfsSimulation {
     edges = [];
     /** Tree roots, in the order they were started. */
     trees = [];
+    /** Depth of each discovered vertex in the depth-first forest (roots 0). */
+    depth = new Map();
     constructor(view, start) {
         this.view = view;
         this.start = start;
@@ -116,6 +118,26 @@ export class DfsSimulation {
             below: pairs('cross'),
         };
     }
+    /**
+     * Each discovered vertex's interval [d, f] (f null while running), on the row of its
+     * depth in the forest — so, by the parenthesis theorem, a descendant's interval sits
+     * below and inside its ancestor's — plus the clock.
+     */
+    timestamps() {
+        const action = this.nextAction();
+        const current = action === null ? null : action.type === 'root' ? action.v : action.u;
+        return {
+            clock: this.time,
+            end: 2 * this.color.size,
+            intervals: [...this.discovery].map(([id, start]) => ({
+                id,
+                start,
+                finish: this.finish.get(id) ?? null,
+                depth: this.depth.get(id),
+            })),
+            current: current !== null && this.discovery.has(current) ? current : null,
+        };
+    }
     stackSnapshot() {
         const action = this.nextAction();
         let incoming = [];
@@ -167,6 +189,8 @@ export class DfsSimulation {
     }
     /** DFS-VISIT's first lines: time stamp, colour gray, push. */
     discover(v) {
+        const parent = this.parent.get(v) ?? null;
+        this.depth.set(v, parent === null ? 0 : this.depth.get(parent) + 1);
         this.time++;
         this.discovery.set(v, this.time);
         this.color.set(v, 'gray');

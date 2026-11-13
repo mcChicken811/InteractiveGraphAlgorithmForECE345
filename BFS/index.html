@@ -139,7 +139,9 @@
                   DFS reads the graph as directed. Vertices show their <strong>discovery, finish</strong> times
                   (yellow: running, green: finished). Edges stay dashed until explored, then are labelled
                   <em>forward</em>, <em>backward</em> or <em>crossed</em> (tree edges are plain).
-                  <strong>Hover the stack</strong> to see the vertex numbers.
+                  <strong>Hover the stack</strong> to see the vertex numbers. The
+                  <strong>Timestamps</strong> card charts each vertex from discovery to finish; hover it and press
+                  the corner button to view it full size.
                 </li>
                 <li>
                   When DFS is done and found no backward edge (no cycle), <strong>Topological sort</strong> lines
@@ -248,9 +250,57 @@
               <p id="stack-empty" class="queue-empty" hidden>The stack is empty.</p>
             </div>
           </section>
+          <!-- Shown only while an algorithm with timestamps (DFS) runs: src/timeline-view.ts. -->
+          <section id="timestamps-card" class="info-card queue-card" aria-labelledby="timestamps-title" hidden>
+            <h2 class="card-title" id="timestamps-title">
+              <button
+                class="card-toggle"
+                type="button"
+                aria-expanded="true"
+                aria-controls="timestamps-body"
+                data-collapse-key="timestamps"
+              >
+                <span>Timestamps</span>
+                <svg class="chevron" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
+            </h2>
+            <div id="timestamps-body" class="card-body">
+              <div class="tl-frame">
+                <!-- Focusable so keyboard users can scroll it. -->
+                <div
+                  id="timestamps-chart"
+                  class="tl-scroll"
+                  role="list"
+                  aria-label="Discovery and finish times, by depth"
+                  tabindex="0"
+                ></div>
+                <!-- Bottom-right corner, shown on hover / focus: expands the card to the middle of the screen and back. -->
+                <button
+                  id="timestamps-expand"
+                  class="tl-expand"
+                  type="button"
+                  aria-expanded="false"
+                  aria-label="Expand the timestamp chart"
+                  title="Expand"
+                >
+                  <svg class="icon-expand" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                    <path d="M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7" />
+                  </svg>
+                  <svg class="icon-shrink" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                    <path d="M20 10h-6V4M14 10l7-7M4 14h6v6M10 14l-7 7" />
+                  </svg>
+                </button>
+              </div>
+              <p class="rep-note">Each bar runs from discovery to finish time; descendants sit below their ancestors.</p>
+            </div>
+          </section>
         </aside>
 
         <svg id="canvas" role="img" aria-label="Graph editor canvas"></svg>
+        <!-- The Timestamps card moves in here while expanded (modal, over a darkened, blurred page). -->
+        <dialog id="timestamps-dialog" class="tl-dialog" aria-labelledby="timestamps-title"></dialog>
         <!-- Replaced by build/main.js on startup; stays visible only if the script failed to load. -->
         <p id="message" class="message" data-tone="warn" aria-live="polite">
           The app script didn't load. Run <code>npm run build</code> in BFS/ and reload.

@@ -78,6 +78,29 @@ export interface ArcDiagram {
   below: Array<[NodeId, NodeId]>;
 }
 
+/** One vertex's [discovery, finish] interval on a timestamp chart (DFS). */
+export interface TimestampInterval {
+  id: NodeId;
+  /** Discovery time d. */
+  start: number;
+  /** Finish time f, or null while the vertex is still running. */
+  finish: number | null;
+  /** Depth in the search forest (roots 0): the chart's row, so nested intervals stack downwards. */
+  depth: number;
+}
+
+/** The timestamp chart for the side panel (DFS): every interval so far, and the clock. */
+export interface TimestampSnapshot {
+  /** The current time (the last timestamp handed out; 0 before the first). */
+  clock: number;
+  /** The last time the search will reach (2 × the number of vertices): the axis length. */
+  end: number;
+  /** Discovered vertices, in discovery order. */
+  intervals: TimestampInterval[];
+  /** The vertex the next step works on (drawn white), if it has an interval yet. */
+  current: NodeId | null;
+}
+
 export interface Simulation {
   /** True once the last step has been taken; `step()` then does nothing. */
   readonly finished: boolean;
@@ -91,6 +114,8 @@ export interface Simulation {
   queueSnapshot?(): QueueSnapshot;
   /** The algorithm's recursion stack, if it has one; shown in the side panel while running. */
   stackSnapshot?(): StackSnapshot;
+  /** The algorithm's timestamps, if it keeps them; shown as a chart in the side panel while running. */
+  timestamps?(): TimestampSnapshot;
   /**
    * Offered once finished (DFS): the vertices in topological order, as an arc diagram,
    * or null when there is none (the graph has a cycle). Algorithms without a

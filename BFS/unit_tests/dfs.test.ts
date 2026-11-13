@@ -381,3 +381,46 @@ describe('topological sort (CLRS §20.4)', () => {
     expect(acyclicSeen).toBeGreaterThan(5);
   });
 });
+
+describe('timestamps (for the chart)', () => {
+  it('lists each discovered vertex’s interval on the row of its depth, with the clock', () => {
+    const sim = new DfsSimulation(g.directedView, 0);
+    expect(sim.timestamps()).toEqual({ clock: 0, end: 10, intervals: [], current: null }); // 0 not discovered yet
+    for (let i = 0; i < 3; i++) sim.step(); // 0, 0 → 1, 1 → 2
+    expect(sim.timestamps()).toEqual({
+      clock: 3,
+      end: 10,
+      intervals: [
+        { id: 0, start: 1, finish: null, depth: 0 },
+        { id: 1, start: 2, finish: null, depth: 1 },
+        { id: 2, start: 3, finish: null, depth: 2 },
+      ],
+      current: 2,
+    });
+    runToEnd(sim);
+    expect(sim.timestamps()).toEqual({
+      clock: 10,
+      end: 10,
+      intervals: [
+        { id: 0, start: 1, finish: 6, depth: 0 },
+        { id: 1, start: 2, finish: 5, depth: 1 },
+        { id: 2, start: 3, finish: 4, depth: 2 },
+        { id: 3, start: 7, finish: 10, depth: 0 }, // a second tree starts on the top row again
+        { id: 4, start: 8, finish: 9, depth: 1 },
+      ],
+      current: null,
+    });
+  });
+
+  it('a deeper row always sits inside the interval of its parent (parenthesis theorem)', () => {
+    const sim = new DfsSimulation(g.directedView, 0);
+    runToEnd(sim);
+    const byId = new Map(sim.timestamps().intervals.map((i) => [i.id, i]));
+    for (const [v, p] of sim.parent) {
+      if (p === null) continue;
+      const [child, parent] = [byId.get(v)!, byId.get(p)!];
+      expect(child.depth).toBe(parent.depth + 1);
+      expect(parent.start < child.start && child.finish! < parent.finish!).toBe(true);
+    }
+  });
+});

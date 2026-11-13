@@ -2136,6 +2136,186 @@ test.describe('algorithm simulation (DFS)', () => {
     });
   });
 
+  test.describe('timestamps card', () => {
+    const card = (page: Page) => page.getByRole('region', { name: 'Timestamps' });
+    const chart = (page: Page) => page.getByRole('list', { name: 'Discovery and finish times, by depth' });
+    const expandBtn = (page: Page) => page.locator('#timestamps-expand');
+    const dialog = (page: Page) => page.locator('#timestamps-dialog');
+    const settle = (page: Page) =>
+      page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => {}))));
+
+    test.beforeEach(async ({ page }) => {
+      await page.getByRole('button', { name: 'Help and adjacency list' }).click();
+      await page.getByRole('button', { name: 'How to use' }).click(); // make room
+    });
+
+    test('appears under the recursion stack only while DFS runs', async ({ page }) => {
+      await build(page);
+      await expect(card(page)).toBeHidden();
+      await run(page);
+      await expect(card(page)).toBeVisible();
+      const [stackBox, cardBox] = await Promise.all([stackCard(page).boundingBox(), card(page).boundingBox()]);
+      expect(cardBox!.y).toBeGreaterThan(stackBox!.y + stackBox!.height - 1); // right under it
+      await page.getByRole('button', { name: 'Stop', exact: true }).click();
+      await expect(card(page)).toBeHidden();
+    });
+
+    test('bars run from discovery to finish time, each on the row of its depth', async ({ page }) => {
+      await build(page);
+      await run(page);
+      await steps(page, 13);
+      await settle(page);
+      const m = await page.evaluate(() => {
+        const tick = (t: number) => {
+          const r = document.querySelector(`#timestamps-chart .tl-axis [data-t="${t}"]`)!.getBoundingClientRect();
+          return r.left + r.width / 2;
+        };
+        return [...document.querySelectorAll<HTMLElement>('#timestamps-chart .tl-bar')].map((b) => {
+          const r = b.getBoundingClientRect();
+          return { id: b.textContent, left: r.left, right: r.right, top: r.top, ticks: [1, 2, 3, 4, 6, 7, 8, 9, 10].map(tick) };
+        });
+      });
+      const [t1, t2, t3, t4, t6, t7, t8, t9, t10] = m[0].ticks;
+      const bars = Object.fromEntries(m.map((b) => [b.id, b]));
+      const spans: Record<string, [number, number]> = { '0': [t1, t6], '1': [t2, t4 + (t4 - t3)], '2': [t3, t4], '3': [t7, t10], '4': [t8, t9] };
+      for (const [id, [from, to]] of Object.entries(spans)) {
+        expect(bars[id].left).toBeCloseTo(from, 0);
+        expect(bars[id].right).toBeCloseTo(to, 0);
+      }
+      // Rows by depth: roots 0 and 3 on top, then 1 and 4, then 2.
+      expect(bars['0'].top).toBeCloseTo(bars['3'].top, 0);
+      expect(bars['1'].top).toBeCloseTo(bars['4'].top, 0);
+      expect(bars['1'].top).toBeGreaterThan(bars['0'].top);
+      expect(bars['2'].top).toBeGreaterThan(bars['1'].top);
+      await expect(chart(page).getByRole('listitem').first()).toHaveAttribute(
+        'aria-label',
+        'Vertex 0: discovered at 1, finished at 6',
+      );
+    });
+
+    test('running bars are yellow and grow with the clock; the next vertex’s bar is white; finished ones green', async ({ page }) => {
+      await build(page);
+      await run(page);
+      await steps(page, 2); // 0 and 1 running; next: 1 → 2
+      await settle(page);
+      const look = (id: number) =>
+        page.locator(`#timestamps-chart .tl-bar[data-id="${id}"]`).evaluate((b) => ({
+          width: b.getBoundingClientRect().width,
+          border: getComputedStyle(b).borderTopColor,
+        }));
+      const before = await look(0);
+      expect(before.border).toBe(YELLOW);
+      expect((await look(1)).border).toBe(WHITE);
+      await steps(page, 3); // … 1 → 2, 2 → 0, finish 2
+      await settle(page);
+      const after = await look(0);
+      expect(after.width).toBeGreaterThan(before.width + 50); // three more time steps
+      expect((await look(2)).border).toBe(GREEN);
+      await expect(page.locator('#timestamps-chart .tl-axis .now')).toHaveText('4');
+    });
+
+    test('scrolls when the axis overflows, keeping the current time in view', async ({ page }) => {
+      await build(page);
+      await run(page);
+      const sizes = await chart(page).evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
+      expect(sizes.scroll).toBeGreaterThan(sizes.client);
+      await steps(page, 13);
+      await expect.poll(() => chart(page).evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
+      await expect(page.locator('#timestamps-chart .tl-axis .now')).toBeInViewport();
+      const [nowBox, chartBox] = await Promise.all([
+        page.locator('#timestamps-chart .tl-axis .now').boundingBox(),
+        chart(page).boundingBox(),
+      ]);
+      expect(nowBox!.x).toBeGreaterThanOrEqual(chartBox!.x);
+      expect(nowBox!.x + nowBox!.width).toBeLessThanOrEqual(chartBox!.x + chartBox!.width);
+    });
+
+    test('hovering the chart shows the expand button in its bottom-right corner', async ({ page }) => {
+      await build(page);
+      await run(page);
+      await page.mouse.move(5, 5);
+      await expect.poll(() => expandBtn(page).evaluate((b) => getComputedStyle(b).opacity)).toBe('0');
+      await chart(page).hover();
+      await expect.poll(() => expandBtn(page).evaluate((b) => getComputedStyle(b).opacity)).toBe('1');
+      const [b, c] = await Promise.all([expandBtn(page).boundingBox(), chart(page).boundingBox()]);
+      expect(b!.x + b!.width).toBeLessThanOrEqual(c!.x + c!.width);
+      expect(b!.x + b!.width).toBeGreaterThan(c!.x + c!.width - 24);
+      expect(b!.y + b!.height).toBeLessThanOrEqual(c!.y + c!.height);
+      expect(b!.y + b!.height).toBeGreaterThan(c!.y + c!.height - 48);
+      await expect(expandBtn(page)).toHaveAccessibleName('Expand the timestamp chart');
+    });
+
+    test('expands to the middle of the screen over a dark, blurred page, and shrinks back', async ({ page }) => {
+      await build(page);
+      await run(page);
+      await steps(page, 6);
+      await settle(page); // the chart grows a row as it goes; let the panel settle first
+      const home = await card(page).boundingBox();
+      await chart(page).hover();
+      await expandBtn(page).click();
+      await expect(dialog(page)).toHaveJSProperty('open', true);
+      // Moving, not jumping: part-way after a moment.
+      await page.waitForTimeout(80);
+      const during = (await dialog(page).boundingBox())!;
+      await settle(page);
+      const box = (await card(page).boundingBox())!;
+      const viewport = page.viewportSize()!;
+      expect(during.width).toBeGreaterThan(home!.width + 1);
+      expect(during.width).toBeLessThan(box.width - 1);
+      expect(box.x + box.width / 2).toBeCloseTo(viewport.width / 2, 0);
+      expect(box.y + box.height / 2).toBeCloseTo(viewport.height / 2, 0);
+      expect(box.width).toBeGreaterThan(viewport.width * 0.8);
+      const backdrop = await dialog(page).evaluate((d) => {
+        const cs = getComputedStyle(d, '::backdrop');
+        return { filter: cs.backdropFilter, background: cs.backgroundColor };
+      });
+      expect(backdrop.filter).toMatch(/blur\(/);
+      expect(backdrop.background).toMatch(/rgba\(\d+, \d+, \d+, 0\.[1-9]/); // a translucent dark layer
+      // The page underneath can't be clicked meanwhile.
+      await expect(page.locator('#timestamps-dialog .tl-bar').first()).toBeVisible();
+      // Same button, same corner: now it shrinks the chart back.
+      await expect(expandBtn(page)).toHaveAccessibleName('Shrink the timestamp chart');
+      const [b, c] = await Promise.all([expandBtn(page).boundingBox(), chart(page).boundingBox()]);
+      expect(b!.x + b!.width).toBeGreaterThan(c!.x + c!.width - 24);
+      expect(b!.y + b!.height).toBeGreaterThan(c!.y + c!.height - 48);
+      await expandBtn(page).click();
+      await expect(dialog(page)).toHaveJSProperty('open', false);
+      await settle(page);
+      const back = (await card(page).boundingBox())!;
+      expect(back.x).toBeCloseTo(home!.x, 0);
+      expect(back.y).toBeCloseTo(home!.y, 0);
+      expect(back.width).toBeCloseTo(home!.width, 0);
+      await expect(page.locator('#info-panel #timestamps-card')).toHaveCount(1);
+    });
+
+    test('Esc shrinks it back and leaves the ☰ panel open; the run carries on', async ({ page }) => {
+      await build(page);
+      await run(page);
+      await chart(page).hover();
+      await expandBtn(page).click();
+      await page.keyboard.press('Escape');
+      await expect(dialog(page)).toHaveJSProperty('open', false);
+      await expect(page.locator('#info-panel')).toBeVisible();
+      await update(page);
+      await expect(page.locator('#timestamps-chart .tl-axis .now')).toHaveText('1');
+    });
+
+    test.describe('with reduced motion', () => {
+      test.use({ reducedMotion: 'reduce' });
+
+      test('expands and shrinks instantly', async ({ page }) => {
+        await build(page);
+        await run(page);
+        await chart(page).hover();
+        await expandBtn(page).click();
+        const box = (await card(page).boundingBox())!;
+        expect(box.x + box.width / 2).toBeCloseTo(page.viewportSize()!.width / 2, 0);
+        await expandBtn(page).click();
+        await expect(dialog(page)).toHaveJSProperty('open', false);
+      });
+    });
+  });
+
   test.describe('recursion stack card', () => {
     test.beforeEach(async ({ page }) => {
       await page.getByRole('button', { name: 'Help and adjacency list' }).click();

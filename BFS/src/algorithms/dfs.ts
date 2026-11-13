@@ -1,6 +1,14 @@
 import type { NodeId } from '../graph.js';
 import type { GraphView } from '../graph-views.js';
-import type { AlgorithmDefinition, ArcDiagram, ExploredEdge, Highlight, Simulation, StackSnapshot } from './types.js';
+import type {
+  AlgorithmDefinition,
+  ArcDiagram,
+  ExploredEdge,
+  Highlight,
+  Simulation,
+  StackSnapshot,
+  TimestampSnapshot,
+} from './types.js';
 
 /**
  * Depth-first search as defined in CLRS (Introduction to Algorithms, 4th ed., §20.3):
@@ -103,6 +111,8 @@ export class DfsSimulation implements Simulation {
   readonly edges: ClassifiedEdge[] = [];
   /** Tree roots, in the order they were started. */
   readonly trees: NodeId[] = [];
+  /** Depth of each discovered vertex in the depth-first forest (roots 0). */
+  readonly depth = new Map<NodeId, number>();
 
   constructor(
     private readonly view: GraphView,
@@ -199,6 +209,27 @@ export class DfsSimulation implements Simulation {
     };
   }
 
+  /**
+   * Each discovered vertex's interval [d, f] (f null while running), on the row of its
+   * depth in the forest — so, by the parenthesis theorem, a descendant's interval sits
+   * below and inside its ancestor's — plus the clock.
+   */
+  timestamps(): TimestampSnapshot {
+    const action = this.nextAction();
+    const current = action === null ? null : action.type === 'root' ? action.v : action.u;
+    return {
+      clock: this.time,
+      end: 2 * this.color.size,
+      intervals: [...this.discovery].map(([id, start]) => ({
+        id,
+        start,
+        finish: this.finish.get(id) ?? null,
+        depth: this.depth.get(id)!,
+      })),
+      current: current !== null && this.discovery.has(current) ? current : null,
+    };
+  }
+
   stackSnapshot(): StackSnapshot {
     const action = this.nextAction();
     let incoming: NodeId[] = [];
@@ -252,6 +283,8 @@ export class DfsSimulation implements Simulation {
 
   /** DFS-VISIT's first lines: time stamp, colour gray, push. */
   private discover(v: NodeId): void {
+    const parent = this.parent.get(v) ?? null;
+    this.depth.set(v, parent === null ? 0 : this.depth.get(parent)! + 1);
     this.time++;
     this.discovery.set(v, this.time);
     this.color.set(v, 'gray');

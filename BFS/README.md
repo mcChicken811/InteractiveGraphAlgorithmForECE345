@@ -49,6 +49,7 @@ Pass Playwright options after `--`, e.g. `npm run test:e2e -- --grep "edge"`.
 - `unit_tests/queue-view.test.ts`: the queue and stack strips' contents, order, arrows, labels, reuse of elements, empty state.
 - `unit_tests/dfs.test.ts`: the DFS simulation against CLRS: discovery and finish times, edge classes, every step's message, stack snapshots, the outer loop over all vertices, and (on random graphs) the parenthesis theorem and each class's time rules. Also the topological sort: decreasing finish times, and (checked against Kahn's algorithm on random graphs) offered exactly when the graph is acyclic, with every edge pointing forward.
 - `unit_tests/label-fit.test.ts`: label font shrinking.
+- `unit_tests/timeline-view.test.ts`: the timestamp chart's bars, rows, axis and now line, and expanding into the dialog and back (button, Esc, backdrop click).
 - `unit_tests/arc-diagram.test.ts`: the topological sort's row layout (centring, wrapping, room for arcs) and half-circle geometry.
 - `unit_tests/select-menu.test.ts`: the picker's mouse and keyboard behaviour, disabling, and outside clicks.
 - `unit_tests/bfs.test.ts`: the BFS simulation (order, steps, highlights, messages, unreachable vertices, directed vs. undirected).
@@ -163,6 +164,16 @@ A graph with *n* vertices, *m* edges and *t* trees takes *n* + *m* + *t* Updates
 - **Animation:** a finished vertex turns green and slides out of the top.
 - **Labels:** the circles show the times, and hovering or focusing the strip shows the ids, on the canvas too.
 
+**Timestamps card.** Below the Recursion stack card, a **Timestamps** card charts every discovered vertex as a bar from its discovery time *d* to its finish time *f*, on a time axis 1 … 2*n*.
+
+- **Rows:** each vertex sits on the row of its depth in the depth-first forest (roots on top), so by the parenthesis theorem a descendant's bar lies below, and inside, its ancestor's.
+- **Colours:** running vertices' bars are yellow and reach the current time, trailing off past it. Finished bars are green, and the bar of the vertex the next Update works on has the white ring, as on the canvas.
+- **Current time:** a line marks it, and its axis label is highlighted. Bars grow and move with smooth transitions.
+- **Scrolling:** when the chart doesn't fit, it scrolls both ways and follows the current time. The axis stays in view at the bottom.
+- **Expanding:** hovering the chart (or focusing it) shows a button in its bottom-right corner. Pressing it moves the whole card to the middle of the screen, enlarged, over a darkened, blurred page (a modal `<dialog>` and its `::backdrop`).
+- **Shrinking back:** the same button, in the same corner, sends the card back to its place in the panel. Esc and a click on the darkened page do the same.
+- **Motion:** both ways animate. The chart's time steps widen to fill the space, and with "reduce motion" everything happens instantly.
+
 ### Topological sort
 
 When DFS has finished, a **Topological sort** button appears next to **Finish**. CLRS's TOPOLOGICAL-SORT (§20.4) is DFS followed by listing the vertices by **decreasing finish time**. A directed graph has a topological order exactly when DFS finds no back edge (Lemma 20.11), so the button is greyed out when a backward edge was found, and its tooltip and the final message say why.
@@ -178,7 +189,7 @@ When DFS has finished, a **Topological sort** button appears next to **Finish**.
 
 ### Adding another algorithm
 
-1. Implement `Simulation` (in `src/algorithms/types.ts`). An algorithm with a queue can also implement `queueSnapshot()`, returning `{ items, incoming }`, to get the animated Queue card. One with a recursion stack can implement `stackSnapshot()`, returning `{ items, incoming, popping }` (top first), to get the Recursion stack card. It works on a read-only `GraphView`, takes one step per `step()`, and reports `highlight()` (current vertex, finished vertices, active edges) and `describe()` (the status message).
+1. Implement `Simulation` (in `src/algorithms/types.ts`). An algorithm with a queue can also implement `queueSnapshot()`, returning `{ items, incoming }`, to get the animated Queue card. One with a recursion stack can implement `stackSnapshot()`, returning `{ items, incoming, popping }` (top first), to get the Recursion stack card. One with timestamps can implement `timestamps()`, returning `{ clock, end, intervals, current }`, to get the Timestamps card. It works on a read-only `GraphView`, takes one step per `step()`, and reports `highlight()` (current vertex, finished vertices, active edges) and `describe()` (the status message).
 2. Export an `AlgorithmDefinition` from its own file: `id`, `name`, `requires` (e.g. `{ weighted: true }` for Dijkstra; DFS uses `{ weighted: false, directed: true }`), and `create(view, start)`. By convention `highlight()` previews the *next* step: `current` is what it will process and `activeEdges` what it will travel. It may also return:
    - `labels` (vertex → text) to draw inside the vertices instead of their ids, as BFS does with distances and DFS with times; Dijkstra could do the same with tentative distances.
    - `running` (vertices drawn yellow).
@@ -313,6 +324,7 @@ Freivalds, Dogrusoz & Kikusts study this approach in *Disconnected Graph Layout 
 - `src/select-menu.ts` — `SelectMenu`: the styled program picker. It replaces a native `<select>`, whose open list the browser draws and which can't be styled or positioned (on macOS it pops up over the box). It follows the WAI-ARIA "select-only combobox" pattern: mouse, ↑/↓/Home/End/Enter/Space/Esc/Tab, and closes on an outside click. The list drops down below the box, in the page's panel style, with the option text in line with the box's text.
 - `src/queue-view.ts` — `QueueView`: the side panel's animated queue strip (BFS), or with `kind: 'stack'` the recursion stack strip (DFS). Elements are reused by vertex id, and changes are animated with the FLIP technique (record positions, update, play from the old positions).
 - `src/arc-diagram.ts` — `rowLayout` (vertices in a centred line that wraps into rows) and `halfEllipse` (an edge as a half circle over its two ends, trimmed to the node rims), for the topological sort; pure, no DOM.
+- `src/timeline-view.ts` — `TimelineView`: the Timestamps card's chart (bars positioned with CSS custom properties, so they animate and rescale) and its expand / shrink into a centred modal dialog (animated between the two positions).
 - `src/label-fit.ts` — `fitFontSize`: shrinks a label's font so long labels (DFS's `d,f`) fit inside a vertex circle.
 - `src/status-bar.ts` — `StatusBar`: every status message goes through `show(text, tone)`.
   - **Hiding:** 5 s after the last message, with the pointer neither on the bar nor near it, the bar slides slowly down out of view.

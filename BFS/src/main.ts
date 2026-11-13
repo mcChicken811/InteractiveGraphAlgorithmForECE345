@@ -9,6 +9,7 @@ import { AlgorithmRunner } from './runner.js';
 import { SelectMenu } from './select-menu.js';
 import { QueueView } from './queue-view.js';
 import { StatusBar, type Tone } from './status-bar.js';
+import { TimelineView } from './timeline-view.js';
 
 followColorScheme();
 
@@ -117,6 +118,14 @@ const stackView = new QueueView(
 );
 stackView.onPeek = (peek) => editor.setLabelPeek(peek);
 
+// DFS's timestamps as a chart; its corner button expands it to the middle of the screen.
+const timelineView = new TimelineView({
+  card: document.querySelector<HTMLElement>('#timestamps-card')!,
+  scroll: document.querySelector<HTMLElement>('#timestamps-chart')!,
+  expand: document.querySelector<HTMLButtonElement>('#timestamps-expand')!,
+  dialog: document.querySelector<HTMLDialogElement>('#timestamps-dialog')!,
+});
+
 // Algorithm simulation (header, top right). `runner` is declared above so refreshPanels,
 // which can run before this point, can check it.
 runner = new AlgorithmRunner(
@@ -137,6 +146,8 @@ runner = new AlgorithmRunner(
     queueView,
     stackCard: document.querySelector<HTMLElement>('#stack-card')!,
     stackView,
+    timestampsCard: document.querySelector<HTMLElement>('#timestamps-card')!,
+    timelineView,
   },
   { message: (text) => showMessage(text), onStateChange: refreshPanels },
 );

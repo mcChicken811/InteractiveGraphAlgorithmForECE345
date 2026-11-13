@@ -113,6 +113,10 @@ export class AlgorithmRunner {
         this.el.stackView?.update(null, false);
         if (this.el.stackCard)
             this.el.stackCard.hidden = true;
+        this.el.timelineView?.collapse(false);
+        this.el.timelineView?.update(null, false);
+        if (this.el.timestampsCard)
+            this.el.timestampsCard.hidden = true;
         this.updateControls();
         this.hooks.onStateChange();
         this.hooks.message(`${message} The graph can be edited again.`);
@@ -130,6 +134,10 @@ export class AlgorithmRunner {
         if (this.el.stackCard)
             this.el.stackCard.hidden = stack === null;
         this.el.stackView?.update(stack, animate, highlight.labels);
+        const timestamps = simulation.timestamps?.() ?? null;
+        if (this.el.timestampsCard)
+            this.el.timestampsCard.hidden = timestamps === null;
+        this.el.timelineView?.update(timestamps, animate);
         this.updateControls();
         this.hooks.onStateChange();
         this.hooks.message(simulation.describe());
