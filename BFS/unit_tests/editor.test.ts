@@ -317,6 +317,82 @@ describe('GraphEditor', () => {
   });
 });
 
+describe('GraphEditor randomise', () => {
+  const seeded = (seed: number) => () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+
+  it('on an empty canvas: scatters nodes clear of each other and the overlays, and connects them', () => {
+    // A second editor, on a canvas of its own, that reports a toolbar and a status bar.
+    document.body.innerHTML = '<svg id="canvas"></svg>';
+    svg = document.querySelector<SVGSVGElement>('#canvas')!;
+    svg.getBoundingClientRect = () =>
+      ({ x: 0, y: 0, left: 0, top: 0, width: WIDTH, height: HEIGHT, right: WIDTH, bottom: HEIGHT }) as DOMRect;
+    graph = new Graph();
+    const insetEditor = new GraphEditor(svg, graph, { onMessage, canvasInsets: () => ({ top: 60, bottom: 96 }) });
+    insetEditor.randomise(seeded(7));
+    const nodes = graph.getNodes();
+    expect(nodes.length).toBeGreaterThanOrEqual(5);
+    expect(nodes.length).toBeLessThanOrEqual(10);
+    for (const n of nodes) {
+      expect(n.x).toBeGreaterThanOrEqual(NODE_RADIUS);
+      expect(n.x).toBeLessThanOrEqual(WIDTH - NODE_RADIUS);
+      expect(n.y).toBeGreaterThanOrEqual(60 + NODE_RADIUS);
+      expect(n.y).toBeLessThanOrEqual(HEIGHT - 96 - NODE_RADIUS);
+      for (const m of nodes) if (m !== n) expect(Math.hypot(n.x - m.x, n.y - m.y)).toBeGreaterThanOrEqual(NODE_RADIUS * 2 + 56);
+    }
+    expect(graph.connectedComponents()).toHaveLength(1);
+    expect(svg.querySelectorAll('.node')).toHaveLength(nodes.length);
+    expect(lastMessage()[0]).toBe(`Random graph: ${nodes.length} nodes and ${graph.getArcs().length} edges.`);
+  });
+
+  it('stores every edge as a weighted directed arc, one per pair', () => {
+    editor.randomise(seeded(3));
+    const arcs = graph.getArcs();
+    expect(arcs.length).toBeGreaterThanOrEqual(graph.nodeCount - 1);
+    const pairs = new Set(arcs.map(([a, b]) => `${Math.min(a, b)}-${Math.max(a, b)}`));
+    expect(pairs.size).toBe(arcs.length);
+    for (const [a, b] of arcs) {
+      const w = graph.arcWeight(a, b)!;
+      expect(Number.isInteger(w) && w >= 1 && w <= 20).toBe(true);
+    }
+    // Both directions turn up: the arcs are not all drawn from lower to higher ids.
+    expect(arcs.some(([a, b]) => a > b) && arcs.some(([a, b]) => a < b)).toBe(true);
+  });
+
+  it('with nodes placed: keeps them where they are and replaces their edges', () => {
+    addRow(4);
+    clickNode(0);
+    clickNode(3); // an edge to be replaced
+    clickNode(1); // and a selection to be dropped
+    onChange.mockClear();
+    // Lay the row out as a square so several edges are possible.
+    graph.moveNode(0, 200, 150);
+    graph.moveNode(1, 500, 150);
+    graph.moveNode(2, 200, 450);
+    graph.moveNode(3, 500, 450);
+    const square = graph.getNodes().map((n) => [n.x, n.y]);
+    editor.randomise(seeded(11));
+    expect(graph.getNodes().map((n) => [n.x, n.y])).toEqual(square);
+    expect(graph.connectedComponents()).toHaveLength(1);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(svg.querySelectorAll('.selected')).toHaveLength(0);
+    expect(lastMessage()[0]).toBe(`Random edges between the 4 nodes: ${graph.getArcs().length} edges.`);
+  });
+
+  it('a single node has nothing to connect to', () => {
+    clickBackground(300, 300);
+    editor.randomise(seeded(1));
+    expect(graph.nodeCount).toBe(1);
+    expect(graph.getArcs()).toEqual([]);
+    expect(lastMessage()).toEqual(['Randomise needs at least two nodes to connect.', 'warn']);
+  });
+
+  it('does nothing while the graph is locked', () => {
+    editor.setLocked(true);
+    editor.randomise(seeded(1));
+    expect(graph.nodeCount).toBe(0);
+  });
+});
+
 describe('GraphEditor auto-layout', () => {
   let frames: FrameRequestCallback[];
 

@@ -448,6 +448,20 @@ describe('Graph', () => {
     });
   });
 
+  it('clearEdges() removes every arc and keeps the nodes in place', () => {
+    g.addNode(10, 20);
+    g.addNode(30, 40);
+    g.addNode(50, 60);
+    g.addEdge(0, 1, 5);
+    g.addEdge(2, 1, 3);
+    g.clearEdges();
+    expect(g.getArcs()).toEqual([]);
+    expect(g.getNodes().map((n) => [n.x, n.y])).toEqual([[10, 20], [30, 40], [50, 60]]);
+    expect(g.addEdge(1, 0)).toBe(true); // the in-sets were emptied too
+    g.removeNode(1);
+    expect(g.getArcs()).toEqual([]);
+  });
+
   it('clear() removes everything and restarts ids at 0', () => {
     g.addNode(0, 0);
     g.addNode(0, 0);

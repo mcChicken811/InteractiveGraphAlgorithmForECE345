@@ -23,6 +23,7 @@ const modeInputs = document.querySelectorAll('input[name="edge-mode"]');
 const weightInputs = document.querySelectorAll('input[name="weight-mode"]');
 const toolbar = document.querySelector('.canvas-toolbar');
 const clearBtn = document.querySelector('#clear-btn');
+const randomBtn = document.querySelector('#random-btn');
 const layoutBtn = document.querySelector('#layout-toggle');
 const layoutState = layoutBtn.querySelector('.state');
 const panelBtn = document.querySelector('#panel-toggle');
@@ -34,6 +35,7 @@ function refreshPanels() {
     const m = graph.edgeCount;
     stats.textContent = `${n} node${n === 1 ? '' : 's'} · ${m} edge${m === 1 ? '' : 's'}`;
     clearBtn.disabled = n === 0 || (runner?.running ?? false);
+    randomBtn.disabled = runner?.running ?? false;
     runner?.refresh();
     // The panel shows whichever reading of the graph the Undirected/Directed switch selects.
     renderAdjacencyList(adjacencyEl, graph.currentView);
@@ -86,6 +88,7 @@ const editor = new GraphEditor(svg, graph, {
     },
 });
 clearBtn.addEventListener('click', () => editor.clear());
+randomBtn.addEventListener('click', () => editor.randomise());
 // Hovering (or focusing) the queue strip shows vertex ids instead of BFS distances.
 const queueView = new QueueView(document.querySelector('#queue-strip'), document.querySelector('#queue-empty'));
 queueView.onPeek = (peek) => editor.setPeek(peek ? 'ids' : null);

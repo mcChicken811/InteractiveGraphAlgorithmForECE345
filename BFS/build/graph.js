@@ -164,6 +164,13 @@ export class Graph {
         this.in.get(to)?.delete(from);
         return true;
     }
+    /** Removes every stored arc, keeping the nodes where they are. */
+    clearEdges() {
+        for (const targets of this.out.values())
+            targets.clear();
+        for (const sources of this.in.values())
+            sources.clear();
+    }
     clear() {
         this.nodes.clear();
         this.out.clear();

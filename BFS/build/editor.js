@@ -2,6 +2,7 @@ import { ForceLayout } from './layout.js';
 import { fitFontSize } from './label-fit.js';
 import { halfEllipse, rowLayout } from './arc-diagram.js';
 import { cutShape, loopsPath, polylinesPath } from './voronoi.js';
+import { nodeCountFor, randomArcs, randomPositions } from './random-graph.js';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 export const NODE_RADIUS = 20;
 /** Pointer travel (px) before a press on a node becomes a drag instead of a click. */
@@ -111,6 +112,49 @@ export class GraphEditor {
         this.render();
         this.changed();
         this.message('Graph cleared. Click empty space to add a node.');
+    }
+    /**
+     * Randomise: on an empty canvas, scatters a handful of nodes and connects them; with
+     * nodes already placed, keeps them where they are and replaces their edges with a
+     * random set. Every edge is stored as a weighted directed arc (random direction, weight
+     * 1–20), as all edges are, so each Undirected / Directed and Unweighted / Weighted
+     * reading has something to show. See random-graph.ts.
+     */
+    randomise(rand = Math.random) {
+        if (this.locked)
+            return;
+        const fresh = this.graph.nodeCount === 0;
+        if (fresh) {
+            const area = this.freeArea();
+            const gap = NODE_RADIUS * 2 + 56;
+            for (const p of randomPositions(nodeCountFor(area, gap), area, gap, rand))
+                this.graph.addNode(p.x, p.y);
+        }
+        const nodes = this.graph.getNodes();
+        this.graph.clearEdges();
+        const arcs = randomArcs(nodes, rand, { clearance: NODE_RADIUS + 6 });
+        for (const arc of arcs)
+            this.graph.addEdge(nodes[arc.from].id, nodes[arc.to].id, arc.weight);
+        this.selected = null;
+        this.pending = null;
+        this.render();
+        this.changed();
+        const edges = `${arcs.length} edge${arcs.length === 1 ? '' : 's'}`;
+        if (fresh)
+            this.message(`Random graph: ${nodes.length} nodes and ${edges}.`);
+        else if (nodes.length < 2)
+            this.message('Randomise needs at least two nodes to connect.', 'warn');
+        else
+            this.message(`Random edges between the ${nodes.length} nodes: ${edges}.`);
+    }
+    /** The canvas minus a node's margin and the overlays at the top and bottom. */
+    freeArea() {
+        const rect = this.svg.getBoundingClientRect();
+        const insets = this.callbacks.canvasInsets?.() ?? { top: 0, bottom: 0 };
+        const pad = NODE_RADIUS + 12;
+        const top = Math.min(rect.height / 2, insets.top + NODE_RADIUS);
+        const bottom = Math.max(top, rect.height - Math.min(rect.height / 2, insets.bottom));
+        return { left: pad, top: Math.max(pad, top), right: Math.max(pad, rect.width - pad), bottom: Math.max(pad, bottom - pad) };
     }
     /** The selected node, if any (e.g. the start vertex for an algorithm). */
     get selectedNode() {

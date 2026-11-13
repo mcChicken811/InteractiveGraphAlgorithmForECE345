@@ -291,6 +291,92 @@ test('Delete key removes the selected node and its id is reused', async ({ page 
   await expect(cv.node(0)).toHaveAttribute('transform', `translate(${P.d[0]} ${P.d[1]})`);
 });
 
+test.describe('Randomise', () => {
+  const randomBtn = (page: Page) => page.getByRole('button', { name: 'Randomise' });
+
+  /** Stored arcs as [from, to, weight], read off the canvas with Directed and Weighted on. */
+  async function storedArcs(page: Page): Promise<Array<[number, number, number]>> {
+    // The radios are visually hidden: pick a mode by its label, as a user does.
+    await page.locator('label[for="mode-directed"]').click();
+    await page.locator('label[for="weights-on"]').click();
+    return page.evaluate(() =>
+      [...document.querySelectorAll<SVGGElement>('#canvas .edge')].map((g) => [
+        Number(g.dataset.edgeA),
+        Number(g.dataset.edgeB),
+        Number(g.querySelector('.edge-weight text')?.textContent),
+      ]),
+    );
+  }
+
+  test('sits just left of Clear graph, and works on an empty canvas', async ({ page }) => {
+    const random = (await randomBtn(page).boundingBox())!;
+    const clear = (await page.getByRole('button', { name: 'Clear graph' }).boundingBox())!;
+    expect(random.x + random.width).toBeLessThanOrEqual(clear.x);
+    expect(random.x + random.width).toBeGreaterThan(clear.x - 24);
+    expect(Math.abs(random.y - clear.y)).toBeLessThan(1);
+    expect(random.height).toBe(clear.height);
+    await expect(randomBtn(page)).toBeEnabled();
+  });
+
+  test('on an empty canvas: makes a connected random graph clear of the toolbar and status bar', async ({ page }) => {
+    await randomBtn(page).click();
+    const n = await cv.nodes.count();
+    expect(n).toBeGreaterThanOrEqual(5);
+    await expect(page.locator('#message')).toHaveText(new RegExp(`^Random graph: ${n} nodes and \\d+ edges\\.$`));
+    const boxes = await cv.nodes.locator('circle').evaluateAll((els) => els.map((el) => el.getBoundingClientRect()));
+    const canvas = (await cv.canvas.boundingBox())!;
+    const toolbar = (await page.locator('.canvas-toolbar').boundingBox())!;
+    for (const b of boxes) {
+      expect(b.top).toBeGreaterThanOrEqual(toolbar.y + toolbar.height);
+      expect(b.bottom).toBeLessThanOrEqual(canvas.y + canvas.height - 60);
+      expect(b.left).toBeGreaterThanOrEqual(canvas.x);
+      expect(b.right).toBeLessThanOrEqual(canvas.x + canvas.width);
+    }
+    // Every node is reached (undirected, one piece), and the stats agree.
+    const m = await cv.edges.count();
+    expect(m).toBeGreaterThanOrEqual(n - 1);
+    await expect(page.locator('#stats')).toHaveText(`${n} nodes · ${m} edges`);
+    await expect(page.getByRole('button', { name: 'Clear graph' })).toBeEnabled();
+  });
+
+  test('every edge is a directed arc with a weight, shown when Directed and Weighted are on', async ({ page }) => {
+    await randomBtn(page).click();
+    const undirected = await cv.edges.count();
+    const arcs = await storedArcs(page);
+    expect(arcs).toHaveLength(undirected); // one arc per connected pair
+    for (const [, , w] of arcs) expect(w >= 1 && w <= 20 && Number.isInteger(w)).toBe(true);
+    await expect(cv.canvas.locator('.edge .edge-weight').first()).toBeVisible();
+  });
+
+  test('with nodes placed: keeps them where they are and replaces their edges', async ({ page }) => {
+    await addTriangleNodes();
+    await cv.click(...P.d);
+    await connect(P.a, P.d); // an edge that runs past c
+    await randomBtn(page).click();
+    await expect(cv.nodes).toHaveCount(4);
+    await expect(cv.node(0)).toHaveAttribute('transform', `translate(${P.a[0]} ${P.a[1]})`);
+    await expect(cv.node(3)).toHaveAttribute('transform', `translate(${P.d[0]} ${P.d[1]})`);
+    await expect(page.locator('#message')).toHaveText(/^Random edges between the 4 nodes: \d+ edges\.$/);
+    expect(await cv.edges.count()).toBeGreaterThanOrEqual(3);
+    // Pressing again gives a new set of edges on the same nodes, sooner or later.
+    const first = JSON.stringify(await storedArcs(page));
+    let changed = false;
+    for (let k = 0; k < 8 && !changed; k++) {
+      await randomBtn(page).click();
+      changed = JSON.stringify(await storedArcs(page)) !== first;
+    }
+    expect(changed).toBe(true);
+    await expect(cv.nodes).toHaveCount(4);
+  });
+
+  test('a single node: a warning, and nothing changes', async ({ page }) => {
+    await cv.click(...P.a);
+    await randomBtn(page).click();
+    await expect(cv.nodes).toHaveCount(1);
+    await expect(page.locator('#message')).toHaveText('Randomise needs at least two nodes to connect.');
+  });
+});
+
 test('Clear graph removes everything', async ({ page }) => {
   await addTriangleNodes();
   await connect(P.a, P.b);
@@ -1279,6 +1365,7 @@ test.describe('algorithm simulation (BFS)', () => {
     // The direction switch and Clear are locked too.
     for (const radio of await directionRadios(page).all()) await expect(radio).toBeDisabled();
     await expect(page.getByRole('button', { name: 'Clear graph' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Randomise' })).toBeDisabled();
   });
 
   test('white marks what the next Update pops and travels; popped vertices are green', async ({ page }) => {

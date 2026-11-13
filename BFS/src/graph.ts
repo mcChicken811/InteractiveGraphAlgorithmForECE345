@@ -200,6 +200,12 @@ export class Graph {
     return true;
   }
 
+  /** Removes every stored arc, keeping the nodes where they are. */
+  clearEdges(): void {
+    for (const targets of this.out.values()) targets.clear();
+    for (const sources of this.in.values()) sources.clear();
+  }
+
   clear(): void {
     this.nodes.clear();
     this.out.clear();

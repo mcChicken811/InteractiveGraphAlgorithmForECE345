@@ -260,6 +260,10 @@ button.primary:hover:not(:disabled) {
   filter: brightness(1.08);
 }
 
+#random-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
 #clear-btn:hover:not(:disabled) {
   border-color: var(--danger);
   color: var(--danger);

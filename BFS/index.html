@@ -18,6 +18,14 @@
     <header class="topbar">
       <h1>BFS · Graph Builder</h1>
       <span id="stats" class="stats"></span>
+      <!-- Randomise: a random graph on an empty canvas, or random edges between the nodes placed. -->
+      <button
+        id="random-btn"
+        type="button"
+        title="Generate a random graph, or random edges between the nodes already placed"
+      >
+        Randomise
+      </button>
       <button id="clear-btn" type="button">Clear graph</button>
       <!-- Algorithm simulation: pick a program, then Run → Update (one step) … Finish, or Stop. -->
       <div class="run-controls" role="group" aria-label="Algorithm simulation">
@@ -117,6 +125,11 @@
                 <li><strong>Drag a node</strong> to move it.</li>
                 <li><strong>Right-click a node</strong> (or select it and press Delete) to remove it.</li>
                 <li><strong>Esc</strong> or click empty space to cancel a selection.</li>
+                <li>
+                  <strong>Randomise</strong> (top) makes a random graph on an empty canvas, or random edges
+                  between the nodes you have placed. Each edge gets a random direction and weight, shown
+                  when Directed or Weighted is on.
+                </li>
                 <li><strong>Auto-layout</strong> (top left) spaces the graph out automatically.</li>
                 <li>
                   <strong>Undirected / Directed</strong> (top left) sets how edges are read. Clicking A then B
