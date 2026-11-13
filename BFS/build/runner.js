@@ -87,11 +87,12 @@ export class AlgorithmRunner {
     /** Draws the simulation's state; `animate` animates the queue from its previous state. */
     show(animate) {
         const simulation = this.simulation;
-        this.editor.setHighlight(simulation.highlight());
+        const highlight = simulation.highlight();
+        this.editor.setHighlight(highlight);
         const queue = simulation.queueSnapshot?.() ?? null;
         if (this.el.queueCard)
             this.el.queueCard.hidden = queue === null;
-        this.el.queueView?.update(queue, animate);
+        this.el.queueView?.update(queue, animate, highlight.labels);
         this.updateControls();
         this.hooks.onStateChange();
         this.hooks.message(simulation.describe());

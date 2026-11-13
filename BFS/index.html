@@ -129,6 +129,10 @@
                   node (or node 0). <strong>Update</strong> takes one step; <strong>Stop</strong> or
                   <strong>Finish</strong> ends it. The graph is locked while it runs.
                 </li>
+                <li>
+                  While BFS runs, vertices show their <strong>distance</strong> from the start (blank until
+                  found). <strong>Hover the queue</strong> to see their numbers again.
+                </li>
               </ul>
             </div>
           </section>
@@ -199,7 +203,8 @@
               </button>
             </h2>
             <div id="queue-body" class="card-body">
-              <div id="queue-strip" class="queue-strip" role="list" aria-label="Queue, front first"></div>
+              <!-- Focusable so keyboard users can scroll it; hovering or focusing it shows vertex ids. -->
+              <div id="queue-strip" class="queue-strip" role="list" aria-label="Queue, front first" tabindex="0"></div>
               <p id="queue-empty" class="queue-empty" hidden>The queue is empty.</p>
             </div>
           </section>

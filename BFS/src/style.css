@@ -853,6 +853,33 @@ button:disabled {
   transition: fill 0.12s, stroke-width 0.12s;
 }
 
+/* An algorithm's label (e.g. BFS distance) overlaps the id; one is shown at a time. */
+.node .node-index,
+.node .sim-label {
+  transition: opacity 0.35s ease;
+}
+
+.node .sim-label {
+  opacity: 0;
+}
+
+#canvas.sim-labels .node .node-index {
+  opacity: 0;
+}
+
+#canvas.sim-labels .node .sim-label {
+  opacity: 1;
+}
+
+/* Hovering the queue strip: back to the ids. */
+#canvas.sim-labels.peek-ids .node .node-index {
+  opacity: 1;
+}
+
+#canvas.sim-labels.peek-ids .node .sim-label {
+  opacity: 0;
+}
+
 .node text {
   fill: var(--text);
   font-size: 14px;
@@ -1154,6 +1181,46 @@ button:disabled {
 
 @media (prefers-reduced-motion: reduce) {
   .q-node {
+    transition: none;
+  }
+}
+
+/* Queue vertices: the id and the algorithm's label (BFS distance) stacked in one cell,
+   crossfaded like the canvas; hovering or focusing the strip shows the ids. */
+.q-node > span {
+  grid-area: 1 / 1;
+  transition: opacity 0.35s ease;
+}
+
+.q-node .q-label {
+  opacity: 0;
+}
+
+.queue-strip.has-labels .q-index {
+  opacity: 0;
+}
+
+.queue-strip.has-labels .q-label {
+  opacity: 1;
+}
+
+.queue-strip.has-labels.peek-ids .q-index {
+  opacity: 1;
+}
+
+.queue-strip.has-labels.peek-ids .q-label {
+  opacity: 0;
+}
+
+.queue-strip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .node .node-index,
+  .node .sim-label,
+  .q-node > span {
     transition: none;
   }
 }

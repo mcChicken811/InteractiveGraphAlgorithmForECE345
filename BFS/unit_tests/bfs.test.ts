@@ -46,7 +46,7 @@ describe('BfsSimulation (undirected)', () => {
   it('starts with the source at the front of the queue: white, with the edges it will travel', () => {
     expect(sim.finished).toBe(false);
     expect(sim.queued).toEqual([0]);
-    expect(sim.highlight()).toEqual({
+    expect(sim.highlight()).toMatchObject({
       current: 0,
       done: [],
       activeEdges: [
@@ -60,7 +60,7 @@ describe('BfsSimulation (undirected)', () => {
   it('a step pops the front vertex (green) and the new front turns white', () => {
     sim.step(); // pop 0, discover 1, 2
     expect(sim.queued).toEqual([1, 2]);
-    expect(sim.highlight()).toEqual({
+    expect(sim.highlight()).toMatchObject({
       current: 1, // next to be popped
       done: [0],
       activeEdges: [[1, 3]], // 1 → 0 is not travelled: 0 is already discovered
@@ -80,10 +80,10 @@ describe('BfsSimulation (undirected)', () => {
   it('white edges are only those the next pop will travel (to undiscovered neighbours)', () => {
     sim.step(); // pop 0 → queue 1, 2
     sim.step(); // pop 1 → discovers 3 → queue 2, 3
-    expect(sim.highlight()).toEqual({ current: 2, done: [0, 1], activeEdges: [] }); // 0 and 3 already known
+    expect(sim.highlight()).toMatchObject({ current: 2, done: [0, 1], activeEdges: [] }); // 0 and 3 already known
     expect(sim.describe()).toBe('Popped 1: discovered 3. Queue: 2, 3.');
     sim.step(); // pop 2 → nothing new → queue 3
-    expect(sim.highlight()).toEqual({ current: 3, done: [0, 1, 2], activeEdges: [] });
+    expect(sim.highlight()).toMatchObject({ current: 3, done: [0, 1, 2], activeEdges: [] });
     expect(sim.describe()).toBe('Popped 2: nothing new. Queue: 3.');
   });
 
@@ -107,6 +107,26 @@ describe('BfsSimulation (undirected)', () => {
     }
   });
 
+  it('labels each vertex with its distance from the source once it is discovered', () => {
+    expect(sim.highlight().labels).toEqual({ 0: '0' }); // only the source is known at first
+    sim.step(); // pop 0 → discovers 1, 2 at distance 1
+    expect(sim.highlight().labels).toEqual({ 0: '0', 1: '1', 2: '1' });
+    sim.step(); // pop 1 → discovers 3 at distance 2
+    expect(sim.highlight().labels).toEqual({ 0: '0', 1: '1', 2: '1', 3: '2' });
+    runToEnd(sim);
+    expect(sim.highlight().labels).not.toHaveProperty('4'); // unreachable: never labelled
+  });
+
+  it('distances along the queue never decrease (the BFS invariant)', () => {
+    for (let i = 0; i < 4; i++) {
+      const { labels } = sim.highlight();
+      const ds = sim.queued.map((id) => Number(labels![id]));
+      for (let j = 1; j < ds.length; j++) expect(ds[j]).toBeGreaterThanOrEqual(ds[j - 1]);
+      expect(Math.max(...ds) - Math.min(...ds)).toBeLessThanOrEqual(1);
+      sim.step();
+    }
+  });
+
   it('visits in BFS order with hop distances and a BFS tree', () => {
     runToEnd(sim);
     expect(sim.order).toEqual([0, 1, 2, 3]);
@@ -117,7 +137,7 @@ describe('BfsSimulation (undirected)', () => {
   it('takes exactly one step per reachable vertex', () => {
     expect(runToEnd(sim)).toBe(4);
     expect(sim.finished).toBe(true);
-    expect(sim.highlight()).toEqual({ current: null, done: [0, 1, 2, 3], activeEdges: [] });
+    expect(sim.highlight()).toMatchObject({ current: null, done: [0, 1, 2, 3], activeEdges: [] });
   });
 
   it('leaves unreachable vertices undiscovered and says so', () => {
@@ -132,7 +152,7 @@ describe('BfsSimulation (undirected)', () => {
     runToEnd(sim);
     const before = sim.highlight();
     expect(sim.step()).toBe(false);
-    expect(sim.highlight()).toEqual(before);
+    expect(sim.highlight()).toMatchObject(before);
   });
 
   it('can start anywhere', () => {
@@ -143,7 +163,7 @@ describe('BfsSimulation (undirected)', () => {
 
   it('an isolated source finishes after one step', () => {
     const lonely = new BfsSimulation(g.undirectedView, 4);
-    expect(lonely.highlight()).toEqual({ current: 4, done: [], activeEdges: [] });
+    expect(lonely.highlight()).toMatchObject({ current: 4, done: [], activeEdges: [] });
     expect(runToEnd(lonely)).toBe(1);
     expect(lonely.order).toEqual([4]);
     expect(lonely.describe()).toContain('visited 1 of 5 vertices');
@@ -164,7 +184,7 @@ describe('BfsSimulation (directed)', () => {
       [0, 2],
     ]);
     sim.step(); // pop 0 → queue 1, 2; 1's only out-arc leads to 3
-    expect(sim.highlight()).toEqual({ current: 1, done: [0], activeEdges: [[1, 3]] });
+    expect(sim.highlight()).toMatchObject({ current: 1, done: [0], activeEdges: [[1, 3]] });
     runToEnd(sim);
     // 2 has no out-arcs; 3 is reached via 1 → 3. 3 → 2 is not needed (2 already found).
     expect(sim.order).toEqual([0, 1, 2, 3]);

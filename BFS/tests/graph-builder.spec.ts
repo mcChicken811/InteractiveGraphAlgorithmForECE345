@@ -1413,7 +1413,8 @@ test.describe('BFS queue card (side panel)', () => {
       els.map((el) => {
         const key = (el as HTMLElement).dataset.key!;
         if (key === 'pop' || key === 'push') return key;
-        return el.textContent! + (el.classList.contains('front') ? '*' : '') + (el.classList.contains('incoming') ? '?' : '');
+        const id = el.querySelector('.q-index')!.textContent!;
+        return id + (el.classList.contains('front') ? '*' : '') + (el.classList.contains('incoming') ? '?' : '');
       }),
     );
 
@@ -1481,7 +1482,13 @@ test.describe('BFS queue card (side panel)', () => {
     const look = (sel: string) =>
       page.locator(sel).first().evaluate((el) => {
         const cs = getComputedStyle(el as HTMLElement);
-        return { radius: cs.borderTopLeftRadius, width: el.getBoundingClientRect().width, border: cs.borderTopColor, opacity: Number(cs.opacity), text: el.textContent };
+        return {
+          radius: cs.borderTopLeftRadius,
+          width: el.getBoundingClientRect().width,
+          border: cs.borderTopColor,
+          opacity: Number(cs.opacity),
+          text: el.querySelector('.q-index')!.textContent,
+        };
       });
     const canvasNode = await cv.node(1).locator('circle').evaluate((c) => ({
       stroke: getComputedStyle(c).stroke,
@@ -1503,7 +1510,7 @@ test.describe('BFS queue card (side panel)', () => {
     await update(page);
     const popped = page.locator('#queue-strip > .exiting');
     await expect(popped).toHaveCount(1);
-    await expect(popped).toHaveText('0');
+    await expect(popped.locator('.q-index')).toHaveText('0');
     await expect(popped).toHaveClass(/popped/);
     const animating = await page
       .locator('#queue-strip > [data-key]')
@@ -1567,6 +1574,122 @@ test.describe('BFS queue card (side panel)', () => {
     await expect(strip(page)).toBeHidden();
     await page.getByRole('button', { name: 'Queue', exact: true }).click();
     await expect(strip(page)).toBeVisible();
+  });
+});
+
+test.describe('BFS distance labels', () => {
+  const run = (page: Page) => page.getByRole('button', { name: 'Run', exact: true }).click();
+  const update = (page: Page) => page.getByRole('button', { name: 'Update', exact: true }).click();
+  const strip = (page: Page) => page.getByRole('list', { name: 'Queue, front first' });
+
+  /** For each canvas vertex: its id, the label text, and which of the two is showing. */
+  const canvasLabels = (page: Page) =>
+    page.locator('#canvas [data-node-id]').evaluateAll((nodes) =>
+      nodes.map((g) => ({
+        id: g.querySelector('.node-index')!.textContent,
+        label: g.querySelector('.sim-label')!.textContent,
+        showing: Number(getComputedStyle(g.querySelector('.sim-label')!).opacity) === 1 ? 'label' : 'id',
+      })),
+    );
+
+  /** Path 0 — 1 — 2 plus isolated 3, numbered so ids and distances differ: start from 2. */
+  async function build(page: Page): Promise<void> {
+    await addTriangleNodes();
+    await cv.click(...P.d);
+    await connect(P.a, P.b);
+    await connect(P.b, P.c);
+    await cv.click(...P.c); // select 2 as the start
+    await page.getByRole('button', { name: 'Help and adjacency list' }).click();
+  }
+
+  test('while BFS runs, vertices show their distance from the start; undiscovered ones are blank', async ({ page }) => {
+    await build(page);
+    await run(page);
+    await expect
+      .poll(() => canvasLabels(page))
+      .toEqual([
+        { id: '0', label: '', showing: 'label' },
+        { id: '1', label: '', showing: 'label' },
+        { id: '2', label: '0', showing: 'label' }, // the start
+        { id: '3', label: '', showing: 'label' },
+      ]);
+    await update(page); // pop 2 → discovers 1 at distance 1
+    await update(page); // pop 1 → discovers 0 at distance 2
+    const after = await canvasLabels(page);
+    expect(after.map((n) => n.label)).toEqual(['2', '1', '0', '']); // 3 is unreachable: stays blank
+  });
+
+  test('the queue shows distances too, blank for vertices not found yet', async ({ page }) => {
+    await build(page);
+    await run(page);
+    await update(page); // queue: 1 (distance 1); about to push 0
+    const labels = await page
+      .locator('#queue-strip .q-node:not(.exiting)')
+      .evaluateAll((els) => els.map((el) => [el.querySelector('.q-index')!.textContent, el.querySelector('.q-label')!.textContent]));
+    expect(labels).toEqual([
+      ['1', '1'],
+      ['0', ''],
+    ]);
+    await expect(strip(page).getByRole('listitem').first()).toHaveAttribute('aria-label', '1, distance 1, next to be popped');
+  });
+
+  test('hovering the queue smoothly switches every vertex back to its id, and leaving switches back', async ({ page }) => {
+    await build(page);
+    await run(page);
+    await expect.poll(async () => (await canvasLabels(page))[2].showing).toBe('label');
+
+    await strip(page).hover();
+    await expect(cv.canvas).toHaveClass(/peek-ids/);
+    // A CSS transition is fading the labels (not an instant swap).
+    const fading = await cv.node(2).locator('.node-index').evaluate((el) =>
+      el.getAnimations().some((a) => (a as CSSTransition).transitionProperty === 'opacity'),
+    );
+    expect(fading).toBe(true);
+    await expect.poll(async () => (await canvasLabels(page)).map((n) => n.showing)).toEqual(['id', 'id', 'id', 'id']);
+    // The queue's own circles switch too.
+    await expect
+      .poll(() => strip(page).locator('.q-index').first().evaluate((el) => Number(getComputedStyle(el).opacity)))
+      .toBe(1);
+
+    await cv.move(...P.d); // pointer leaves the queue
+    await expect(cv.canvas).not.toHaveClass(/peek-ids/);
+    await expect.poll(async () => (await canvasLabels(page))[2].showing).toBe('label');
+  });
+
+  test('keyboard focus on the queue also shows the ids', async ({ page }) => {
+    await build(page);
+    await run(page);
+    await strip(page).focus();
+    await expect(cv.canvas).toHaveClass(/peek-ids/);
+    await page.getByRole('button', { name: 'Stop', exact: true }).focus();
+    await expect(cv.canvas).not.toHaveClass(/peek-ids/);
+  });
+
+  test('stopping shows the ids again', async ({ page }) => {
+    await build(page);
+    await run(page);
+    await strip(page).hover();
+    await page.getByRole('button', { name: 'Stop', exact: true }).click();
+    await expect(cv.canvas).not.toHaveClass(/sim-labels|peek-ids/);
+    await expect.poll(async () => (await canvasLabels(page)).map((n) => n.showing)).toEqual(['id', 'id', 'id', 'id']);
+    expect((await canvasLabels(page)).map((n) => n.label)).toEqual(['', '', '', '']);
+  });
+
+  test('outside a run, vertices show only their ids', async ({ page }) => {
+    await build(page);
+    await expect(cv.node(2)).toHaveText('2');
+    expect((await canvasLabels(page)).every((n) => n.showing === 'id')).toBe(true);
+  });
+
+  test.describe('with reduced motion', () => {
+    test.use({ reducedMotion: 'reduce' });
+
+    test('switches instantly', async ({ page }) => {
+      await build(page);
+      await run(page);
+      const duration = await cv.node(2).locator('.sim-label').evaluate((el) => getComputedStyle(el).transitionDuration);
+      expect(duration).toBe('0s');
+    });
   });
 });
 

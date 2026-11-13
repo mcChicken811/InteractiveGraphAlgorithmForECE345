@@ -32,13 +32,35 @@ const ARROW_LEFT =
   '<svg viewBox="0 0 24 14" width="24" height="14" aria-hidden="true"><path d="M22 7H3M8 2L3 7l5 5" /></svg>';
 
 export class QueueView {
+  /**
+   * Called with `true` while the pointer is over (or keyboard focus is in) the strip, and
+   * `false` when it leaves: vertex labels then switch back to ids, here and on the canvas.
+   */
+  onPeek: ((peek: boolean) => void) | null = null;
+  private labels: Record<NodeId, string> | undefined;
+
   constructor(
     private readonly strip: HTMLElement,
     private readonly emptyNote: HTMLElement,
-  ) {}
+  ) {
+    const peek = (on: boolean) => {
+      strip.classList.toggle('peek-ids', on);
+      this.onPeek?.(on);
+    };
+    strip.addEventListener('pointerenter', () => peek(true));
+    strip.addEventListener('pointerleave', () => peek(strip.contains(document.activeElement)));
+    strip.addEventListener('focusin', () => peek(true));
+    strip.addEventListener('focusout', () => peek(strip.matches(':hover')));
+  }
 
-  /** Shows `snapshot` (or nothing, for null), animating from the previous one if asked. */
-  update(snapshot: QueueSnapshot | null, animate: boolean): void {
+  /**
+   * Shows `snapshot` (or nothing, for null), animating from the previous one if asked.
+   * `labels` (e.g. BFS distances) are drawn inside the vertices instead of their ids;
+   * vertices without a label are left blank. Hovering the strip shows the ids.
+   */
+  update(snapshot: QueueSnapshot | null, animate: boolean, labels?: Record<NodeId, string>): void {
+    this.labels = labels;
+    this.strip.classList.toggle('has-labels', !!labels);
     const motion = animate && canAnimate() && !prefersReducedMotion();
     const live = this.liveElements();
 
@@ -133,7 +155,13 @@ export class QueueView {
     } else {
       el.className = 'q-node';
       el.setAttribute('role', 'listitem');
-      el.textContent = String(item.id);
+      // The id and the algorithm's label overlap; CSS crossfades between them.
+      const index = document.createElement('span');
+      index.className = 'q-index';
+      index.textContent = String(item.id);
+      const label = document.createElement('span');
+      label.className = 'q-label';
+      el.append(index, label);
     }
     return el;
   }
@@ -142,14 +170,11 @@ export class QueueView {
     if (item.id === undefined) return;
     el.classList.toggle('front', item.kind === 'front');
     el.classList.toggle('incoming', item.kind === 'incoming');
-    el.setAttribute(
-      'aria-label',
-      item.kind === 'front'
-        ? `${item.id}, next to be popped`
-        : item.kind === 'incoming'
-          ? `${item.id}, about to be pushed`
-          : String(item.id),
-    );
+    const label = this.labels?.[item.id];
+    el.querySelector('.q-label')!.textContent = label ?? '';
+    const role = item.kind === 'front' ? ', next to be popped' : item.kind === 'incoming' ? ', about to be pushed' : '';
+    const distance = label !== undefined ? `, distance ${label}` : '';
+    el.setAttribute('aria-label', `${item.id}${distance}${role}`);
   }
 }
 

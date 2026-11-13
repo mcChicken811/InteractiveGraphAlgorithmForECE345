@@ -18,6 +18,12 @@ export interface Highlight {
    * orientation. In an undirected view [a, b] and [b, a] mean the same edge.
    */
   activeEdges: Array<[NodeId, NodeId]>;
+  /**
+   * Optional per-vertex labels drawn inside the vertices instead of their ids while the
+   * algorithm runs (BFS: the shortest-path length found so far). When given, vertices
+   * without an entry show no number. Hovering the queue strip shows the ids again.
+   */
+  labels?: Record<NodeId, string>;
 }
 
 /** A queue-like structure for the side panel (BFS's queue). */

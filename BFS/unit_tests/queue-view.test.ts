@@ -17,7 +17,11 @@ function tokens(): string[] {
   return [...strip.querySelectorAll<HTMLElement>(':scope > [data-key]:not(.exiting)')].map((el) => {
     const key = el.dataset.key!;
     if (key === 'pop' || key === 'push') return key;
-    return el.textContent! + (el.classList.contains('front') ? '*' : '') + (el.classList.contains('incoming') ? '?' : '');
+    return (
+      el.querySelector('.q-index')!.textContent! +
+      (el.classList.contains('front') ? '*' : '') +
+      (el.classList.contains('incoming') ? '?' : '')
+    );
   });
 }
 
@@ -63,6 +67,27 @@ describe('QueueView', () => {
     expect(tokens()).toEqual([]);
     expect(empty.hidden).toBe(false);
     expect(strip.hidden).toBe(true);
+  });
+
+  it('shows labels (e.g. distances) instead of ids, blank where there is none', () => {
+    view.update({ items: [0, 1], incoming: [2] }, false, { 0: '0', 1: '1' });
+    expect(strip.classList.contains('has-labels')).toBe(true);
+    const labels = [...strip.querySelectorAll('.q-label')].map((el) => el.textContent);
+    expect(labels).toEqual(['0', '1', '']); // 2 is not discovered yet
+    expect(strip.querySelector('[data-key="v1"]')!.getAttribute('aria-label')).toBe('1, distance 1');
+    view.update({ items: [0], incoming: [] }, false);
+    expect(strip.classList.contains('has-labels')).toBe(false);
+  });
+
+  it('hovering or focusing the strip asks to show ids', () => {
+    const peeks: boolean[] = [];
+    view.onPeek = (p) => peeks.push(p);
+    strip.dispatchEvent(new PointerEvent('pointerenter'));
+    expect(strip.classList.contains('peek-ids')).toBe(true);
+    strip.dispatchEvent(new PointerEvent('pointerleave'));
+    expect(strip.classList.contains('peek-ids')).toBe(false);
+    strip.dispatchEvent(new FocusEvent('focusin'));
+    expect(peeks).toEqual([true, false, true]);
   });
 
   it('null clears everything', () => {

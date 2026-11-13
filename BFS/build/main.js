@@ -70,6 +70,9 @@ const editor = new GraphEditor(svg, graph, {
     onMessage: showMessage,
 });
 clearBtn.addEventListener('click', () => editor.clear());
+// Hovering (or focusing) the queue strip shows vertex ids instead of BFS distances.
+const queueView = new QueueView(document.querySelector('#queue-strip'), document.querySelector('#queue-empty'));
+queueView.onPeek = (peek) => editor.setLabelPeek(peek);
 // Algorithm simulation (header, top right). `runner` is declared above so refreshPanels,
 // which can run before this point, can check it.
 runner = new AlgorithmRunner(graph, editor, {
@@ -80,7 +83,7 @@ runner = new AlgorithmRunner(graph, editor, {
     weightSwitch: document.querySelector('#weight-switch'),
     directionSwitch: document.querySelector('#direction-switch'),
     queueCard: document.querySelector('#queue-card'),
-    queueView: new QueueView(document.querySelector('#queue-strip'), document.querySelector('#queue-empty')),
+    queueView,
 }, { message: (text) => showMessage(text), onStateChange: refreshPanels });
 // Undirected / Directed switch: only changes how the stored arcs are interpreted.
 for (const input of modeInputs) {

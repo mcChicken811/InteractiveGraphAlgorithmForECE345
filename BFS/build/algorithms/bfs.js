@@ -10,6 +10,9 @@
  * neighbours and appends them to the queue in ascending id order (views return sorted
  * neighbours, so runs are deterministic). The new front vertex turns white.
  *
+ * Vertices are labelled with their shortest-path length from the source as soon as they
+ * are discovered (BFS discovers every vertex at its final distance).
+ *
  * Right after creation the source is the only vertex in the queue, so it is already
  * white. A source with n reachable vertices finishes after exactly n steps; vertices not
  * reachable from it are never discovered.
@@ -76,6 +79,9 @@ export class BfsSimulation {
             current: next,
             done: [...this.popped],
             activeEdges: next === null ? [] : this.incoming().map((w) => [next, w]),
+            // Shortest-path length (in edges) from the source, known from the moment a vertex is
+            // discovered; undiscovered vertices get no label.
+            labels: Object.fromEntries([...this.distance].map(([id, d]) => [id, String(d)])),
         };
     }
     queueSnapshot() {

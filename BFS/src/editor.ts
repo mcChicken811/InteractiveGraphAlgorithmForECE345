@@ -126,7 +126,17 @@ export class GraphEditor {
   /** Draws an algorithm's state on the graph, or clears it with null. */
   setHighlight(highlight: Highlight | null): void {
     this.highlight = highlight;
+    this.svg.classList.toggle('sim-labels', !!highlight?.labels);
+    if (!highlight) this.setLabelPeek(false);
     this.render();
+  }
+
+  /**
+   * While an algorithm labels the vertices (e.g. BFS distances), `true` shows the vertex
+   * ids again instead — used while the pointer is over the queue strip. CSS crossfades.
+   */
+  setLabelPeek(peek: boolean): void {
+    this.svg.classList.toggle('peek-ids', peek);
   }
 
   get directed(): boolean {
@@ -503,9 +513,12 @@ export class GraphEditor {
       if (!g) {
         g = svgEl('g', { class: 'node' });
         g.dataset.nodeId = String(node.id);
-        const label = svgEl('text', { 'text-anchor': 'middle', 'dominant-baseline': 'central' });
+        // Two overlapping labels: the id, and an algorithm's label (BFS: the distance). CSS
+        // crossfades between them (see setLabelPeek).
+        const label = svgEl('text', { class: 'node-index', 'text-anchor': 'middle', 'dominant-baseline': 'central' });
         label.textContent = String(node.id);
-        g.append(svgEl('circle', { r: NODE_RADIUS }), label);
+        const simLabel = svgEl('text', { class: 'sim-label', 'text-anchor': 'middle', 'dominant-baseline': 'central' });
+        g.append(svgEl('circle', { r: NODE_RADIUS }), label, simLabel);
         this.nodeLayer.append(g);
         this.nodeEls.set(node.id, g);
       }
@@ -513,6 +526,7 @@ export class GraphEditor {
       g.classList.toggle('selected', node.id === this.selected);
       g.classList.toggle('sim-current', this.highlight?.current === node.id);
       g.classList.toggle('sim-done', this.highlight?.done.includes(node.id) ?? false);
+      g.querySelector('.sim-label')!.textContent = this.highlight?.labels?.[node.id] ?? '';
     }
     for (const [id, g] of this.nodeEls) {
       if (!liveNodes.has(id)) {

@@ -109,6 +109,8 @@ The header's picker lists the available algorithms; for now there is one, **Brea
 
 Each Update pops the front vertex (it turns green) and appends its undiscovered neighbours to the queue in ascending id order; the new front vertex turns white. The status message lists the whole queue, front (white) vertex first, for example "Popped 0: discovered 1, 2. Queue: 1, 2." A start vertex with *n* reachable vertices takes exactly *n* Updates, then Update becomes Finish.
 
+**Distance labels.** While BFS runs, each vertex shows its shortest-path length (number of edges) from the start vertex instead of its id. The label appears the moment BFS discovers the vertex, which is when that length is known, so undiscovered vertices show no number. The Queue card's circles show distances too: along the queue they never decrease, and differ by at most 1. **Hovering or focusing the queue strip** smoothly crossfades every vertex, on the canvas and in the queue, back to its id; leaving it switches back.
+
 **Queue card.** While BFS runs, a **Queue** card appears at the bottom of the ☰ panel. It shows the queue as a horizontal strip: `← pop  (front) … (back)  (incoming…)  ← push`.
 
 - **Front:** the first vertex is the one the next Update pops, with the same white ring as on the canvas.
@@ -123,7 +125,7 @@ BFS runs from a single source, so vertices it can't reach stay uncoloured, and t
 ### Adding another algorithm
 
 1. Implement `Simulation` (in `src/algorithms/types.ts`). An algorithm with a queue can also implement `queueSnapshot()`, returning `{ items, incoming }`, to get the animated Queue card. It works on a read-only `GraphView`, takes one step per `step()`, and reports `highlight()` (current vertex, finished vertices, active edges) and `describe()` (the status message).
-2. Export an `AlgorithmDefinition` from its own file: `id`, `name`, `requires` (e.g. `{ weighted: true }` for Dijkstra), and `create(view, start)`. By convention `highlight()` previews the *next* step: `current` is what it will process and `activeEdges` what it will travel.
+2. Export an `AlgorithmDefinition` from its own file: `id`, `name`, `requires` (e.g. `{ weighted: true }` for Dijkstra), and `create(view, start)`. By convention `highlight()` previews the *next* step: `current` is what it will process and `activeEdges` what it will travel. It may also return `labels` (vertex → text) to draw inside the vertices instead of their ids, as BFS does with distances; Dijkstra could do the same with tentative distances.
 3. Add it to `ALGORITHMS` in `src/algorithms/index.ts`. The picker, the locks and the drawing then work without further changes.
 
 ## Directed and undirected mode
