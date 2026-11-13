@@ -2654,15 +2654,20 @@ test.describe("algorithm simulation (Prim's minimum spanning tree)", () => {
     await expect(cv.edge(2, 3).locator('.edge-line')).not.toHaveCSS('stroke-dasharray', 'none');
   });
 
+  /** Waits for the cut's border to finish moving to its new place. */
+  const cutSettled = (_page: Page) => expect(cv.canvas).not.toHaveClass(/cut-moving/);
+
   /** For each vertex: is its centre inside the shaded territory (the tree's side of the cut)? */
-  const inTerritory = (page: Page) =>
-    page.evaluate(() => {
+  const inTerritory = async (page: Page) => {
+    await cutSettled(page);
+    return page.evaluate(() => {
       const region = document.querySelector<SVGPathElement>('#canvas .cut-region')!;
       return [...document.querySelectorAll<SVGGElement>('#canvas .node')].map((g) => {
         const m = g.transform.baseVal.consolidate()!.matrix;
         return region.isPointInFill(new DOMPoint(m.e, m.f));
       });
     });
+  };
 
   test('the cut is drawn as a border: the tree’s territory is shaded, the rest is not', async ({ page }) => {
     await build(page);
@@ -2713,6 +2718,7 @@ test.describe("algorithm simulation (Prim's minimum spanning tree)", () => {
       });
     for (const n of [1, 2, 3, 4]) {
       await update(page);
+      await cutSettled(page);
       for (const e of await sides()) {
         if (e.crossing) expect(e.changes, `${e.edge} after ${n} updates`).toBeGreaterThanOrEqual(1);
         else expect(e.changes, `${e.edge} after ${n} updates`).toBe(0);
@@ -2738,10 +2744,51 @@ test.describe("algorithm simulation (Prim's minimum spanning tree)", () => {
     });
     await run(page);
     await update(page); // tree {0}: 0 — 1 crosses the cut, 1 — 2 does not
+    await cutSettled(page);
     const [crossing, below] = await sides();
     expect(crossing).toMatchObject({ edge: '0-1', crossing: true });
     expect(crossing.changes).toBeGreaterThanOrEqual(1);
     expect(below).toMatchObject({ edge: '1-2', crossing: false, changes: 0, first: false });
+  });
+
+  test('after an Update the border moves smoothly to its new place, sweeping out from the tree', async ({ page }) => {
+    await build(page);
+    await run(page);
+    await steps(page, 1); // tree {0}
+    await cutSettled(page);
+    // Record the border on every frame of the next move, and whether vertex 1 (joining
+    // now) is in the tree's territory yet.
+    await page.evaluate(() => {
+      const w = window as unknown as { frames: Array<{ d: string; one: boolean }> };
+      w.frames = [];
+      let seen = false; // the move has started
+      const record = () => {
+        const svg = document.querySelector('#canvas')!;
+        const region = svg.querySelector<SVGPathElement>('.cut-region')!;
+        const node = svg.querySelector<SVGGElement>('[data-node-id="1"]')!;
+        const m = node.transform.baseVal.consolidate()!.matrix;
+        w.frames.push({ d: svg.querySelector('.cut-border')!.getAttribute('d') ?? '', one: region.isPointInFill(new DOMPoint(m.e, m.f)) });
+        const moving = svg.classList.contains('cut-moving');
+        seen ||= moving;
+        if ((!seen || moving) && w.frames.length < 2000) requestAnimationFrame(record);
+      };
+      requestAnimationFrame(record);
+    });
+    await update(page); // 1 joins
+    await cutSettled(page);
+    await page.waitForTimeout(100);
+    const frames = await page.evaluate(() =>
+      (window as unknown as { frames: Array<{ d: string; one: boolean }> }).frames.filter(
+        (f, i, all) => i === 0 || f.d !== all[i - 1].d,
+      ),
+    ); // one entry per change of the border (frames before the click repeat the old one)
+    const distinct = new Set(frames.map((f) => f.d)).size;
+    expect(distinct).toBeGreaterThan(8); // many in-between borders, not one jump
+    // Vertex 1 is reached part-way through the move, not at its first change.
+    const firstIn = frames.findIndex((f) => f.one);
+    expect(firstIn).toBeGreaterThan(2);
+    expect(frames[frames.length - 1].one).toBe(true);
+    expect(frames.slice(firstIn).every((f) => f.one)).toBe(true); // and stays in
   });
 
   test('the border is there even when no edge crosses the cut', async ({ page }) => {
@@ -2760,9 +2807,11 @@ test.describe("algorithm simulation (Prim's minimum spanning tree)", () => {
     await run(page);
     await steps(page, 4);
     await expect(cv.canvas).toHaveClass(/has-cut/);
-    await update(page); // the last vertex joins
+    await update(page); // the last vertex joins: the tree's territory floods the canvas, then fades
+    await expect(cv.canvas).toHaveClass(/cut-moving/);
     await expect(cv.canvas).not.toHaveClass(/has-cut/);
     await expect(cv.canvas.locator('.cut-border')).not.toHaveAttribute('d', /./);
+    await expect(cv.canvas.locator('.cut')).toHaveCSS('opacity', '0');
     await page.getByRole('button', { name: 'Finish', exact: true }).click();
     await run(page);
     await steps(page, 2);
@@ -2775,6 +2824,7 @@ test.describe("algorithm simulation (Prim's minimum spanning tree)", () => {
     await build(page);
     await run(page);
     await steps(page, 2);
+    await cutSettled(page);
     const border = cv.canvas.locator('.cut-border');
     const before = await border.getAttribute('d');
     await cv.drag(S[2], [S[2][0] + 160, S[2][1] + 40]);

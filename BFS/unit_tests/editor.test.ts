@@ -879,30 +879,46 @@ describe('GraphEditor lock and algorithm highlight', () => {
   });
 
   it('draws a cut as one side’s Voronoi territory and its border', () => {
+    // Settled cuts (reduced motion: no move between them).
+    vi.stubGlobal('matchMedia', () => ({ matches: true }));
     // The fixture: 0, 1, 2 in a row at x = 100, 250, 400 (y = 300), joined 0 — 1 — 2; the
     // canvas is 800 × 600.
     const region = svg.querySelector('.cut-region')!;
     const border = svg.querySelector('.cut-border')!;
-    /** The border's x coordinates (it is a vertical line here) and its vertical extent. */
-    const borderXs = () => {
-      const nums = [...border.getAttribute('d')!.matchAll(/(-?[\d.]+) (-?[\d.]+)/g)].map((m) => [Number(m[1]), Number(m[2])]);
-      return { xs: [...new Set(nums.map(([x]) => x))], ys: nums.map(([, y]) => y).sort((a, b) => a - b) };
+    const points = (d: string) =>
+      [...d.matchAll(/(-?[\d.]+) (-?[\d.]+)/g)].map((m) => ({ x: Number(m[1]), y: Number(m[2]) }));
+    /** The border's x coordinates (it is a vertical line here), to the nearest tenth. */
+    const borderXs = () => [...new Set(points(border.getAttribute('d')!).map((p) => Math.round(p.x * 10) / 10))];
+    /** Is p in the shaded territory (its loops, filled even-odd)? */
+    const inTerritory = (p: { x: number; y: number }) => {
+      let inside = false;
+      for (const loop of region.getAttribute('d')!.split('Z').filter((part) => part.trim())) {
+        const ps = points(loop);
+        for (let i = 0, j = ps.length - 1; i < ps.length; j = i++) {
+          const [a, b] = [ps[i], ps[j]];
+          if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+        }
+      }
+      return inside;
     };
     editor.setHighlight({ current: 1, done: [0], activeEdges: [], cut: [0] });
     expect(svg.classList.contains('has-cut')).toBe(true);
     // 0's territory is everything left of the bisector with 1, x = 175 (1 — 2 is on the
     // other side, and farther away).
-    expect(borderXs()).toEqual({ xs: [175], ys: [0, 600] });
-    expect(region.getAttribute('d')).toBe('M 0 0 L 175 0 L 175 600 L 0 600 Z');
+    expect(borderXs()).toEqual([175]);
+    const ys = points(border.getAttribute('d')!).map((p) => p.y);
+    expect([Math.min(...ys), Math.max(...ys)]).toEqual([0, 600]); // across the whole canvas
+    expect(inTerritory({ x: 170, y: 20 })).toBe(true);
+    expect(inTerritory({ x: 180, y: 20 })).toBe(false);
 
     editor.setHighlight({ current: 2, done: [0, 1], activeEdges: [], cut: [0, 1] });
-    expect(borderXs().xs).toEqual([325]); // between 1 and 2 now
+    expect(borderXs()).toEqual([325]); // between 1 and 2 now
 
     // The border follows a dragged vertex.
     pointer(nodeEl(2).querySelector('circle')!, 'pointerdown', 400, 300);
     pointer(svg, 'pointermove', 500, 300);
     pointer(svg, 'pointerup', 500, 300);
-    expect(borderXs().xs).toEqual([375]);
+    expect(borderXs()).toEqual([375]);
 
     // Non-crossing edges belong to their side: with 0 alone on its side, the edge 1 — 2
     // (dragged down out of line) still keeps 0's territory from reaching it.
@@ -910,34 +926,20 @@ describe('GraphEditor lock and algorithm highlight', () => {
     pointer(svg, 'pointermove', 100, 500);
     pointer(svg, 'pointerup', 100, 500);
     editor.setHighlight({ current: 1, done: [0], activeEdges: [], cut: [0] });
-    /** Is p inside 0's territory (the region path's convex polygons)? */
-    const inTerritory = (p: { x: number; y: number }) =>
-      region
-        .getAttribute('d')!
-        .split('Z')
-        .filter((part) => part.trim())
-        .some((part) => {
-          const ps = [...part.matchAll(/(-?[\d.]+) (-?[\d.]+)/g)].map((m) => ({ x: Number(m[1]), y: Number(m[2]) }));
-          let sign = 0;
-          return ps.every((a, i) => {
-            const b = ps[(i + 1) % ps.length];
-            const cross = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
-            if (Math.abs(cross) < 1e-9) return true;
-            if (!sign) sign = Math.sign(cross);
-            return Math.sign(cross) === sign;
-          });
-        });
     // (150, 380): its nearest vertex is 0 (94 px; 1 and 2 are 128 and 130 px away), so by
     // vertices alone it would be 0's. But the edge 1 — 2, from (250, 300) to (100, 500), is
     // only 32 px away, and that edge does not cross the cut: the point is on its side.
     expect(inTerritory({ x: 150, y: 380 })).toBe(false);
     expect(inTerritory({ x: 110, y: 310 })).toBe(true); // right next to 0
 
-    editor.setHighlight({ current: null, done: [0, 1, 2], activeEdges: [], cut: [0, 1, 2] }); // one side empty
+    // Every vertex on S's side: the territory is everything, with no border, and fades out.
+    editor.setHighlight({ current: null, done: [0, 1, 2], activeEdges: [], cut: [0, 1, 2] });
     expect(svg.classList.contains('has-cut')).toBe(false);
-    expect(border.hasAttribute('d')).toBe(false);
+    expect(border.getAttribute('d')).toBe('');
+    expect(inTerritory({ x: 790, y: 590 })).toBe(true);
     editor.setHighlight(null);
     expect(region.hasAttribute('d')).toBe(false);
+    vi.unstubAllGlobals();
   });
 
   it('edges between finished vertices outside the result (Prim) are marked to draw dashed green', () => {
@@ -1180,5 +1182,87 @@ describe('GraphEditor arc diagram (topological sort)', () => {
     for (let i = 1; i < end.length; i++) expect(end[i]).toBeGreaterThan(end[i - 1]);
     expect(edgeEl(3, 2)!.dataset.shape).toBe('path');
     expect(Math.max(...pathYs(3, 2))).toBeGreaterThan(graph.getNode(3)!.y + 50);
+  });
+});
+
+describe('GraphEditor cut transitions', () => {
+  let frames: FrameRequestCallback[];
+  let now: number;
+
+  beforeEach(() => {
+    frames = [];
+    now = 0;
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => frames.push(cb));
+    vi.stubGlobal('cancelAnimationFrame', () => {});
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    // 0, 1, 2 in a row at x = 100, 250, 400 (y = 300), joined 0 — 1 — 2.
+    addRow(3);
+    clickNode(0);
+    clickNode(1);
+    clickNode(1);
+    clickNode(2);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const border = () => svg.querySelector('.cut-border')!.getAttribute('d') ?? '';
+  /** The border's x position (a vertical line in this fixture). */
+  const borderX = () => {
+    const xs = [...border().matchAll(/(-?[\d.]+) (-?[\d.]+)/g)].map((m) => Number(m[1]));
+    return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN;
+  };
+  /** Runs one animation frame, `ms` later. */
+  const frame = (ms: number) => {
+    now += ms;
+    const queued = frames;
+    frames = [];
+    for (const cb of queued) cb(now);
+  };
+
+  it('moves the border continuously to its new place instead of jumping', () => {
+    editor.setHighlight({ current: null, done: [0], activeEdges: [], cut: [0] });
+    for (let i = 0; i < 60 && frames.length; i++) frame(16); // settle the first cut
+    expect(borderX()).toBeCloseTo(175, 0);
+
+    editor.setHighlight({ current: null, done: [0, 1], activeEdges: [], cut: [0, 1] });
+    expect(svg.classList.contains('cut-moving')).toBe(true);
+    expect(borderX()).toBeCloseTo(175, 0); // starts where it was
+    const xs: number[] = [];
+    while (frames.length) {
+      frame(16);
+      xs.push(borderX());
+    }
+    expect(borderX()).toBeCloseTo(325, 0); // ends at the new bisector
+    expect(svg.classList.contains('cut-moving')).toBe(false);
+    // On the way it passed through many places in between, never going backwards, in
+    // steps much smaller than the whole move.
+    const between = xs.filter((x) => x > 180 && x < 320);
+    expect(between.length).toBeGreaterThan(10);
+    for (let i = 1; i < xs.length; i++) {
+      expect(xs[i]).toBeGreaterThanOrEqual(xs[i - 1] - 0.5);
+      expect(xs[i] - xs[i - 1]).toBeLessThan(40);
+    }
+  });
+
+  it('a first cut grows from its vertex', () => {
+    editor.setHighlight({ current: null, done: [0], activeEdges: [], cut: [0] });
+    expect(svg.querySelector('.cut-region')!.getAttribute('d')).toBe(''); // nothing yet
+    frame(200);
+    const early = borderX();
+    while (frames.length) frame(16);
+    expect(early).toBeLessThan(170); // part-way out from 0 (at x = 100) towards x = 175
+    expect(borderX()).toBeCloseTo(175, 0);
+  });
+
+  it('with reduced motion, the border jumps straight to its new place', () => {
+    vi.stubGlobal('matchMedia', () => ({ matches: true }));
+    editor.setHighlight({ current: null, done: [0], activeEdges: [], cut: [0] });
+    editor.setHighlight({ current: null, done: [0, 1], activeEdges: [], cut: [0, 1] });
+    expect(frames).toHaveLength(0);
+    expect(svg.classList.contains('cut-moving')).toBe(false);
+    expect(borderX()).toBeCloseTo(325, 0);
   });
 });

@@ -179,8 +179,9 @@ export class PrimSimulation implements Simulation {
         ...this.crossingEdges().map(([from, to]): ExploredEdge => ({ from, to, crossing: true })),
         ...this.withinEdges().map(([from, to]): ExploredEdge => ({ from, to, within: true })),
       ],
-      // The cut (S, V − S), while both sides have vertices.
-      cut: this.order.length > 0 && !this.finished ? [...this.order] : undefined,
+      // The cut (S, V − S) once the tree has a vertex — including at the end, when it has
+      // them all (the canvas then shows the tree's territory flooding everything).
+      cut: this.order.length > 0 ? [...this.order] : undefined,
     };
   }
 

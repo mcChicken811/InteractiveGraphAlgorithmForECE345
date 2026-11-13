@@ -1,7 +1,7 @@
 import { ForceLayout } from './layout.js';
 import { fitFontSize } from './label-fit.js';
 import { halfEllipse, rowLayout } from './arc-diagram.js';
-import { chainSegments, polygonsPath, polylinesPath, sampleSegment, territory } from './voronoi.js';
+import { cutShape, loopsPath, polylinesPath } from './voronoi.js';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 export const NODE_RADIUS = 20;
 /** Pointer travel (px) before a press on a node becomes a drag instead of a click. */
@@ -19,8 +19,8 @@ const SIM_LABEL_FONT = 14;
 const SIM_LABEL_WIDTH = NODE_RADIUS * 2 - 8;
 /** Arc diagram: how long vertices take to glide into line, and edges to bend into / out of arcs. */
 const ARRANGE_MS = 750;
-/** A cut's border: how far apart the points sampled along each non-crossing edge are. */
-const CUT_SAMPLE_STEP = 14;
+/** How long a cut's border takes to move to its new place when the cut changes. */
+const CUT_MS = 650;
 const BEND_MS = 450;
 /**
  * Interactive SVG editor:
@@ -67,6 +67,14 @@ export class GraphEditor {
     cutBorder;
     /** The geometry the cut was last drawn for, to skip redrawing it when nothing moved. */
     cutKey = '';
+    /**
+     * The cut being drawn: its S before (cutFrom) and after (cutTo) the latest change, and
+     * how far the border has moved between them (cutT, 0 → 1). null: no cut.
+     */
+    cutFrom = null;
+    cutTo = null;
+    cutT = 1;
+    cutTween = null;
     edgeLayer;
     previewLine;
     nodeLayer;
@@ -130,7 +138,34 @@ export class GraphEditor {
         this.svg.classList.toggle('sim-compact', !!highlight?.compact);
         if (!highlight)
             this.setPeek(null);
+        this.setCut(highlight?.cut ? new Set(highlight.cut) : null);
         this.render();
+    }
+    /**
+     * Takes the highlight's cut. When it changes, the border moves continuously to its new
+     * place (CUT_MS) instead of jumping; a cut appearing grows from nothing.
+     */
+    setCut(next) {
+        if (!next) {
+            this.cutFrom = this.cutTo = null;
+            this.cutTween = null;
+            this.cutT = 1;
+            return;
+        }
+        const prev = this.cutTo;
+        if (prev && prev.size === next.size && [...next].every((id) => prev.has(id)))
+            return;
+        // From the previous target: a change during a move continues from where it was headed.
+        this.cutFrom = prev ?? new Set();
+        this.cutTo = next;
+        if (prefersReducedMotion()) {
+            this.cutTween = null;
+            this.cutT = 1;
+            return;
+        }
+        this.cutT = 0;
+        this.cutTween = { from: 0, to: 1, start: performance.now(), duration: CUT_MS };
+        this.startTweens();
     }
     /**
      * Temporarily changes what the vertices show while the pointer is over (or focus is in)
@@ -298,6 +333,13 @@ export class GraphEditor {
             if (k >= 1)
                 this.moveTween = null;
         }
+        if (this.cutTween) {
+            this.cutT = progress(this.cutTween);
+            if (this.cutT >= 1) {
+                this.cutT = 1;
+                this.cutTween = null;
+            }
+        }
         if (this.bendTween) {
             const k = progress(this.bendTween);
             this.bend = this.bendTween.from + (this.bendTween.to - this.bendTween.from) * k;
@@ -308,7 +350,7 @@ export class GraphEditor {
             }
         }
         this.render();
-        if (this.moveTween || this.bendTween)
+        if (this.moveTween || this.bendTween || this.cutTween)
             this.startTweens();
     };
     // ---------------------------------------------------------------- events
@@ -671,47 +713,74 @@ export class GraphEditor {
     /**
      * Draws the highlight's cut (S, V − S), if any: S's territory shaded, and the border with
      * the rest. A side's territory is the part of the canvas nearer to it than to the other
-     * side — nearer to one of its vertices, or to one of its edges: an edge whose ends are
-     * both on that side (it does not cross the cut). So only crossing edges cross the
-     * border. Edges count through points sampled along them (Voronoi cells of points stand
-     * in for those of segments). It follows the vertices as they move.
+     * side — nearer to one of its vertices, or to one of its edges whose ends are both on
+     * that side (it does not cross the cut). So only crossing edges cross the border.
+     *
+     * While the cut changes, the border moves continuously: the new territory is revealed by
+     * a front spreading out from the old S (see voronoi.ts). When S ends up with every vertex, its territory floods the
+     * canvas and then fades out. It follows the vertices as they move.
      */
     renderCut() {
-        const cut = this.highlight?.cut;
-        const nodes = this.graph.getNodes();
-        const side = new Set(cut ?? []);
-        const insideCount = nodes.filter((n) => side.has(n.id)).length;
-        const drawn = !!cut && insideCount > 0 && insideCount < nodes.length;
-        this.svg.classList.toggle('has-cut', drawn);
-        if (!drawn) {
+        const to = this.cutTo;
+        if (!to) {
             this.cutKey = '';
+            this.svg.classList.remove('has-cut', 'cut-moving');
             this.cutRegion.removeAttribute('d');
             this.cutBorder.removeAttribute('d');
             return;
         }
-        const rect = this.svg.getBoundingClientRect();
-        const sites = [];
-        const inside = new Set();
-        const add = (p, isInside) => {
-            if (isInside)
-                inside.add(sites.length);
-            sites.push(p);
+        const from = this.cutFrom ?? to;
+        const t = this.cutTween ? this.cutT : 1;
+        const nodes = this.graph.getNodes();
+        const modeOf = (set) => {
+            const inside = nodes.filter((n) => set.has(n.id)).length;
+            return inside === 0 ? 'empty' : inside === nodes.length ? 'all' : 'split';
         };
-        for (const node of nodes)
-            add(node, side.has(node.id));
-        const edges = this.graph.getEdges().filter(([a, b]) => side.has(a) === side.has(b)); // non-crossing
-        for (const [a, b] of edges) {
-            const isInside = side.has(a);
-            for (const p of sampleSegment(this.graph.getNode(a), this.graph.getNode(b), CUT_SAMPLE_STEP))
-                add(p, isInside);
+        const toMode = modeOf(to);
+        // Shown while both sides have vertices, and while moving; a full (or empty) cut that
+        // has finished moving fades out.
+        this.svg.classList.toggle('has-cut', toMode === 'split' || t < 1);
+        this.svg.classList.toggle('cut-moving', t < 1);
+        const sideIn = (set, id) => (set.has(id) ? 'in' : 'out');
+        const edgeSide = (set, a, b) => set.has(a) === set.has(b) ? sideIn(set, a) : null; // crossing edges belong to neither
+        // A vertex joining S with no edge to the old S (the first one, or a new tree's root)
+        // grows a territory of its own; the rest of the new territory spreads from the old S.
+        const touchesFrom = new Set();
+        for (const [a, b] of this.graph.getEdges()) {
+            if (from.has(a))
+                touchesFrom.add(b);
+            if (from.has(b))
+                touchesFrom.add(a);
         }
-        const key = `${rect.width}x${rect.height}|${sites.map((p, i) => `${p.x},${p.y},${inside.has(i) ? 1 : 0}`).join(';')}`;
+        const features = nodes.map((node) => ({
+            a: node,
+            from: sideIn(from, node.id),
+            to: sideIn(to, node.id),
+            seed: !from.has(node.id) && to.has(node.id) && !touchesFrom.has(node.id),
+        }));
+        for (const [a, b] of this.graph.getEdges()) {
+            const f = edgeSide(from, a, b);
+            const g = edgeSide(to, a, b);
+            if (f || g)
+                features.push({ a: this.graph.getNode(a), b: this.graph.getNode(b), from: f, to: g });
+        }
+        const rect = this.svg.getBoundingClientRect();
+        const key = [
+            rect.width,
+            rect.height,
+            t,
+            ...features.map((f) => `${f.a.x},${f.a.y},${f.b?.x},${f.b?.y},${f.from},${f.to}`),
+        ].join('|');
         if (key === this.cutKey)
             return; // nothing moved
         this.cutKey = key;
-        const { region, border } = territory(sites, inside, { width: rect.width, height: rect.height });
-        this.cutRegion.setAttribute('d', polygonsPath(region));
-        this.cutBorder.setAttribute('d', polylinesPath(chainSegments(border)));
+        const { region, border } = cutShape(features, { width: rect.width, height: rect.height }, {
+            t,
+            from: modeOf(from),
+            to: toMode,
+        });
+        this.cutRegion.setAttribute('d', loopsPath(region));
+        this.cutBorder.setAttribute('d', polylinesPath(border));
     }
     /** The key of the drawn edge a → b (undirected: between a and b), as used in edgeEls. */
     edgeKey(a, b, directed) {

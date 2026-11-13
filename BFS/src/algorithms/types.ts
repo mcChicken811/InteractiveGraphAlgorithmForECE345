@@ -45,7 +45,9 @@ export interface Highlight {
    * One side S of a cut (S, V − S) (Prim: the tree's vertices). The canvas shades S's
    * territory — the part of the canvas nearer to a vertex of S than to any other vertex
    * (its Voronoi cells) — and draws the border with V − S's territory, which exists even
-   * when no edge crosses the cut. Left out (or with either side empty), nothing is drawn.
+   * when no edge crosses the cut. When the cut changes, the border moves continuously to
+   * its new place. Left out, nothing is drawn; with every vertex in S, the territory floods
+   * the canvas and fades out.
    */
   cut?: NodeId[];
 }

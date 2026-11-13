@@ -152,14 +152,14 @@ describe('PrimSimulation (weighted, CLRS MST-PRIM)', () => {
     ]);
   });
 
-  it('reports the cut (the tree’s vertices) while both sides have vertices', () => {
+  it('reports the cut (the tree’s vertices) once the tree has a vertex, to the end', () => {
     expect(sim.highlight().cut).toBeUndefined(); // the tree is empty
     sim.step();
     expect(sim.highlight().cut).toEqual([0]);
     sim.step();
     expect(sim.highlight().cut).toEqual([0, 1]);
     runToEnd(sim);
-    expect(sim.highlight().cut).toBeUndefined(); // everything is in the tree
+    expect(sim.highlight().cut).toEqual([0, 1, 2, 3, 4]); // everything (the canvas floods, then fades)
   });
 
   it('crossing edges are exactly those with one end in the tree; none before the first step', () => {

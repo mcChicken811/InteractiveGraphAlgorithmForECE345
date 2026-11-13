@@ -1,228 +1,347 @@
 /**
- * Voronoi cells and the border between two groups of sites, for drawing an algorithm's
- * cut (S, V − S) as territories on the canvas: every point of the canvas belongs to its
- * nearest vertex, the cells of S's vertices together form S's territory, and the border
- * is where a cell of S meets a cell of V − S.
+ * The territories of an algorithm's cut (S, V − S) on the canvas, and the border between
+ * them, as the zero line of a distance field:
  *
- * This is the Voronoi-diagram view of a vertex partition that GMap (Gansner, Hu &
- * Kobourov, "GMap: Visualizing Graphs and Clusters as Maps", IEEE PacificVis 2010) starts
- * from. It depends only on where the vertices are, so the border exists even when no
- * edge crosses the cut, and it always separates the two groups exactly.
+ *   f(p) = (distance from p to S's nearest feature) − (distance to V − S's nearest feature)
  *
- * Edges can take part too: a segment site is approximated by points sampled along it
- * (`sampleSegment`), the usual practical stand-in for the exact Voronoi diagram of line
- * segments (whose borders are partly parabolic). Then the territory of a side holds that
- * side's edges as well as its vertices.
+ * A feature is a vertex, or an edge whose ends are both on one side (it does not cross
+ * the cut); distances to edges are exact point-to-segment distances. f < 0 is S's
+ * territory, f > 0 the other's, and f = 0 the border: the Voronoi border between the two
+ * groups of features (the Voronoi view of a partition that GMap starts from — Gansner, Hu
+ * & Kobourov, "GMap: Visualizing Graphs and Clusters as Maps", IEEE PacificVis 2010 —
+ * with edges as segment sites). It depends only on where the features are, so it exists
+ * even when no edge crosses the cut.
  *
- * Each cell is computed exactly: the bounding rectangle clipped by the perpendicular
- * bisector with other sites (Sutherland–Hodgman), remembering which site produced each
- * edge of the cell. Nearby sites are found through a grid of buckets, tried in rings
- * outwards, stopping once the next ring is more than twice as far as the cell's farthest
- * corner — no farther bisector can reach the cell — so each cell costs about the same
- * however many sites there are. Pure functions, no DOM.
+ * Moving the border continuously from one cut to the next, when S grows (as in Prim's
+ * algorithm), reveals the new territory with a front spreading out from the old S at a
+ * steady speed:
+ *
+ *   region(t) = R_old ∪ (R_new ∩ { p : distance from p to the old S's features < r(t) })
+ *
+ * with r(t) rising until the front has covered all of the new territory — as a field,
+ * g_t = max(f_new, min(f_old, d_seed − r(t))), traced the same way. The territory along a
+ * new tree edge so fills in from the tree's end towards the vertex that joined. A vertex
+ * that joins with no edge to S (the first one, or a new tree's root) seeds a front of its
+ * own. The territory only grows, and moves continuously (sublevel sets of a continuous
+ * function); the front's arcs are offset curves of the old S.
+ *
+ * For any other change (S losing vertices), the two fields are blended instead,
+ * f_t = (1 − t)·f_old + t·f_new — the classic way to morph implicit shapes (Turk &
+ * O'Brien, "Shape Transformation Using Variational Implicit Functions", SIGGRAPH 1999).
+ *
+ * The field is sampled on a grid and the zero line traced with marching squares, each
+ * crossing refined by bisection on the exact field. A frame of padding with f > 0 around
+ * the canvas closes every contour, so S's territory comes out as closed loops (filled with
+ * the even-odd rule); the parts of the loops on that frame are left out of the border
+ * line. Pure functions, no DOM.
  */
-/** A cell edge's origin: the index of the neighbouring site whose bisector it lies on, or −1 for the rectangle. */
-const RECT = -1;
+/** The field value standing for "no territory" (+) or "everything" (−) when a side is empty. */
+export const FLAT = 60;
+const DEFAULT_STEP = 7;
+const PAD = 1e9;
+/** Distance from (px, py) to the segment a–b. */
+function segmentDistance(px, py, ax, ay, bx, by) {
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    let t = len2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const cx = ax + dx * t - px;
+    const cy = ay + dy * t - py;
+    return Math.sqrt(cx * cx + cy * cy);
+}
+/** The field for one cut, from the distances to its nearest inside and outside features. */
+function field(dIn, dOut, mode) {
+    if (mode === 'empty')
+        return FLAT;
+    if (mode === 'all')
+        return -FLAT;
+    if (dIn === Infinity)
+        return FLAT;
+    if (dOut === Infinity)
+        return -FLAT;
+    return dIn - dOut;
+}
 /**
- * The Voronoi cell of every site within `bounds` (the rectangle from (0, 0)). Sites at
- * the same position split nothing between them: each gets the cell they share.
+ * The territory of S, and its border, for the blend `t` between two cuts (t = 1, or
+ * `from` equal to `to`, for a single cut).
  */
-export function voronoiCells(sites, bounds) {
-    const { width: w, height: h } = bounds;
-    // A grid of buckets about one site wide, so each cell only meets nearby sites.
-    const size = Math.max(8, Math.sqrt((Math.max(w, 1) * Math.max(h, 1)) / Math.max(sites.length, 1)));
-    const cols = Math.max(1, Math.ceil(w / size));
-    const rows = Math.max(1, Math.ceil(h / size));
-    const bucketOf = (p) => [
-        Math.min(cols - 1, Math.max(0, Math.floor(p.x / size))),
-        Math.min(rows - 1, Math.max(0, Math.floor(p.y / size))),
-    ];
-    const buckets = Array.from({ length: cols * rows }, () => []);
-    sites.forEach((p, j) => {
-        const [bx, by] = bucketOf(p);
-        buckets[by * cols + bx].push(j);
+export function cutShape(features, bounds, options) {
+    const { t, from, to } = options;
+    const step = options.step ?? DEFAULT_STEP;
+    const w = Math.max(bounds.width, 1);
+    const h = Math.max(bounds.height, 1);
+    const nx = Math.max(1, Math.ceil(w / step));
+    const ny = Math.max(1, Math.ceil(h / step));
+    const sx = w / nx;
+    const sy = h / ny;
+    // Nodes i = −1 … nx + 1, j = −1 … ny + 1; the outer ring is padding (outside).
+    const cols = nx + 3;
+    const rows = ny + 3;
+    const value = new Float64Array(cols * rows).fill(PAD);
+    const index = (i, j) => (j + 1) * cols + (i + 1);
+    const n = features.length;
+    const ax = new Float64Array(n);
+    const ay = new Float64Array(n);
+    const bx = new Float64Array(n);
+    const by = new Float64Array(n);
+    const fromIn = new Uint8Array(n);
+    const fromOut = new Uint8Array(n);
+    const toIn = new Uint8Array(n);
+    const toOut = new Uint8Array(n);
+    const seedOf = new Uint8Array(n); // the front grows from these
+    features.forEach((f, k) => {
+        ax[k] = f.a.x;
+        ay[k] = f.a.y;
+        bx[k] = (f.b ?? f.a).x;
+        by[k] = (f.b ?? f.a).y;
+        fromIn[k] = +(f.from === 'in');
+        fromOut[k] = +(f.from === 'out');
+        toIn[k] = +(f.to === 'in');
+        toOut[k] = +(f.to === 'out');
+        seedOf[k] = +(f.from === 'in' || !!f.seed);
     });
-    return sites.map((site, i) => {
-        let cell = {
-            points: [
-                { x: 0, y: 0 },
-                { x: w, y: 0 },
-                { x: w, y: h },
-                { x: 0, y: h },
-            ],
-            edge: [RECT, RECT, RECT, RECT],
-        };
-        let reach = farthest2(cell.points, site);
-        const [cx, cy] = bucketOf(site);
-        // Rings of buckets around the site's own, nearest first. Every site in ring k + 1 is at
-        // least k bucket widths away; once that is beyond twice the cell's farthest corner, no
-        // bisector with a farther site can reach the cell.
-        for (let k = 0;; k++) {
-            if (k > 0 && ((k - 1) * size) ** 2 > 4 * reach)
-                break;
-            if (cx - k < 0 && cy - k < 0 && cx + k >= cols && cy + k >= rows)
-                break; // past the grid
-            for (let by = cy - k; by <= cy + k; by++) {
-                if (by < 0 || by >= rows)
-                    continue;
-                const edgeRow = by === cy - k || by === cy + k;
-                for (let bx = cx - k; bx <= cx + k; bx += edgeRow ? 1 : 2 * k) {
-                    if (bx >= 0 && bx < cols) {
-                        for (const j of buckets[by * cols + bx]) {
-                            if (j === i)
-                                continue;
-                            const clipped = clip(cell, site, sites[j], j);
-                            if (clipped !== cell) {
-                                cell = clipped;
-                                reach = farthest2(cell.points, site);
-                            }
-                        }
-                    }
-                    if (k === 0)
-                        break;
+    // S grows when nothing leaves it; then the new territory is revealed by a front.
+    const grows = features.every((f) => f.from !== 'in' || f.to === 'in') && seedOf.some((x) => x === 1);
+    /** The old field, the new one, and the distance to the front's seeds, at a point. */
+    const scratch = new Float64Array(3);
+    const sample = (px, py) => {
+        let fIn = Infinity;
+        let fOut = Infinity;
+        let tIn = Infinity;
+        let tOut = Infinity;
+        let seed = Infinity;
+        for (let k = 0; k < n; k++) {
+            if (!(toIn[k] | toOut[k] | fromIn[k] | fromOut[k] | seedOf[k]))
+                continue;
+            const d = segmentDistance(px, py, ax[k], ay[k], bx[k], by[k]);
+            if (toIn[k] && d < tIn)
+                tIn = d;
+            if (toOut[k] && d < tOut)
+                tOut = d;
+            if (fromIn[k] && d < fIn)
+                fIn = d;
+            if (fromOut[k] && d < fOut)
+                fOut = d;
+            if (seedOf[k] && d < seed)
+                seed = d;
+        }
+        scratch[0] = field(fIn, fOut, from);
+        scratch[1] = field(tIn, tOut, to);
+        scratch[2] = seed;
+        return scratch;
+    };
+    const count = cols * rows;
+    const oldF = new Float64Array(count);
+    const newF = new Float64Array(count);
+    const seedD = new Float64Array(count);
+    // The front's radius runs over the seed distances of the territory to be revealed.
+    let r0 = Infinity;
+    let r1 = -Infinity;
+    for (let j = 0; j <= ny; j++) {
+        for (let i = 0; i <= nx; i++) {
+            const [fo, fn, sd] = sample(i * sx, j * sy);
+            const at = index(i, j);
+            oldF[at] = fo;
+            newF[at] = fn;
+            seedD[at] = sd;
+            if (fn < 0 && fo >= 0) {
+                r0 = Math.min(r0, sd);
+                r1 = Math.max(r1, sd);
+            }
+        }
+    }
+    const sweep = grows && r0 <= r1 && Number.isFinite(r1);
+    const radius = r0 - 0.5 + (r1 - r0 + 1) * t;
+    /** The field drawn at blend t. */
+    const blend = (fo, fn, sd) => {
+        if (t >= 1)
+            return fn;
+        if (t <= 0)
+            return fo;
+        if (sweep)
+            return Math.max(fn, Math.min(fo, sd - radius));
+        return (1 - t) * fo + t * fn;
+    };
+    for (let j = 0; j <= ny; j++) {
+        for (let i = 0; i <= nx; i++) {
+            const at = index(i, j);
+            value[at] = blend(oldF[at], newF[at], seedD[at]);
+        }
+    }
+    const exact = (px, py) => {
+        const [fo, fn, sd] = sample(px, py);
+        return blend(fo, fn, sd);
+    };
+    // Node positions (the padding ring sits one cell outside the canvas).
+    const xOf = (i) => i * sx;
+    const yOf = (j) => j * sy;
+    // Crossing points, one per grid edge, keyed by edge id: 2·node + 0 (to the right) / 1 (down).
+    // Inside the canvas each is refined by bisection on the exact field, so the border is
+    // accurate even where the field bends sharply (near vertices).
+    const inner = (i, j) => i >= 0 && j >= 0 && i <= nx && j <= ny;
+    const crossing = new Map();
+    const crossAt = (i, j, horizontal) => {
+        const id = index(i, j) * 2 + (horizontal ? 0 : 1);
+        if (!crossing.has(id)) {
+            const [i2, j2] = horizontal ? [i + 1, j] : [i, j + 1];
+            const f1 = value[index(i, j)];
+            const f2 = value[index(i2, j2)];
+            const [x1, y1, x2, y2] = [xOf(i), yOf(j), xOf(i2), yOf(j2)];
+            let s = f1 / (f1 - f2);
+            if (inner(i, j) && inner(i2, j2)) {
+                let lo = 0;
+                let hi = 1;
+                for (let k = 0; k < 7; k++) {
+                    const v = exact(x1 + (x2 - x1) * s, y1 + (y2 - y1) * s);
+                    if (v < 0 === f1 < 0)
+                        lo = s;
+                    else
+                        hi = s;
+                    s = (lo + hi) / 2;
                 }
             }
-            if (!cell.points.length)
-                break;
+            crossing.set(id, { x: x1 + (x2 - x1) * s, y: y1 + (y2 - y1) * s });
         }
-        return cell;
-    });
-}
-/** Squared distance from `site` to the farthest of `points`. */
-function farthest2(points, site) {
-    let max = 0;
-    for (const p of points)
-        max = Math.max(max, (p.x - site.x) ** 2 + (p.y - site.y) ** 2);
-    return max;
-}
-/**
- * Points spaced at most `step` apart strictly between p and q (not p and q themselves),
- * standing in for the segment p–q as Voronoi sites.
- */
-export function sampleSegment(p, q, step) {
-    const len = Math.hypot(q.x - p.x, q.y - p.y);
-    const parts = Math.ceil(len / step);
-    const points = [];
-    for (let k = 1; k < parts; k++) {
-        const t = k / parts;
-        points.push({ x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t });
-    }
-    return points;
-}
-/** Keeps the part of `cell` at least as close to `a` as to `b`; new edges get origin `label`. */
-function clip(cell, a, b, label) {
-    const nx = b.x - a.x;
-    const ny = b.y - a.y;
-    if (Math.abs(nx) < 1e-9 && Math.abs(ny) < 1e-9)
-        return cell; // same position
-    // g(p) ≤ 0 ⇔ p is at least as close to a as to b (g is the bisector's signed distance, scaled).
-    const mx = (a.x + b.x) / 2;
-    const my = (a.y + b.y) / 2;
-    const g = (p) => (p.x - mx) * nx + (p.y - my) * ny;
-    const points = [];
-    const edge = [];
-    const n = cell.points.length;
-    for (let k = 0; k < n; k++) {
-        const p = cell.points[k];
-        const q = cell.points[(k + 1) % n];
-        const gp = g(p);
-        const gq = g(q);
-        const cross = () => {
-            const t = gp / (gp - gq);
-            return { x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t };
-        };
-        if (gp <= 0) {
-            points.push(p);
-            edge.push(cell.edge[k]);
-            // Leaving the kept side: the edge from the crossing to where the polygon comes back
-            // in lies along the bisector.
-            if (gq > 0) {
-                points.push(cross());
-                edge.push(label);
+        return id;
+    };
+    // Marching squares: each cell adds up to two segments between crossings on its sides.
+    const segA = [];
+    const segB = [];
+    const segPad = [];
+    for (let j = -1; j <= ny; j++) {
+        for (let i = -1; i <= nx; i++) {
+            const v00 = value[index(i, j)];
+            const v10 = value[index(i + 1, j)];
+            const v11 = value[index(i + 1, j + 1)];
+            const v01 = value[index(i, j + 1)];
+            const c = (v00 < 0 ? 1 : 0) | (v10 < 0 ? 2 : 0) | (v11 < 0 ? 4 : 0) | (v01 < 0 ? 8 : 0);
+            if (c === 0 || c === 15)
+                continue;
+            const pad = i < 0 || j < 0 || i >= nx || j >= ny;
+            const T = () => crossAt(i, j, true);
+            const B = () => crossAt(i, j + 1, true);
+            const L = () => crossAt(i, j, false);
+            const R = () => crossAt(i + 1, j, false);
+            const add = (p, q) => {
+                segA.push(p);
+                segB.push(q);
+                segPad.push(pad);
+            };
+            // Saddles (opposite corners inside): the centre decides which corners connect.
+            const centreIn = v00 + v10 + v11 + v01 < 0;
+            switch (c) {
+                case 1:
+                case 14:
+                    add(L(), T());
+                    break;
+                case 2:
+                case 13:
+                    add(T(), R());
+                    break;
+                case 3:
+                case 12:
+                    add(L(), R());
+                    break;
+                case 4:
+                case 11:
+                    add(R(), B());
+                    break;
+                case 6:
+                case 9:
+                    add(T(), B());
+                    break;
+                case 7:
+                case 8:
+                    add(L(), B());
+                    break;
+                case 5:
+                    if (centreIn) {
+                        add(T(), R());
+                        add(B(), L());
+                    }
+                    else {
+                        add(L(), T());
+                        add(R(), B());
+                    }
+                    break;
+                case 10:
+                    if (centreIn) {
+                        add(L(), T());
+                        add(R(), B());
+                    }
+                    else {
+                        add(T(), R());
+                        add(B(), L());
+                    }
+                    break;
             }
         }
-        else if (gq <= 0) {
-            // Coming back in: the rest of this edge belongs to the original edge.
-            points.push(cross());
-            edge.push(cell.edge[k]);
+    }
+    // Chain the segments into closed loops through the crossings they share (each crossing
+    // is shared by exactly the two cells on either side of its grid edge).
+    const at = new Map();
+    for (let s = 0; s < segA.length; s++) {
+        for (const id of [segA[s], segB[s]]) {
+            const list = at.get(id);
+            if (list)
+                list.push(s);
+            else
+                at.set(id, [s]);
         }
     }
-    return { points, edge };
-}
-/**
- * The territory of the sites in `inside` and its border with the others. When either
- * side is empty there is no border (and the region is everything or nothing).
- */
-export function territory(sites, inside, bounds) {
-    const cells = voronoiCells(sites, bounds);
+    const used = new Uint8Array(segA.length);
     const region = [];
     const border = [];
-    cells.forEach((cell, i) => {
-        if (!inside.has(i) || cell.points.length < 3)
-            return;
-        region.push(cell.points);
-        const n = cell.points.length;
-        for (let k = 0; k < n; k++) {
-            const origin = cell.edge[k];
-            if (origin === RECT || inside.has(origin))
-                continue;
-            const p = cell.points[k];
-            const q = cell.points[(k + 1) % n];
-            if (Math.hypot(q.x - p.x, q.y - p.y) > 1e-6)
-                border.push([p, q]);
+    for (let start = 0; start < segA.length; start++) {
+        if (used[start])
+            continue;
+        // Walk the loop: crossing ids[k] → ids[k + 1] is segment k, padding if pads[k].
+        const ids = [segA[start]];
+        const pads = [];
+        let s = start;
+        let id = segB[start];
+        for (;;) {
+            used[s] = 1;
+            pads.push(segPad[s]);
+            ids.push(id);
+            const next = (at.get(id) ?? []).find((x) => !used[x]);
+            if (next === undefined)
+                break;
+            id = segA[next] === id ? segB[next] : segA[next];
+            s = next;
         }
-    });
+        const points = ids.map((c) => crossing.get(c));
+        region.push(points.slice(0, -1)); // the last crossing repeats the first
+        // The border: runs of segments off the padding frame.
+        const firstPad = pads.indexOf(true);
+        if (firstPad < 0) {
+            border.push(points); // a closed border loop, ending where it starts
+            continue;
+        }
+        let run = [];
+        for (let k = 1; k <= pads.length; k++) {
+            const seg = (firstPad + k) % pads.length; // start just after padding, so runs don't wrap
+            if (pads[seg]) {
+                if (run.length > 1)
+                    border.push(run);
+                run = [];
+                continue;
+            }
+            if (!run.length)
+                run.push(points[seg]);
+            run.push(points[seg + 1]);
+        }
+        if (run.length > 1)
+            border.push(run);
+    }
     return { region, border };
 }
-/** SVG path data for polygons (closed) and for loose segments. */
-export function polygonsPath(polygons) {
-    return polygons.map((ps) => `M ${ps.map((p) => `${round(p.x)} ${round(p.y)}`).join(' L ')} Z`).join(' ');
+/** SVG path data for closed loops. */
+export function loopsPath(loops) {
+    return loops.map((ps) => `M ${ps.map((p) => `${round(p.x)} ${round(p.y)}`).join(' L ')} Z`).join(' ');
 }
-export function segmentsPath(segments) {
-    return segments.map(([p, q]) => `M ${round(p.x)} ${round(p.y)} L ${round(q.x)} ${round(q.y)}`).join(' ');
-}
-/**
- * Joins segments that share endpoints into polylines, so a dashed stroke flows along the
- * border instead of restarting its pattern at every short piece.
- */
-export function chainSegments(segments) {
-    const key = (p) => `${Math.round(p.x * 10)},${Math.round(p.y * 10)}`;
-    const at = new Map();
-    segments.forEach(([p, q], i) => {
-        for (const k of [key(p), key(q)]) {
-            const list = at.get(k);
-            if (list)
-                list.push(i);
-            else
-                at.set(k, [i]);
-        }
-    });
-    const used = new Uint8Array(segments.length);
-    /** Extends `line` from its last point while an unused segment continues it. */
-    const extend = (line) => {
-        for (;;) {
-            const end = line[line.length - 1];
-            const next = (at.get(key(end)) ?? []).find((i) => !used[i]);
-            if (next === undefined)
-                return;
-            used[next] = 1;
-            const [p, q] = segments[next];
-            line.push(key(p) === key(end) ? q : p);
-        }
-    };
-    const lines = [];
-    segments.forEach(([p, q], i) => {
-        if (used[i])
-            return;
-        used[i] = 1;
-        const line = [p, q];
-        extend(line);
-        line.reverse();
-        extend(line);
-        lines.push(line);
-    });
-    return lines;
-}
+/** SVG path data for open polylines. */
 export function polylinesPath(lines) {
     return lines.map((ps) => `M ${ps.map((p) => `${round(p.x)} ${round(p.y)}`).join(' L ')}`).join(' ');
 }

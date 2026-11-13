@@ -1112,6 +1112,16 @@ button:disabled {
    territory (its vertices' Voronoi cells) faintly green, and the border with the rest. */
 .cut {
   pointer-events: none;
+  transition: opacity 0.4s;
+}
+
+/* A cut that has finished (every vertex on one side) fades out. */
+#canvas:not(.has-cut) .cut {
+  opacity: 0;
+}
+
+.cut-region {
+  fill-rule: evenodd;
 }
 
 .cut-region {
