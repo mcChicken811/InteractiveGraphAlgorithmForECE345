@@ -97,3 +97,86 @@ describe('QueueView', () => {
     expect(empty.hidden).toBe(true);
   });
 });
+
+describe('QueueView as a recursion stack', () => {
+  let stack: QueueView;
+  beforeEach(() => {
+    document.body.innerHTML = `<div id="strip" role="list"></div><p id="empty" hidden></p>`;
+    strip = document.querySelector('#strip')!;
+    empty = document.querySelector('#empty')!;
+    stack = new QueueView(strip, empty, {
+      kind: 'stack',
+      describeLabel: (label) => `times ${label}`,
+    });
+  });
+
+  /** Tokens: 'ends' (+ '<' pop lit, '>' push lit), then '<id>' (+ '*' top, '?' incoming, '~' running). */
+  function stackTokens(): string[] {
+    return [...strip.querySelectorAll<HTMLElement>(':scope > [data-key]:not(.exiting)')].map((el) => {
+      if (el.dataset.key === 'ends') {
+        return (
+          'ends' +
+          (el.querySelector('.q-pop')!.classList.contains('active') ? '<' : '') +
+          (el.querySelector('.q-push')!.classList.contains('active') ? '>' : '')
+        );
+      }
+      return (
+        el.querySelector('.q-index')!.textContent! +
+        (el.classList.contains('front') ? '*' : '') +
+        (el.classList.contains('incoming') ? '?' : '') +
+        (el.classList.contains('running') ? '~' : '')
+      );
+    });
+  }
+
+  it('puts both arrows on the left, then what is pushed next, then the stack top first', () => {
+    stack.update({ items: [2, 1, 0], incoming: [3], popping: false }, false);
+    expect(stackTokens()).toEqual(['ends>', '3?', '2*', '1~', '0~']);
+    expect(strip.classList.contains('strip-stack')).toBe(true);
+    const ends = strip.querySelector('.q-ends')!;
+    expect(ends.getAttribute('aria-hidden')).toBe('true');
+    expect([...ends.querySelectorAll('.q-arrow')].map((a) => a.textContent)).toEqual(['pop', 'push']);
+  });
+
+  it('lights the arrow the next step uses: pop, push, or neither', () => {
+    stack.update({ items: [2, 1], incoming: [], popping: true }, false);
+    expect(stackTokens()).toEqual(['ends<', '2*', '1~']);
+    stack.update({ items: [2, 1], incoming: [], popping: false }, false); // e.g. a back edge
+    expect(stackTokens()).toEqual(['ends', '2*', '1~']);
+  });
+
+  it('a pushed vertex becomes the top in place; a popped one leaves', () => {
+    stack.update({ items: [0], incoming: [1], popping: false }, false);
+    const one = strip.querySelector('[data-key="v1"]');
+    stack.update({ items: [1, 0], incoming: [], popping: true }, false);
+    expect(stackTokens()).toEqual(['ends<', '1*', '0~']);
+    expect(strip.querySelector('[data-key="v1"]')).toBe(one);
+    stack.update({ items: [0], incoming: [], popping: true }, false);
+    expect(stackTokens()).toEqual(['ends<', '0*']);
+  });
+
+  it('between trees the stack is empty but shows the next root about to be pushed', () => {
+    stack.update({ items: [], incoming: [4], popping: false }, false);
+    expect(stackTokens()).toEqual(['ends>', '4?']);
+    expect(empty.hidden).toBe(true);
+    stack.update({ items: [], incoming: [], popping: false }, false);
+    expect(stackTokens()).toEqual([]);
+    expect(empty.hidden).toBe(false);
+  });
+
+  it('describes the top and its labels to screen readers', () => {
+    stack.update({ items: [2, 1], incoming: [], popping: true }, false, { 1: '1,', 2: '2,' });
+    const labels = [...strip.querySelectorAll('[role="listitem"]')].map((el) => el.getAttribute('aria-label'));
+    expect(labels).toEqual(['2, times 2,, top, next to be popped', '1, times 1,']);
+    stack.update({ items: [2, 1], incoming: [3], popping: false }, false, { 1: '1,', 2: '2,' });
+    const again = [...strip.querySelectorAll('[role="listitem"]')].map((el) => el.getAttribute('aria-label'));
+    expect(again).toEqual(['3, about to be pushed', '2, times 2,, top', '1, times 1,']);
+  });
+
+  it('shrinks long labels (e.g. "10,11") to fit the circle', () => {
+    stack.update({ items: [0, 1], incoming: [], popping: false }, false, { 0: '1,', 1: '10,11' });
+    const size = (id: number) => strip.querySelector<HTMLElement>(`[data-key="v${id}"] .q-label`)!.style.fontSize;
+    expect(size(0)).toBe(''); // fits at the normal size
+    expect(parseFloat(size(1))).toBeLessThan(12);
+  });
+});

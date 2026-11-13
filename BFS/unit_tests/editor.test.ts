@@ -822,6 +822,62 @@ describe('GraphEditor lock and algorithm highlight', () => {
     expect(svg.querySelectorAll('.sim-current, .sim-done, .sim-active')).toHaveLength(0);
   });
 
+  it('draws running vertices (e.g. DFS on the recursion stack) yellow-ringed; current wins', () => {
+    editor.setHighlight({ current: 1, done: [2], running: [0, 1], activeEdges: [] });
+    expect(nodeEl(0).classList.contains('sim-running')).toBe(true);
+    expect(nodeEl(1).classList.contains('sim-running')).toBe(true); // CSS draws current on top
+    expect(nodeEl(1).classList.contains('sim-current')).toBe(true);
+    expect(nodeEl(2).classList.contains('sim-running')).toBe(false);
+    editor.setHighlight(null);
+    expect(svg.querySelectorAll('.sim-running')).toHaveLength(0);
+  });
+
+  it('with explored edges given, the rest are marked unexplored; explored ones carry their tag', () => {
+    const edge = (a: number, b: number) => svg.querySelector<SVGGElement>(`[data-edge-a="${a}"][data-edge-b="${b}"]`)!;
+    editor.setHighlight({ current: 0, done: [], activeEdges: [] });
+    expect(svg.querySelectorAll('.sim-unexplored, .sim-explored')).toHaveLength(0); // BFS: no tracking
+
+    // The fixture is the path 0 — 1 — 2.
+    editor.setHighlight({ current: 1, done: [], activeEdges: [], exploredEdges: [{ from: 0, to: 1 }] });
+    expect(edge(0, 1).classList.contains('sim-unexplored')).toBe(false);
+    expect(edge(1, 2).classList.contains('sim-unexplored')).toBe(true);
+
+    editor.setHighlight({
+      current: 2,
+      done: [],
+      activeEdges: [],
+      exploredEdges: [
+        { from: 0, to: 1 },
+        { from: 2, to: 1, label: 'backward' }, // undirected: the 1—2 edge
+      ],
+    });
+    expect(edge(0, 1).classList.contains('sim-explored')).toBe(true);
+    expect(edge(0, 1).dataset.tag).toBeUndefined(); // tree edge: plain
+    expect(edge(1, 2).classList.contains('sim-explored')).toBe(true);
+    expect(edge(1, 2).dataset.tag).toBe('backward');
+    expect(edge(1, 2).querySelector('.edge-tag text')!.textContent).toBe('backward');
+    expect(svg.querySelectorAll('.edge.sim-unexplored')).toHaveLength(0);
+
+    editor.setHighlight(null);
+    expect(svg.querySelectorAll('.sim-unexplored, .sim-explored, [data-tag]')).toHaveLength(0);
+  });
+
+  it('explored directed edges match the exact arc', () => {
+    editor.setDirected(true);
+    editor.setHighlight({ current: 0, done: [], activeEdges: [], exploredEdges: [{ from: 1, to: 0, label: 'x' }] });
+    expect(svg.querySelectorAll('.sim-explored')).toHaveLength(0); // the arc is 0 → 1
+    editor.setHighlight({ current: 0, done: [], activeEdges: [], exploredEdges: [{ from: 0, to: 1, label: 'x' }] });
+    expect(svg.querySelector('[data-edge-a="0"][data-edge-b="1"]')!.classList.contains('sim-explored')).toBe(true);
+  });
+
+  it('shrinks long vertex labels (DFS "d,f") to fit inside the circle', () => {
+    editor.setHighlight({ current: null, done: [], activeEdges: [], labels: { 0: '1,', 1: '10,13' } });
+    const size = (id: number) => nodeEl(id).querySelector<SVGTextElement>('.sim-label')!.style.fontSize;
+    expect(nodeEl(1).querySelector('.sim-label')!.textContent).toBe('10,13');
+    expect(size(0)).toBe('');
+    expect(parseFloat(size(1))).toBeLessThan(14);
+  });
+
   it('directed highlight matches the exact arc only', () => {
     editor.setDirected(true);
     editor.setHighlight({ current: 1, done: [], activeEdges: [[1, 0]] }); // no arc 1 → 0 exists

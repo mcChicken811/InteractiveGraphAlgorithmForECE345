@@ -134,6 +134,12 @@
                   found). <strong>Hover the queue</strong> to see their numbers again.
                 </li>
                 <li>
+                  DFS reads the graph as directed. Vertices show their <strong>discovery, finish</strong> times
+                  (yellow: running, green: finished). Edges stay dashed until explored, then are labelled
+                  <em>forward</em>, <em>backward</em> or <em>crossed</em> (tree edges are plain).
+                  <strong>Hover the stack</strong> to see the vertex numbers.
+                </li>
+                <li>
                   Messages appear at the bottom and slide away after 5&nbsp;s; move the mouse to the bottom
                   edge to bring the last one back.
                 </li>
@@ -210,6 +216,28 @@
               <!-- Focusable so keyboard users can scroll it; hovering or focusing it shows vertex ids. -->
               <div id="queue-strip" class="queue-strip" role="list" aria-label="Queue, front first" tabindex="0"></div>
               <p id="queue-empty" class="queue-empty" hidden>The queue is empty.</p>
+            </div>
+          </section>
+          <!-- Shown only while an algorithm with a recursion stack (DFS) runs: src/queue-view.ts. -->
+          <section id="stack-card" class="info-card queue-card" aria-labelledby="stack-title" hidden>
+            <h2 class="card-title" id="stack-title">
+              <button
+                class="card-toggle"
+                type="button"
+                aria-expanded="true"
+                aria-controls="stack-body"
+                data-collapse-key="stack"
+              >
+                <span>Recursion stack</span>
+                <svg class="chevron" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
+            </h2>
+            <div id="stack-body" class="card-body">
+              <!-- Focusable so keyboard users can scroll it; hovering or focusing it shows vertex ids. -->
+              <div id="stack-strip" class="queue-strip" role="list" aria-label="Recursion stack, top first" tabindex="0"></div>
+              <p id="stack-empty" class="queue-empty" hidden>The stack is empty.</p>
             </div>
           </section>
         </aside>

@@ -92,6 +92,20 @@ const queueView = new QueueView(
 );
 queueView.onPeek = (peek) => editor.setLabelPeek(peek);
 
+// DFS's recursion stack works the same way; its vertices show "discovery,finish" times.
+const stackView = new QueueView(
+  document.querySelector<HTMLElement>('#stack-strip')!,
+  document.querySelector<HTMLElement>('#stack-empty')!,
+  {
+    kind: 'stack',
+    describeLabel: (label) => {
+      const [d, f] = label.split(',');
+      return f ? `discovered at ${d}, finished at ${f}` : `discovered at ${d}`;
+    },
+  },
+);
+stackView.onPeek = (peek) => editor.setLabelPeek(peek);
+
 // Algorithm simulation (header, top right). `runner` is declared above so refreshPanels,
 // which can run before this point, can check it.
 runner = new AlgorithmRunner(
@@ -109,6 +123,8 @@ runner = new AlgorithmRunner(
     directionSwitch: document.querySelector<HTMLFieldSetElement>('#direction-switch')!,
     queueCard: document.querySelector<HTMLElement>('#queue-card')!,
     queueView,
+    stackCard: document.querySelector<HTMLElement>('#stack-card')!,
+    stackView,
   },
   { message: (text) => showMessage(text), onStateChange: refreshPanels },
 );

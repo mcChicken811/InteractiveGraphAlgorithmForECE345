@@ -1,6 +1,7 @@
 import { Graph, type NodeId } from './graph.js';
 import { ForceLayout } from './layout.js';
 import type { Highlight } from './algorithms/types.js';
+import { fitFontSize } from './label-fit.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 export const NODE_RADIUS = 20;
@@ -14,6 +15,9 @@ const CURVE_OFFSET = 22;
 export const WEIGHT_PER_PAGE = 15;
 /** Pixels per "line" for wheel events reported in lines (deltaMode 1). */
 const LINE_HEIGHT_PX = 16;
+/** An algorithm's label inside a node: base font size and the width it may use. */
+const SIM_LABEL_FONT = 14;
+const SIM_LABEL_WIDTH = NODE_RADIUS * 2 - 8;
 
 interface Point {
   x: number;
@@ -460,10 +464,14 @@ export class GraphEditor {
     this.svg.classList.toggle('directed', directed);
     this.svg.classList.toggle('weighted', weighted);
     const liveEdges = new Set<string>();
+    // Edges the algorithm has explored (key → tag), if it tracks them; the rest are dashed.
+    const explored = this.highlight?.exploredEdges
+      ? new Map(this.highlight.exploredEdges.map((e) => [this.edgeKey(e.from, e.to, directed), e.label ?? '']))
+      : null;
     for (const [a, b] of this.graph.getEdges()) {
       const curved = directed && this.graph.hasArc(b, a);
       const shape = curved ? 'path' : 'line';
-      const key = directed ? `${a}>${b}` : `${a}-${b}`;
+      const key = this.edgeKey(a, b, directed);
       liveEdges.add(key);
       let g = this.edgeEls.get(key);
       if (g && g.dataset.shape !== shape) {
@@ -479,13 +487,29 @@ export class GraphEditor {
         // clicking on the label acts on the edge.
         const label = svgEl('g', { class: 'edge-weight' });
         label.append(svgEl('rect', { rx: 9, height: 18 }), svgEl('text', { 'text-anchor': 'middle', 'dominant-baseline': 'central' }));
-        g.append(svgEl(shape, { class: 'edge-hit' }), svgEl(shape, { class: 'edge-line' }), label, svgEl('title', {}));
+        // An algorithm's tag for the edge (DFS: its class, e.g. "backward"), same place.
+        const tag = svgEl('g', { class: 'edge-tag' });
+        tag.append(svgEl('rect', { rx: 8, height: 16 }), svgEl('text', { 'text-anchor': 'middle', 'dominant-baseline': 'central' }));
+        g.append(svgEl(shape, { class: 'edge-hit' }), svgEl(shape, { class: 'edge-line' }), label, tag, svgEl('title', {}));
         this.edgeLayer.append(g);
         this.edgeEls.set(key, g);
       }
       const { attrs, mid } = this.edgeGeometry(this.graph.getNode(a)!, this.graph.getNode(b)!, directed, curved);
       g.classList.toggle('sim-active', this.isActiveEdge(a, b, directed));
+      g.classList.toggle('sim-unexplored', explored !== null && !explored.has(key));
+      g.classList.toggle('sim-explored', explored?.has(key) ?? false);
       for (const el of g.querySelectorAll('.edge-hit, .edge-line')) setAttrs(el, attrs);
+
+      const tag = explored?.get(key) ?? '';
+      if (tag) {
+        g.dataset.tag = tag;
+        const tagWidth = 12 + tag.length * 6.4;
+        g.querySelector('.edge-tag text')!.textContent = tag;
+        setAttrs(g.querySelector('.edge-tag text')!, { x: mid.x, y: mid.y });
+        setAttrs(g.querySelector('.edge-tag rect')!, { x: mid.x - tagWidth / 2, y: mid.y - 8, width: tagWidth });
+      } else {
+        delete g.dataset.tag;
+      }
 
       const weight = view.weight(a, b)!;
       const text = String(weight);
@@ -526,7 +550,13 @@ export class GraphEditor {
       g.classList.toggle('selected', node.id === this.selected);
       g.classList.toggle('sim-current', this.highlight?.current === node.id);
       g.classList.toggle('sim-done', this.highlight?.done.includes(node.id) ?? false);
-      g.querySelector('.sim-label')!.textContent = this.highlight?.labels?.[node.id] ?? '';
+      g.classList.toggle('sim-running', this.highlight?.running?.includes(node.id) ?? false);
+      const simLabel = g.querySelector<SVGTextElement>('.sim-label')!;
+      const text = this.highlight?.labels?.[node.id] ?? '';
+      simLabel.textContent = text;
+      // Long labels (DFS's "d,f") shrink to stay inside the circle.
+      const size = fitFontSize(text, SIM_LABEL_WIDTH, SIM_LABEL_FONT);
+      simLabel.style.fontSize = size < SIM_LABEL_FONT ? `${size}px` : '';
     }
     for (const [id, g] of this.nodeEls) {
       if (!liveNodes.has(id)) {
@@ -537,6 +567,11 @@ export class GraphEditor {
 
     this.svg.classList.toggle('has-selection', this.selected !== null);
     this.updatePreview();
+  }
+
+  /** The key of the drawn edge a → b (undirected: between a and b), as used in edgeEls. */
+  private edgeKey(a: NodeId, b: NodeId, directed: boolean): string {
+    return directed ? `${a}>${b}` : `${Math.min(a, b)}-${Math.max(a, b)}`;
   }
 
   /** Is the edge a → b (undirected: between a and b) one the algorithm highlights? */

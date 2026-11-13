@@ -18,22 +18,27 @@ export interface RunnerElements {
   /** Side-panel card showing the algorithm's queue while it runs (if it has one). */
   queueCard?: HTMLElement;
   queueView?: QueueView;
+  /** Side-panel card showing the algorithm's recursion stack while it runs (if it has one). */
+  stackCard?: HTMLElement;
+  stackView?: QueueView;
 }
 
 const LOCKED_TITLE = 'Locked while the algorithm runs. Press Stop to change it.';
 
 /**
  * Runs the selected algorithm step by step:
- *   Run    → locks the graph (editing, the direction switch, and the weighting the
- *            algorithm requires — BFS forces "Unweighted") and starts the simulation;
+ *   Run    → locks the graph (editing, the direction switch, and the weighting) and
+ *            forces the reading the algorithm requires (BFS: "Unweighted"; DFS:
+ *            "Unweighted" and "Directed"), then starts the simulation;
  *   Update → advances one step; after the last step it turns into Finish;
  *   Stop / Finish → ends the run, clears the highlighting and releases every lock
- *            (restoring the weighting that was selected before).
+ *            (restoring the weighting and direction that were selected before).
  */
 export class AlgorithmRunner {
   private simulation: Simulation | null = null;
-  /** The weighting chosen before Run forced one, restored on Stop. */
+  /** The weighting / direction chosen before Run forced one, restored on Stop. */
   private savedWeighted: boolean | null = null;
+  private savedDirected: boolean | null = null;
 
   constructor(
     private readonly graph: Graph,
@@ -69,12 +74,18 @@ export class AlgorithmRunner {
 
     // Locks: no editing; the direction switch; and the weighting the algorithm needs.
     this.editor.setLocked(true);
-    if (algorithm.requires.weighted !== undefined) {
+    const { weighted, directed } = algorithm.requires;
+    if (weighted !== undefined) {
       this.savedWeighted = this.graph.weighted;
-      this.editor.setWeighted(algorithm.requires.weighted);
-      this.syncWeightSwitch();
+      this.editor.setWeighted(weighted);
+      this.syncSwitch(this.el.weightSwitch, 'weighted', this.graph.weighted);
     }
-    this.lockSwitch(this.el.weightSwitch, algorithm.requires.weighted !== undefined);
+    if (directed !== undefined) {
+      this.savedDirected = this.graph.directed;
+      this.editor.setDirected(directed);
+      this.syncSwitch(this.el.directionSwitch, 'directed', this.graph.directed);
+    }
+    this.lockSwitch(this.el.weightSwitch, weighted !== undefined);
     this.lockSwitch(this.el.directionSwitch, true);
 
     this.simulation = algorithm.create(this.graph.currentView, start);
@@ -101,19 +112,26 @@ export class AlgorithmRunner {
     this.editor.setLocked(false);
     if (this.savedWeighted !== null) {
       this.editor.setWeighted(this.savedWeighted);
-      this.syncWeightSwitch();
+      this.syncSwitch(this.el.weightSwitch, 'weighted', this.graph.weighted);
       this.savedWeighted = null;
+    }
+    if (this.savedDirected !== null) {
+      this.editor.setDirected(this.savedDirected);
+      this.syncSwitch(this.el.directionSwitch, 'directed', this.graph.directed);
+      this.savedDirected = null;
     }
     this.lockSwitch(this.el.weightSwitch, false);
     this.lockSwitch(this.el.directionSwitch, false);
     this.el.queueView?.update(null, false);
     if (this.el.queueCard) this.el.queueCard.hidden = true;
+    this.el.stackView?.update(null, false);
+    if (this.el.stackCard) this.el.stackCard.hidden = true;
     this.updateControls();
     this.hooks.onStateChange();
     this.hooks.message(`${message} The graph can be edited again.`);
   }
 
-  /** Draws the simulation's state; `animate` animates the queue from its previous state. */
+  /** Draws the simulation's state; `animate` animates the queue / stack from its previous state. */
   private show(animate: boolean): void {
     const simulation = this.simulation!;
     const highlight = simulation.highlight();
@@ -121,6 +139,9 @@ export class AlgorithmRunner {
     const queue = simulation.queueSnapshot?.() ?? null;
     if (this.el.queueCard) this.el.queueCard.hidden = queue === null;
     this.el.queueView?.update(queue, animate, highlight.labels);
+    const stack = simulation.stackSnapshot?.() ?? null;
+    if (this.el.stackCard) this.el.stackCard.hidden = stack === null;
+    this.el.stackView?.update(stack, animate, highlight.labels);
     this.updateControls();
     this.hooks.onStateChange();
     this.hooks.message(simulation.describe());
@@ -141,9 +162,10 @@ export class AlgorithmRunner {
     this.updateControls();
   }
 
-  private syncWeightSwitch(): void {
-    for (const input of this.el.weightSwitch.querySelectorAll<HTMLInputElement>('input')) {
-      input.checked = (input.value === 'weighted') === this.graph.weighted;
+  /** Checks the radio matching the graph's state (`on`: the option named `onValue`). */
+  private syncSwitch(fieldset: HTMLFieldSetElement, onValue: string, on: boolean): void {
+    for (const input of fieldset.querySelectorAll<HTMLInputElement>('input')) {
+      input.checked = (input.value === onValue) === on;
     }
   }
 

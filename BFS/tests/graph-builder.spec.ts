@@ -1119,7 +1119,10 @@ test.describe('algorithm simulation (BFS)', () => {
     await expect(picker(page)).toBeVisible();
     await expect(picker(page)).toHaveText('Breadth-first search');
     await picker(page).click();
-    await expect(page.getByRole('listbox', { name: 'Algorithm' }).getByRole('option')).toHaveText(['Breadth-first search']);
+    await expect(page.getByRole('listbox', { name: 'Algorithm' }).getByRole('option')).toHaveText([
+      'Breadth-first search',
+      'Depth-first search',
+    ]);
     await page.keyboard.press('Escape');
     await expect(runBtn(page)).toBeVisible();
     await expect(updateBtn(page)).toBeHidden();
@@ -1689,6 +1692,341 @@ test.describe('BFS distance labels', () => {
       await run(page);
       const duration = await cv.node(2).locator('.sim-label').evaluate((el) => getComputedStyle(el).transitionDuration);
       expect(duration).toBe('0s');
+    });
+  });
+});
+
+test.describe('algorithm simulation (DFS)', () => {
+  const run = (page: Page) => page.getByRole('button', { name: 'Run', exact: true }).click();
+  const update = (page: Page) => page.getByRole('button', { name: 'Update', exact: true }).click();
+  const message = (page: Page) => page.locator('#message');
+  const stackCard = (page: Page) => page.getByRole('region', { name: 'Recursion stack' });
+  const stackStrip = (page: Page) => page.getByRole('list', { name: 'Recursion stack, top first' });
+  const radio = (page: Page, name: string) => page.getByRole('radio', { name, exact: true });
+
+  const WHITE = 'rgb(255, 255, 255)';
+  const YELLOW = 'rgb(242, 169, 0)';
+  const GREEN = 'rgb(47, 158, 68)';
+  const strokeOf = (id: number) => cv.node(id).locator('circle').evaluate((c) => getComputedStyle(c).stroke);
+
+  /**
+   * Arcs 0 → 1 → 2, 2 → 0, 0 → 2, 3 → 1, 3 → 4. DFS from 0 (CLRS):
+   * 0 (1,6) → 1 (2,5) → 2 (3,4); 2 → 0 backward; 0 → 2 forward; then a new tree at
+   * 3 (7,10): 3 → 1 crossed, 3 → 4 (8,9) a tree edge.
+   */
+  const S: Array<[number, number]> = [
+    [150, 150],
+    [450, 150],
+    [300, 420],
+    [640, 260],
+    [800, 440],
+  ];
+  const ARCS: Array<[number, number]> = [
+    [0, 1],
+    [1, 2],
+    [2, 0],
+    [0, 2],
+    [3, 1],
+    [3, 4],
+  ];
+
+  /** Builds the graph (in directed mode), then leaves the switches as given. */
+  async function build(page: Page, { directed = false, weighted = false } = {}): Promise<void> {
+    for (const p of S) await cv.click(...p);
+    await page.locator('label[for="mode-directed"]').click();
+    for (const [a, b] of ARCS) await connect(S[a], S[b]);
+    if (!directed) await page.locator('label[for="mode-undirected"]').click();
+    if (weighted) await page.locator('label[for="weights-on"]').click();
+    await page.getByRole('combobox', { name: 'Algorithm' }).click();
+    await page.getByRole('option', { name: 'Depth-first search' }).click();
+  }
+
+  async function steps(page: Page, n: number): Promise<void> {
+    for (let i = 0; i < n; i++) await update(page);
+  }
+
+  /** Each canvas vertex's label (in id order). */
+  const labels = (page: Page) =>
+    page.locator('#canvas [data-node-id]').evaluateAll((nodes) => nodes.map((g) => g.querySelector('.sim-label')!.textContent));
+
+  /** Edge "a>b" → whether it is drawn dashed, and its tag. */
+  const edgeLook = (page: Page) =>
+    page.locator('#canvas .edge').evaluateAll((edges) =>
+      Object.fromEntries(
+        edges.map((e) => {
+          const g = e as SVGGElement;
+          const line = g.querySelector('.edge-line')!;
+          return [
+            `${g.dataset.edgeA}>${g.dataset.edgeB}`,
+            { dashed: getComputedStyle(line).strokeDasharray !== 'none', tag: g.dataset.tag ?? '' },
+          ];
+        }),
+      ),
+    );
+
+  /** Stack strip tokens: 'ends' (+ '<' pop lit, '>' push lit), then ids (+ '*' top, '?' incoming, '~' running). */
+  const stackTokens = (page: Page) =>
+    page.locator('#stack-strip > [data-key]:not(.exiting)').evaluateAll((els) =>
+      els.map((el) => {
+        if ((el as HTMLElement).dataset.key === 'ends') {
+          return (
+            'ends' +
+            (el.querySelector('.q-pop')!.classList.contains('active') ? '<' : '') +
+            (el.querySelector('.q-push')!.classList.contains('active') ? '>' : '')
+          );
+        }
+        return (
+          el.querySelector('.q-index')!.textContent! +
+          (el.classList.contains('front') ? '*' : '') +
+          (el.classList.contains('incoming') ? '?' : '') +
+          (el.classList.contains('running') ? '~' : '')
+        );
+      }),
+    );
+
+  test('is offered in the picker', async ({ page }) => {
+    await build(page);
+    await expect(page.getByRole('combobox', { name: 'Algorithm' })).toHaveText('Depth-first search');
+  });
+
+  test('Run forces the directed, unweighted view and locks both switches; Stop restores them', async ({ page }) => {
+    await build(page, { directed: false, weighted: true });
+    await run(page);
+    await expect(message(page)).toHaveText('DFS from 0. Time 0. Press Update to discover 0.');
+    await expect(radio(page, 'Directed')).toBeChecked();
+    await expect(radio(page, 'Unweighted')).toBeChecked();
+    for (const name of ['Undirected', 'Directed', 'Unweighted', 'Weighted']) await expect(radio(page, name)).toBeDisabled();
+    await expect(cv.canvas).toHaveClass(/directed/);
+    await expect(cv.edge(2, 0)).toBeVisible(); // both arcs between 0 and 2 are drawn
+    await expect(cv.edge(0, 2)).toBeVisible();
+    await expect(cv.edge(0, 1).locator('.edge-weight')).toBeHidden();
+
+    await page.getByRole('button', { name: 'Stop', exact: true }).click();
+    await expect(radio(page, 'Undirected')).toBeChecked();
+    await expect(radio(page, 'Weighted')).toBeChecked();
+    for (const name of ['Undirected', 'Directed', 'Unweighted', 'Weighted']) await expect(radio(page, name)).toBeEnabled();
+    await expect(cv.canvas).not.toHaveClass(/directed/);
+  });
+
+  test('every edge starts dashed; explored edges turn solid', async ({ page }) => {
+    await build(page);
+    await run(page);
+    const before = await edgeLook(page);
+    expect(Object.keys(before)).toHaveLength(6);
+    expect(Object.values(before).every((e) => e.dashed)).toBe(true);
+
+    await steps(page, 2); // discover 0, explore 0 → 1
+    const after = await edgeLook(page);
+    expect(after['0>1'].dashed).toBe(false);
+    expect(after['1>2'].dashed).toBe(false); // the white edge, explored next: drawn solid white
+    expect(['2>0', '0>2', '3>1', '3>4'].every((k) => after[k].dashed)).toBe(true);
+    await expect(cv.edge(0, 1).locator('.edge-line')).toHaveCSS('opacity', '1');
+    await expect(cv.edge(3, 4).locator('.edge-line')).not.toHaveCSS('opacity', '1'); // faded too
+  });
+
+  test('white marks the vertex being considered and the next edge; running is yellow, finished green', async ({ page }) => {
+    await build(page);
+    await run(page);
+    // Before the first step: 0 is about to be discovered.
+    expect(await strokeOf(0)).toBe(WHITE);
+    await expect(cv.canvas.locator('.edge.sim-active')).toHaveCount(0);
+
+    await steps(page, 1); // discover 0 → next: explore 0 → 1
+    expect(await strokeOf(0)).toBe(WHITE);
+    await expect(cv.edge(0, 1).locator('.edge-line')).toHaveCSS('stroke', WHITE);
+
+    await steps(page, 2); // 0 → 1, 1 → 2 → next: explore 2 → 0
+    expect(await strokeOf(2)).toBe(WHITE);
+    expect(await strokeOf(1)).toBe(YELLOW); // still running
+    expect(await strokeOf(0)).toBe(YELLOW);
+    await expect(cv.edge(2, 0).locator('.edge-line')).toHaveCSS('stroke', WHITE);
+    await expect(cv.edge(0, 1).locator('.edge-line')).not.toHaveCSS('stroke', WHITE);
+
+    await steps(page, 2); // 2 → 0 (backward), finish 2 → next: finish 1
+    expect(await strokeOf(2)).toBe(GREEN);
+    expect(await strokeOf(1)).toBe(WHITE);
+    expect(await strokeOf(0)).toBe(YELLOW);
+    await expect(cv.canvas.locator('.edge.sim-active')).toHaveCount(0); // finishing travels no edge
+    await expect(message(page)).toHaveText('Finished 2 at time 4. Stack: 1, 0 (top first).');
+  });
+
+  test('vertices show "discovery,finish" times; undiscovered ones are blank', async ({ page }) => {
+    await build(page);
+    await run(page);
+    expect(await labels(page)).toEqual(['', '', '', '', '']);
+    await expect(cv.node(0).locator('.sim-label')).toHaveCSS('opacity', '1');
+    await steps(page, 3);
+    expect(await labels(page)).toEqual(['1,', '2,', '3,', '', '']);
+    await steps(page, 2); // backward edge, finish 2
+    expect(await labels(page)).toEqual(['1,', '2,', '3,4', '', '']);
+    await steps(page, 8);
+    expect(await labels(page)).toEqual(['1,6', '2,5', '3,4', '7,10', '8,9']);
+    // A two-digit label still fits inside its circle.
+    const fits = await cv.node(3).evaluate((g) => {
+      const text = g.querySelector('.sim-label')!.getBoundingClientRect();
+      const circle = g.querySelector('circle')!.getBoundingClientRect();
+      return text.width < circle.width - 8;
+    });
+    expect(fits).toBe(true);
+  });
+
+  test('explored edges are labelled forward, backward and crossed; tree edges stay plain', async ({ page }) => {
+    await build(page);
+    await run(page);
+    await steps(page, 4); // … 2 → 0
+    expect((await edgeLook(page))['2>0'].tag).toBe('backward');
+    await expect(cv.edge(2, 0).locator('.edge-tag')).toBeVisible();
+    await expect(cv.edge(2, 0).locator('.edge-tag')).toHaveText('backward');
+    await expect(message(page)).toHaveText(
+      '2 → 0 is a backward edge: 0 is still running (an ancestor of 2). Stack: 2, 1, 0 (top first).',
+    );
+
+    await steps(page, 9);
+    await expect(page.getByRole('button', { name: 'Finish', exact: true })).toBeVisible();
+    expect(await edgeLook(page)).toEqual({
+      '0>1': { dashed: false, tag: '' },
+      '1>2': { dashed: false, tag: '' },
+      '2>0': { dashed: false, tag: 'backward' },
+      '0>2': { dashed: false, tag: 'forward' },
+      '3>1': { dashed: false, tag: 'crossed' },
+      '3>4': { dashed: false, tag: '' },
+    });
+    // Edges are drawn in arc order: 0 → 2 (forward) before 2 → 0 (backward).
+    await expect(cv.canvas.locator('.edge-tag:visible')).toHaveText(['forward', 'backward', 'crossed']);
+    await expect(message(page)).toHaveText(
+      'DFS finished at time 10: 5 vertices in 2 trees; 3 tree, 1 backward, 1 forward, 1 crossed edges. Press Finish.',
+    );
+  });
+
+  test('Finish ends the run: dashes, tags and times are cleared and the switches restored', async ({ page }) => {
+    await build(page);
+    await run(page);
+    await steps(page, 13);
+    await page.getByRole('button', { name: 'Finish', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeVisible();
+    await expect(cv.canvas.locator('.sim-unexplored, .sim-explored, .sim-running, .sim-done, [data-tag]')).toHaveCount(0);
+    expect(Object.values(await edgeLook(page)).every((e) => !e.dashed)).toBe(true);
+    await expect(radio(page, 'Undirected')).toBeChecked();
+    await expect(cv.node(3)).toHaveText(/^3/);
+  });
+
+  test('starts from the selected node', async ({ page }) => {
+    await build(page);
+    await cv.click(...S[3]);
+    await run(page);
+    await expect(message(page)).toHaveText('DFS from 3. Time 0. Press Update to discover 3.');
+    expect(await strokeOf(3)).toBe(WHITE);
+  });
+
+  test('BFS still draws every edge solid', async ({ page }) => {
+    await build(page);
+    await page.getByRole('combobox', { name: 'Algorithm' }).click();
+    await page.getByRole('option', { name: 'Breadth-first search' }).click();
+    await run(page);
+    await update(page);
+    expect(Object.values(await edgeLook(page)).every((e) => !e.dashed)).toBe(true);
+    await expect(radio(page, 'Undirected')).toBeChecked(); // BFS keeps the chosen direction
+  });
+
+  test.describe('recursion stack card', () => {
+    test.beforeEach(async ({ page }) => {
+      await page.getByRole('button', { name: 'Help and adjacency list' }).click();
+    });
+
+    test('appears at the bottom of the panel only while DFS runs (BFS shows its queue instead)', async ({ page }) => {
+      await build(page);
+      await expect(stackCard(page)).toBeHidden();
+      await run(page);
+      await expect(stackCard(page)).toBeVisible();
+      await expect(page.getByRole('region', { name: 'Queue' })).toBeHidden();
+      const tops = await page.locator('.info-card:not([hidden])').evaluateAll((cards) =>
+        cards.map((c) => c.getBoundingClientRect().top),
+      );
+      expect(tops[tops.length - 1]).toBe(Math.max(...tops)); // the stack is the last card
+      await page.getByRole('button', { name: 'Stop', exact: true }).click();
+      await expect(stackCard(page)).toBeHidden();
+    });
+
+    test('pop and push arrows share the left end; the top comes first; the next push is greyed', async ({ page }) => {
+      await build(page);
+      await run(page);
+      expect(await stackTokens(page)).toEqual(['ends>', '0?']); // about to push 0
+      await update(page);
+      expect(await stackTokens(page)).toEqual(['ends>', '1?', '0*']); // 0 → 1 pushes 1 next
+      await steps(page, 2);
+      expect(await stackTokens(page)).toEqual(['ends', '2*', '1~', '0~']); // 2 → 0: no push or pop
+      await update(page);
+      expect(await stackTokens(page)).toEqual(['ends<', '2*', '1~', '0~']); // finishing 2 pops it
+
+      // Laid out left to right on one line: arrows, then the top, down to the bottom.
+      await page
+        .locator('#stack-strip')
+        .evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)));
+      const boxes = await page.locator('#stack-strip > [data-key]').evaluateAll((els) =>
+        els.map((el) => {
+          const r = el.getBoundingClientRect();
+          return { left: r.left, right: r.right, mid: r.top + r.height / 2 };
+        }),
+      );
+      for (let i = 1; i < boxes.length; i++) {
+        expect(boxes[i].left).toBeGreaterThanOrEqual(boxes[i - 1].right - 0.5);
+        expect(Math.abs(boxes[i].mid - boxes[0].mid)).toBeLessThan(2);
+      }
+      // The pop arrow sits above the push arrow, and the lit one is drawn at full strength.
+      const arrows = await page.locator('#stack-strip .q-ends .q-arrow').evaluateAll((els) =>
+        els.map((el) => ({ top: el.getBoundingClientRect().top, opacity: Number(getComputedStyle(el).opacity) })),
+      );
+      expect(arrows[0].top).toBeLessThan(arrows[1].top);
+      await expect.poll(() => page.locator('#stack-strip .q-pop').evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
+      expect(arrows[1].opacity).toBeLessThan(0.6);
+    });
+
+    test('stack vertices match the canvas: white top, yellow below, green when popped', async ({ page }) => {
+      await build(page);
+      await run(page);
+      await steps(page, 4); // stack 2, 1, 0; next: finish 2
+      const border = (sel: string) =>
+        page.locator(sel).first().evaluate((el) => getComputedStyle(el).borderTopColor);
+      await expect.poll(() => border('#stack-strip .q-node.front')).toBe(WHITE);
+      await expect.poll(() => border('#stack-strip .q-node.running')).toBe(YELLOW);
+
+      await update(page); // finish 2: it slides out of the top, green
+      const popped = page.locator('#stack-strip > .exiting');
+      await expect(popped).toHaveCount(1);
+      await expect(popped.locator('.q-index')).toHaveText('2');
+      await expect(popped).toHaveClass(/popped/);
+      await expect(popped).toHaveCount(0, { timeout: 2000 });
+      expect(await stackTokens(page)).toEqual(['ends<', '1*', '0~']);
+    });
+
+    test('shows the times in the circles; hovering the stack shows the ids, here and on the canvas', async ({ page }) => {
+      await build(page);
+      await run(page);
+      await steps(page, 3);
+      const stackLabels = await page
+        .locator('#stack-strip .q-node:not(.exiting)')
+        .evaluateAll((els) => els.map((el) => el.querySelector('.q-label')!.textContent));
+      expect(stackLabels).toEqual(['3,', '2,', '1,']);
+      await expect(stackStrip(page).getByRole('listitem').first()).toHaveAttribute('aria-label', '2, discovered at 3, top');
+
+      await stackStrip(page).hover();
+      await expect(cv.canvas).toHaveClass(/peek-ids/);
+      await expect
+        .poll(() => cv.node(2).locator('.node-index').evaluate((el) => Number(getComputedStyle(el).opacity)))
+        .toBe(1);
+      await expect
+        .poll(() => stackStrip(page).locator('.q-index').first().evaluate((el) => Number(getComputedStyle(el).opacity)))
+        .toBe(1);
+      await cv.move(...S[4]);
+      await expect(cv.canvas).not.toHaveClass(/peek-ids/);
+    });
+
+    test('says the stack is empty once DFS is done', async ({ page }) => {
+      await build(page);
+      await run(page);
+      await steps(page, 13);
+      await expect(stackStrip(page)).toBeHidden();
+      await expect(page.locator('#stack-empty')).toBeVisible();
     });
   });
 });

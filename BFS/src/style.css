@@ -14,6 +14,8 @@
   /* Shared height of the header's controls (buttons and the program picker). */
   --control-height: 36px;
   --sim-done: #2f9e44;
+  /* Started but not finished (DFS: on the recursion stack). */
+  --sim-running: #f2a900;
   /* Algorithm highlight: white, with a dark outline so it stays visible on the light canvas. */
   --sim-current: #ffffff;
   --sim-outline: rgb(20 24 33 / 0.9);
@@ -35,6 +37,7 @@
     --danger: #ff6b6b;
     --warn: #ffb04d;
     --sim-done: #69db7c;
+    --sim-running: #ffd43b;
     --sim-current: #ffffff;
     --sim-outline: rgb(0 0 0 / 0.6);
     color-scheme: dark;
@@ -1015,6 +1018,12 @@ button:disabled {
   stroke-width: 4;
 }
 
+/* Started but not finished (DFS's gray vertices, on the recursion stack): yellow. */
+.node.sim-running circle {
+  stroke: var(--sim-running);
+  stroke-width: 4;
+}
+
 /* The vertex being processed: white stroke (outlined so it shows on the light canvas). */
 .node.sim-current circle {
   stroke: var(--sim-current);
@@ -1038,6 +1047,34 @@ button:disabled {
   marker-end: url(#arrow-active);
 }
 
+/* Algorithms that track explored edges (DFS): edges stay dashed and faded until explored. */
+.edge.sim-unexplored:not(.sim-active) .edge-line {
+  stroke-dasharray: 7 6;
+  opacity: 0.55;
+}
+
+/* An explored edge's class (DFS: forward / backward / crossed), in the middle of the edge. */
+.edge-tag {
+  display: none;
+  pointer-events: none;
+}
+
+.edge[data-tag] .edge-tag {
+  display: inline;
+}
+
+.edge-tag rect {
+  fill: var(--panel);
+  stroke: var(--edge);
+  stroke-width: 1;
+}
+
+.edge-tag text {
+  fill: var(--text);
+  font: 600 10.5px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  letter-spacing: 0.01em;
+}
+
 /* Locked: no "click to delete" hover cue on edges, and no add-node crosshair. */
 #canvas.locked {
   cursor: default;
@@ -1058,6 +1095,10 @@ button:disabled {
 
 #canvas.directed.locked .edge:not(.sim-active):hover .edge-line {
   marker-end: url(#arrow);
+}
+
+#canvas.locked .edge.sim-unexplored:not(.sim-active):hover .edge-line {
+  stroke-dasharray: 7 6;
 }
 
 #canvas.directed.locked .edge.sim-active:hover .edge-line {
@@ -1170,6 +1211,11 @@ button:disabled {
   opacity: 0.38;
 }
 
+/* Recursion stack: vertices below the top are still running — yellow, like the canvas. */
+.q-node.running {
+  border-color: var(--sim-running);
+}
+
 /* Just popped (sliding out): green, like a finished vertex on the canvas. */
 .q-node.popped {
   border-color: var(--sim-done);
@@ -1201,6 +1247,31 @@ button:disabled {
   margin-left: 2px;
 }
 
+/* Recursion stack: both arrows at the open (left) end, one above the other; the one the
+   next step uses is highlighted. */
+.q-ends {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 3px;
+  margin-right: 2px;
+}
+
+.q-ends .q-arrow {
+  flex-direction: row;
+  gap: 5px;
+  margin: 0;
+  opacity: 0.4;
+  transition:
+    opacity 0.3s,
+    color 0.3s;
+}
+
+.q-ends .q-arrow.active {
+  color: var(--text);
+  opacity: 1;
+}
+
 .queue-empty {
   margin: 0;
   color: var(--muted);
@@ -1208,7 +1279,8 @@ button:disabled {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .q-node {
+  .q-node,
+  .q-ends .q-arrow {
     transition: none;
   }
 }

@@ -76,6 +76,15 @@ clearBtn.addEventListener('click', () => editor.clear());
 // Hovering (or focusing) the queue strip shows vertex ids instead of BFS distances.
 const queueView = new QueueView(document.querySelector('#queue-strip'), document.querySelector('#queue-empty'));
 queueView.onPeek = (peek) => editor.setLabelPeek(peek);
+// DFS's recursion stack works the same way; its vertices show "discovery,finish" times.
+const stackView = new QueueView(document.querySelector('#stack-strip'), document.querySelector('#stack-empty'), {
+    kind: 'stack',
+    describeLabel: (label) => {
+        const [d, f] = label.split(',');
+        return f ? `discovered at ${d}, finished at ${f}` : `discovered at ${d}`;
+    },
+});
+stackView.onPeek = (peek) => editor.setLabelPeek(peek);
 // Algorithm simulation (header, top right). `runner` is declared above so refreshPanels,
 // which can run before this point, can check it.
 runner = new AlgorithmRunner(graph, editor, {
@@ -87,6 +96,8 @@ runner = new AlgorithmRunner(graph, editor, {
     directionSwitch: document.querySelector('#direction-switch'),
     queueCard: document.querySelector('#queue-card'),
     queueView,
+    stackCard: document.querySelector('#stack-card'),
+    stackView,
 }, { message: (text) => showMessage(text), onStateChange: refreshPanels });
 // Undirected / Directed switch: only changes how the stored arcs are interpreted.
 for (const input of modeInputs) {

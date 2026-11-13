@@ -1,14 +1,21 @@
-import type { QueueSnapshot } from './algorithms/types.js';
+import type { QueueSnapshot, StackSnapshot } from './algorithms/types.js';
 import type { NodeId } from './graph.js';
+import { fitFontSize } from './label-fit.js';
 
 /**
- * Draws an algorithm's queue as a horizontal strip in the side panel:
+ * Draws an algorithm's queue (BFS) or recursion stack (DFS) as a horizontal strip in the
+ * side panel:
  *
- *   ← pop  (front) (…) (back)  (incoming…)  ← push
+ *   queue:  ← pop  (front) (…) (back)  (incoming…)  ← push
+ *   stack:  ← pop   (incoming) (top) (…) (bottom)
+ *           → push
  *
  * Vertices are drawn like the canvas nodes (ringed circle with the id), smaller. The
- * front vertex — popped by the next step — has the canvas's white "current" ring; the
- * vertices the next step will push are greyed out after the back of the queue.
+ * vertex the next step works on — the queue's front, the stack's top — has the canvas's
+ * white "current" ring; the vertices the next step will push are greyed out where they
+ * will land. A stack's other vertices are still running, so they have the canvas's
+ * yellow ring; its two arrows share the open (left) end, and the one the next step uses
+ * is highlighted.
  *
  * `update()` animates the change from the previous snapshot (FLIP): the popped vertex
  * turns green and slides out to the left, the rest glide into their new places,
@@ -20,7 +27,7 @@ import type { NodeId } from './graph.js';
 const DURATION = 340;
 const EASING = 'cubic-bezier(0.2, 0.7, 0.2, 1)';
 
-type ItemKind = 'pop' | 'push' | 'front' | 'queued' | 'incoming';
+type ItemKind = 'pop' | 'push' | 'ends' | 'front' | 'queued' | 'incoming';
 
 interface Item {
   key: string;
@@ -30,6 +37,19 @@ interface Item {
 
 const ARROW_LEFT =
   '<svg viewBox="0 0 24 14" width="24" height="14" aria-hidden="true"><path d="M22 7H3M8 2L3 7l5 5" /></svg>';
+const ARROW_RIGHT =
+  '<svg viewBox="0 0 24 14" width="24" height="14" aria-hidden="true"><path d="M2 7h19M16 2l5 5-5 5" /></svg>';
+
+/** Width (px) a label may use inside a strip vertex, and its largest font size. */
+const LABEL_WIDTH = 22;
+const LABEL_FONT = 12;
+
+export interface QueueViewOptions {
+  /** 'queue' (BFS, the default) or 'stack' (DFS's recursion stack). */
+  kind: 'queue' | 'stack';
+  /** How a vertex's label is read out to screen readers (default: "distance 2"). */
+  describeLabel: (label: string) => string;
+}
 
 export class QueueView {
   /**
@@ -38,11 +58,18 @@ export class QueueView {
    */
   onPeek: ((peek: boolean) => void) | null = null;
   private labels: Record<NodeId, string> | undefined;
+  private readonly options: QueueViewOptions;
+  /** Stack only: whether the next step pops the top / pushes something (lights its arrow). */
+  private popping = false;
+  private pushing = false;
 
   constructor(
     private readonly strip: HTMLElement,
     private readonly emptyNote: HTMLElement,
+    options: Partial<QueueViewOptions> = {},
   ) {
+    this.options = { kind: 'queue', describeLabel: (label) => `distance ${label}`, ...options };
+    strip.classList.add(`strip-${this.options.kind}`);
     const peek = (on: boolean) => {
       strip.classList.toggle('peek-ids', on);
       this.onPeek?.(on);
@@ -55,11 +82,13 @@ export class QueueView {
 
   /**
    * Shows `snapshot` (or nothing, for null), animating from the previous one if asked.
-   * `labels` (e.g. BFS distances) are drawn inside the vertices instead of their ids;
-   * vertices without a label are left blank. Hovering the strip shows the ids.
+   * `labels` (e.g. BFS distances, DFS times) are drawn inside the vertices instead of
+   * their ids; vertices without a label are left blank. Hovering the strip shows the ids.
    */
-  update(snapshot: QueueSnapshot | null, animate: boolean, labels?: Record<NodeId, string>): void {
+  update(snapshot: QueueSnapshot | StackSnapshot | null, animate: boolean, labels?: Record<NodeId, string>): void {
     this.labels = labels;
+    this.popping = !!snapshot && 'popping' in snapshot && snapshot.popping;
+    this.pushing = !!snapshot && snapshot.incoming.length > 0;
     this.strip.classList.toggle('has-labels', !!labels);
     const motion = animate && canAnimate() && !prefersReducedMotion();
     const live = this.liveElements();
@@ -121,14 +150,23 @@ export class QueueView {
           el.animate([{ transform: `translateX(${dx}px)` }, { transform: 'none' }], { duration: DURATION, easing: EASING });
         }
       } else {
-        // New: fade and slide in from the right (to its own resting opacity).
-        el.animate([{ opacity: 0, transform: 'translateX(16px) scale(0.8)' }], { duration: DURATION, easing: EASING });
+        // New: fade and slide in from the end it joins at — a queue's back (right), a
+        // stack's top (left) — to its own resting opacity.
+        const from = this.options.kind === 'stack' ? -16 : 16;
+        el.animate([{ opacity: 0, transform: `translateX(${from}px) scale(0.8)` }], { duration: DURATION, easing: EASING });
       }
     }
   }
 
-  private items(snapshot: QueueSnapshot): Item[] {
+  private items(snapshot: QueueSnapshot | StackSnapshot): Item[] {
     const items: Item[] = [];
+    if (this.options.kind === 'stack') {
+      // Pushed vertices land on top: the last one pushed ends up leftmost.
+      if (snapshot.items.length || snapshot.incoming.length) items.push({ key: 'ends', kind: 'ends' });
+      for (const id of [...snapshot.incoming].reverse()) items.push({ key: `v${id}`, kind: 'incoming', id });
+      snapshot.items.forEach((id, i) => items.push({ key: `v${id}`, kind: i === 0 ? 'front' : 'queued', id }));
+      return items;
+    }
     if (snapshot.items.length) items.push({ key: 'pop', kind: 'pop' });
     snapshot.items.forEach((id, i) => items.push({ key: `v${id}`, kind: i === 0 ? 'front' : 'queued', id }));
     for (const id of snapshot.incoming) items.push({ key: `v${id}`, kind: 'incoming', id });
@@ -146,9 +184,16 @@ export class QueueView {
   }
 
   private create(item: Item): HTMLElement {
-    const el = document.createElement(item.kind === 'pop' || item.kind === 'push' ? 'span' : 'div');
+    const el = document.createElement(item.id === undefined ? 'span' : 'div');
     el.dataset.key = item.key;
-    if (item.kind === 'pop' || item.kind === 'push') {
+    if (item.kind === 'ends') {
+      // A stack's open end: both arrows, on the left.
+      el.className = 'q-ends';
+      el.setAttribute('aria-hidden', 'true');
+      el.innerHTML =
+        `<span class="q-arrow q-pop">${ARROW_LEFT}<span>pop</span></span>` +
+        `<span class="q-arrow q-push">${ARROW_RIGHT}<span>push</span></span>`;
+    } else if (item.kind === 'pop' || item.kind === 'push') {
       el.className = `q-arrow q-${item.kind}`;
       el.setAttribute('aria-hidden', 'true');
       el.innerHTML = `${ARROW_LEFT}<span>${item.kind}</span>`;
@@ -167,14 +212,27 @@ export class QueueView {
   }
 
   private apply(el: HTMLElement, item: Item): void {
+    const stack = this.options.kind === 'stack';
+    if (item.kind === 'ends') {
+      el.querySelector('.q-pop')!.classList.toggle('active', this.popping);
+      el.querySelector('.q-push')!.classList.toggle('active', this.pushing);
+      return;
+    }
     if (item.id === undefined) return;
     el.classList.toggle('front', item.kind === 'front');
     el.classList.toggle('incoming', item.kind === 'incoming');
+    // A stack's vertices below the top are still running (DFS: gray).
+    el.classList.toggle('running', stack && item.kind === 'queued');
     const label = this.labels?.[item.id];
-    el.querySelector('.q-label')!.textContent = label ?? '';
-    const role = item.kind === 'front' ? ', next to be popped' : item.kind === 'incoming' ? ', about to be pushed' : '';
-    const distance = label !== undefined ? `, distance ${label}` : '';
-    el.setAttribute('aria-label', `${item.id}${distance}${role}`);
+    const labelEl = el.querySelector<HTMLElement>('.q-label')!;
+    labelEl.textContent = label ?? '';
+    const size = fitFontSize(label ?? '', LABEL_WIDTH, LABEL_FONT);
+    labelEl.style.fontSize = size < LABEL_FONT ? `${size}px` : '';
+    let role = '';
+    if (item.kind === 'incoming') role = ', about to be pushed';
+    else if (item.kind === 'front') role = stack ? (this.popping ? ', top, next to be popped' : ', top') : ', next to be popped';
+    const described = label !== undefined ? `, ${this.options.describeLabel(label)}` : '';
+    el.setAttribute('aria-label', `${item.id}${described}${role}`);
   }
 }
 

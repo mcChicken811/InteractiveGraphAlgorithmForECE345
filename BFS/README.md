@@ -46,7 +46,9 @@ npm run test:e2e:local  # browser tests directly on this machine (uses installed
 Pass Playwright options after `--`, e.g. `npm run test:e2e -- --grep "edge"`.
 
 - `unit_tests/status-bar.test.ts`: when the status bar hides and reappears (fake timers).
-- `unit_tests/queue-view.test.ts`: the queue strip's contents, order, labels, reuse of elements, empty state.
+- `unit_tests/queue-view.test.ts`: the queue and stack strips' contents, order, arrows, labels, reuse of elements, empty state.
+- `unit_tests/dfs.test.ts`: the DFS simulation against CLRS: discovery and finish times, edge classes, every step's message, stack snapshots, the outer loop over all vertices, and (on random graphs) the parenthesis theorem and each class's time rules.
+- `unit_tests/label-fit.test.ts`: label font shrinking.
 - `unit_tests/select-menu.test.ts`: the picker's mouse and keyboard behaviour, disabling, and outside clicks.
 - `unit_tests/bfs.test.ts`: the BFS simulation (order, steps, highlights, messages, unreachable vertices, directed vs. undirected).
 - `unit_tests/graph.test.ts`: the `Graph` model (ids, edges, neighbors, removal).
@@ -93,15 +95,16 @@ The image tag in `docker/playwright.Dockerfile` must match the exact `@playwrigh
 
 ## Algorithm simulation
 
-The header's picker lists the available algorithms; for now there is one, **Breadth-first search**.
+The header's picker lists the available algorithms: **Breadth-first search** and **Depth-first search**.
 
 - **Run** starts the simulation from the **selected node**, or from the lowest id if none is selected.
 - **Run** turns into **Update** and **Stop**. **Update** takes one step; after the last step it becomes **Finish**.
 - **Finish** and **Stop** both end the run: they clear the highlighting and release every lock.
 - **While running, the graph is locked:**
   - **Edits are blocked:** you can't add, connect, delete or re-weight anything, and Clear is disabled. Dragging nodes and auto-layout still work.
-  - **Undirected / Directed** is locked.
-  - **Weighting:** the weighting the algorithm needs is forced and its switch is greyed out. BFS forces **Unweighted**, and Stop / Finish restore your previous choice.
+  - **Undirected / Directed** is locked. DFS also forces **Directed**.
+  - **Weighting:** the weighting the algorithm needs is forced and its switch is greyed out. BFS and DFS force **Unweighted**.
+  - Stop / Finish restore the direction and weighting you had chosen before.
 
 **BFS steps.** The canvas always shows what the next Update will do:
 
@@ -123,10 +126,49 @@ Each Update pops the front vertex (it turns green) and appends its undiscovered 
 
 BFS runs from a single source, so vertices it can't reach stay uncoloured, and the final message counts them. On the light theme, white highlights get a thin dark outline so they stay visible.
 
+### Depth-first search
+
+DFS follows *Introduction to Algorithms* (CLRS, 4th ed., §20.3) exactly: `DFS(G)` runs `DFS-VISIT` from every vertex that is still white, so the whole graph is searched and every vertex gets a discovery time *d* and a finish time *f* from one shared clock. The outer loop takes the selected node (or the lowest id) first, then the other vertices in ascending id order. Adjacency lists are in ascending id order too. DFS runs on the **directed, unweighted** view.
+
+**Steps.** Each Update does one of three things:
+
+- **Discover a new root:** push it on the recursion stack. This happens at the start, and again whenever a tree is finished and white vertices remain.
+- **Explore the next edge** (*u*, *v*) of the vertex on top of the stack, and classify it. A tree edge also discovers *v* and pushes it.
+- **Finish the top vertex**, once it has no edges left: pop it.
+
+A graph with *n* vertices, *m* edges and *t* trees takes *n* + *m* + *t* Updates.
+
+**Colours.** The canvas always shows what the next Update will do:
+
+- **White:** the vertex it works on (the top of the stack, or the next root) and the edge it will explore next.
+- **Yellow:** running vertices (gray in CLRS: discovered, not finished, on the recursion stack).
+- **Green:** finished vertices (black in CLRS).
+
+**Times.** While DFS runs, each vertex shows its times as `d,f`: `3,` while running, `3,8` once finished, and nothing before it is discovered. Long labels shrink to fit inside the circle.
+
+**Edges.** Every edge starts dashed and faded. Once explored it is drawn solid and tagged with its class, which is decided by the colour of *v* when the edge is explored:
+
+| Class | When | Tag |
+| --- | --- | --- |
+| Tree | *v* is white: the search goes on into *v* | none |
+| Back | *v* is gray: an ancestor of *u*, still running | `backward` |
+| Forward | *v* is black and *u.d* < *v.d*: a finished descendant of *u* | `forward` |
+| Cross | *v* is black and *u.d* > *v.d*: finished earlier, in another branch or tree | `crossed` |
+
+**Recursion stack card.** While DFS runs, a **Recursion stack** card appears at the bottom of the ☰ panel. It shows the stack, top first: `← pop / → push  (incoming)  (top) … (bottom)`.
+
+- **Arrows:** both are at the open (left) end, pop above push. The one the next Update uses is drawn at full strength; an Update that only classifies an edge uses neither.
+- **Rings:** the top has the white ring (it is the canvas's white vertex), the vertices below it are yellow (running), and a vertex about to be pushed is greyed out where it will land.
+- **Animation:** a finished vertex turns green and slides out of the top.
+- **Labels:** the circles show the times, and hovering or focusing the strip shows the ids, on the canvas too.
+
 ### Adding another algorithm
 
-1. Implement `Simulation` (in `src/algorithms/types.ts`). An algorithm with a queue can also implement `queueSnapshot()`, returning `{ items, incoming }`, to get the animated Queue card. It works on a read-only `GraphView`, takes one step per `step()`, and reports `highlight()` (current vertex, finished vertices, active edges) and `describe()` (the status message).
-2. Export an `AlgorithmDefinition` from its own file: `id`, `name`, `requires` (e.g. `{ weighted: true }` for Dijkstra), and `create(view, start)`. By convention `highlight()` previews the *next* step: `current` is what it will process and `activeEdges` what it will travel. It may also return `labels` (vertex → text) to draw inside the vertices instead of their ids, as BFS does with distances; Dijkstra could do the same with tentative distances.
+1. Implement `Simulation` (in `src/algorithms/types.ts`). An algorithm with a queue can also implement `queueSnapshot()`, returning `{ items, incoming }`, to get the animated Queue card. One with a recursion stack can implement `stackSnapshot()`, returning `{ items, incoming, popping }` (top first), to get the Recursion stack card. It works on a read-only `GraphView`, takes one step per `step()`, and reports `highlight()` (current vertex, finished vertices, active edges) and `describe()` (the status message).
+2. Export an `AlgorithmDefinition` from its own file: `id`, `name`, `requires` (e.g. `{ weighted: true }` for Dijkstra; DFS uses `{ weighted: false, directed: true }`), and `create(view, start)`. By convention `highlight()` previews the *next* step: `current` is what it will process and `activeEdges` what it will travel. It may also return:
+   - `labels` (vertex → text) to draw inside the vertices instead of their ids, as BFS does with distances and DFS with times; Dijkstra could do the same with tentative distances.
+   - `running` (vertices drawn yellow).
+   - `exploredEdges` (`{ from, to, label? }`). When present, every other edge is drawn dashed, as DFS does.
 3. Add it to `ALGORITHMS` in `src/algorithms/index.ts`. The picker, the locks and the drawing then work without further changes.
 
 ## Directed and undirected mode
@@ -252,9 +294,10 @@ Freivalds, Dogrusoz & Kikusts study this approach in *Disconnected Graph Layout 
 - `src/main.ts` — wires the editor to the stats, status message, Auto-layout toggle and the ☰ help/adjacency-list panel.
 - `src/representations.ts` — renders the adjacency list (a column of vertex boxes, then each vertex's neighbours as a joined strip of boxes) and the adjacency matrix, and the list/matrix switch (ARIA tabs). The data comes from `Graph.adjacencyList()` and `Graph.adjacencyMatrix()`.
 - `src/style.css` — styles, linked directly from `index.html`.
-- `src/algorithms/` — step-by-step algorithm simulations: `types.ts` (the `Simulation` / `AlgorithmDefinition` interfaces), `bfs.ts` (`BfsSimulation`, which also exposes `order`, `parent` and `distance`), `index.ts` (the `ALGORITHMS` registry).
+- `src/algorithms/` — step-by-step algorithm simulations: `types.ts` (the `Simulation` / `AlgorithmDefinition` interfaces), `bfs.ts` (`BfsSimulation`, which also exposes `order`, `parent` and `distance`), `dfs.ts` (`DfsSimulation`, which also exposes `discovery`, `finish`, `parent`, `edges` with their classes, and `trees`), `index.ts` (the `ALGORITHMS` registry).
 - `src/select-menu.ts` — `SelectMenu`: the styled program picker. It replaces a native `<select>`, whose open list the browser draws and which can't be styled or positioned (on macOS it pops up over the box). It follows the WAI-ARIA "select-only combobox" pattern: mouse, ↑/↓/Home/End/Enter/Space/Esc/Tab, and closes on an outside click. The list drops down below the box, in the page's panel style, with the option text in line with the box's text.
-- `src/queue-view.ts` — `QueueView`: the side panel's animated queue strip. Elements are reused by vertex id, and changes are animated with the FLIP technique (record positions, update, play from the old positions).
+- `src/queue-view.ts` — `QueueView`: the side panel's animated queue strip (BFS), or with `kind: 'stack'` the recursion stack strip (DFS). Elements are reused by vertex id, and changes are animated with the FLIP technique (record positions, update, play from the old positions).
+- `src/label-fit.ts` — `fitFontSize`: shrinks a label's font so long labels (DFS's `d,f`) fit inside a vertex circle.
 - `src/status-bar.ts` — `StatusBar`: every status message goes through `show(text, tone)`.
   - **Hiding:** 5 s after the last message, with the pointer neither on the bar nor near it, the bar slides slowly down out of view.
   - **Revealing:** a new message, or the pointer coming near the bottom edge where the bar hides (or a tap there), slides it quickly back.

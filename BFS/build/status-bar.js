@@ -63,6 +63,7 @@ export class StatusBar {
         const after = this.bar.getBoundingClientRect();
         const timing = { duration: RESIZE_MS, easing: RESIZE_EASING };
         this.fading = this.text.animate([{ opacity: 0 }, { opacity: 1 }], timing);
+        this.fading.finished.catch(() => { }); // cancelled by a newer message: nothing to do
         if (Math.abs(after.width - before.width) < 0.5 && Math.abs(after.height - before.height) < 0.5)
             return;
         // Pin the text to its final layout. Lift the `max-width: 100%` cap too: it would
