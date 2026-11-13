@@ -88,6 +88,9 @@ clearBtn.addEventListener('click', () => editor.clear());
 // Hovering (or focusing) the queue strip shows vertex ids instead of BFS distances.
 const queueView = new QueueView(document.querySelector('#queue-strip'), document.querySelector('#queue-empty'));
 queueView.onPeek = (peek) => editor.setLabelPeek(peek);
+// Prim's min-priority queue, smallest key first; its vertices show their keys.
+const priorityQueueView = new QueueView(document.querySelector('#pq-strip'), document.querySelector('#pq-empty'), { kind: 'priority' });
+priorityQueueView.onPeek = (peek) => editor.setLabelPeek(peek);
 // DFS's recursion stack works the same way; its vertices show "discovery,finish" times.
 const stackView = new QueueView(document.querySelector('#stack-strip'), document.querySelector('#stack-empty'), {
     kind: 'stack',
@@ -116,6 +119,8 @@ runner = new AlgorithmRunner(graph, editor, {
     directionSwitch: document.querySelector('#direction-switch'),
     queueCard: document.querySelector('#queue-card'),
     queueView,
+    priorityQueueCard: document.querySelector('#pq-card'),
+    priorityQueueView,
     stackCard: document.querySelector('#stack-card'),
     stackView,
     timestampsCard: document.querySelector('#timestamps-card'),

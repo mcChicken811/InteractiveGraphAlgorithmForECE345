@@ -144,6 +144,14 @@
                   the corner button to view it full size.
                 </li>
                 <li>
+                  Prim's algorithm reads the graph as undirected and grows a
+                  <strong>minimum spanning tree</strong> from the start node (green vertices and edges; other
+                  edges are dashed). Vertices show their <strong>key</strong>: the lightest edge found so far
+                  joining them to the tree (∞ if none). It uses the edge weights in weighted mode, and counts
+                  every edge as 1 in unweighted mode. <strong>Hover the priority queue</strong> to see the vertex
+                  numbers.
+                </li>
+                <li>
                   When DFS is done and found no backward edge (no cycle), <strong>Topological sort</strong> lines
                   the vertices up by decreasing finish time. Tree edges run along the line in white; the other
                   edges arc above (forward) or below (crossed). Auto-layout leaves this view; press the button
@@ -226,6 +234,34 @@
               <!-- Focusable so keyboard users can scroll it; hovering or focusing it shows vertex ids. -->
               <div id="queue-strip" class="queue-strip" role="list" aria-label="Queue, front first" tabindex="0"></div>
               <p id="queue-empty" class="queue-empty" hidden>The queue is empty.</p>
+            </div>
+          </section>
+          <!-- Shown only while an algorithm with a min-priority queue (Prim) runs: src/queue-view.ts. -->
+          <section id="pq-card" class="info-card queue-card" aria-labelledby="pq-title" hidden>
+            <h2 class="card-title" id="pq-title">
+              <button
+                class="card-toggle"
+                type="button"
+                aria-expanded="true"
+                aria-controls="pq-body"
+                data-collapse-key="priority-queue"
+              >
+                <span>Priority queue</span>
+                <svg class="chevron" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
+            </h2>
+            <div id="pq-body" class="card-body">
+              <!-- Focusable so keyboard users can scroll it; hovering or focusing it shows vertex ids. -->
+              <div
+                id="pq-strip"
+                class="queue-strip"
+                role="list"
+                aria-label="Priority queue, smallest key first"
+                tabindex="0"
+              ></div>
+              <p id="pq-empty" class="queue-empty" hidden>The priority queue is empty.</p>
             </div>
           </section>
           <!-- Shown only while an algorithm with a recursion stack (DFS) runs: src/queue-view.ts. -->

@@ -862,6 +862,22 @@ describe('GraphEditor lock and algorithm highlight', () => {
     expect(svg.querySelectorAll('.sim-unexplored, .sim-explored, [data-tag]')).toHaveLength(0);
   });
 
+  it('explored edges marked done (e.g. Prim’s tree edges) are drawn in the finished colour', () => {
+    const edge = (a: number, b: number) => svg.querySelector<SVGGElement>(`[data-edge-a="${a}"][data-edge-b="${b}"]`)!;
+    editor.setHighlight({
+      current: 2,
+      done: [0, 1],
+      activeEdges: [[1, 2]],
+      exploredEdges: [{ from: 1, to: 0, done: true }], // undirected: the 0—1 edge
+    });
+    expect(edge(0, 1).classList.contains('sim-tree')).toBe(true);
+    expect(edge(0, 1).classList.contains('sim-unexplored')).toBe(false);
+    expect(edge(1, 2).classList.contains('sim-tree')).toBe(false);
+    expect(edge(1, 2).classList.contains('sim-active')).toBe(true); // about to be added
+    editor.setHighlight(null);
+    expect(svg.querySelectorAll('.sim-tree')).toHaveLength(0);
+  });
+
   it('explored directed edges match the exact arc', () => {
     editor.setDirected(true);
     editor.setHighlight({ current: 0, done: [], activeEdges: [], exploredEdges: [{ from: 1, to: 0, label: 'x' }] });

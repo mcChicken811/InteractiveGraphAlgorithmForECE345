@@ -622,9 +622,9 @@ export class GraphEditor {
     this.svg.classList.toggle('directed', directed);
     this.svg.classList.toggle('weighted', weighted);
     const liveEdges = new Set<string>();
-    // Edges the algorithm has explored (key → tag), if it tracks them; the rest are dashed.
+    // Edges the algorithm has explored (by key), if it tracks them; the rest are dashed.
     const explored = this.highlight?.exploredEdges
-      ? new Map(this.highlight.exploredEdges.map((e) => [this.edgeKey(e.from, e.to, directed), e.label ?? '']))
+      ? new Map(this.highlight.exploredEdges.map((e) => [this.edgeKey(e.from, e.to, directed), e]))
       : null;
     const arc = this.arc;
     for (const [a, b] of this.graph.getEdges()) {
@@ -662,9 +662,10 @@ export class GraphEditor {
       g.classList.toggle('sim-spine', arc !== null && !arc.leaving && arc.spine.has(key));
       g.classList.toggle('sim-unexplored', explored !== null && !explored.has(key));
       g.classList.toggle('sim-explored', explored?.has(key) ?? false);
+      g.classList.toggle('sim-tree', explored?.get(key)?.done ?? false);
       for (const el of g.querySelectorAll('.edge-hit, .edge-line')) setAttrs(el, attrs);
 
-      const tag = explored?.get(key) ?? '';
+      const tag = explored?.get(key)?.label ?? '';
       if (tag) {
         g.dataset.tag = tag;
         const tagWidth = 12 + tag.length * 6.4;
@@ -857,7 +858,7 @@ export class GraphEditor {
 /** Arrowhead markers for directed mode: normal, hovered (delete), the preview line, and algorithm-highlighted edges. */
 function arrowDefs(): SVGDefsElement {
   const defs = svgEl('defs', {});
-  for (const id of ['arrow', 'arrow-hover', 'arrow-preview', 'arrow-active']) {
+  for (const id of ['arrow', 'arrow-hover', 'arrow-preview', 'arrow-active', 'arrow-done']) {
     const marker = svgEl('marker', {
       id,
       viewBox: '0 0 10 10',

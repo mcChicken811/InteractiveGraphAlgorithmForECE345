@@ -1057,6 +1057,20 @@ button:disabled {
   marker-end: url(#arrow-active);
 }
 
+/* Edges the algorithm has made part of its result (Prim's tree): green, like finished vertices. */
+.edge.sim-tree .edge-line {
+  stroke: var(--sim-done);
+  stroke-width: 4;
+}
+
+.arrow-done-head {
+  fill: var(--sim-done);
+}
+
+#canvas.directed .edge.sim-tree .edge-line {
+  marker-end: url(#arrow-done);
+}
+
 /* Algorithms that track explored edges (DFS): edges stay dashed and faded until explored. */
 .edge.sim-unexplored:not(.sim-active) .edge-line {
   stroke-dasharray: 7 6;
@@ -1106,6 +1120,14 @@ button:disabled {
 
 #canvas.directed.locked .edge:not(.sim-active, .sim-spine):hover .edge-line {
   marker-end: url(#arrow);
+}
+
+#canvas.locked .edge.sim-tree:not(.sim-active, .sim-spine):hover .edge-line {
+  stroke: var(--sim-done);
+}
+
+#canvas.directed.locked .edge.sim-tree:not(.sim-active, .sim-spine):hover .edge-line {
+  marker-end: url(#arrow-done);
 }
 
 #canvas.locked .edge.sim-unexplored:not(.sim-active):hover .edge-line {

@@ -3,10 +3,11 @@ import type { NodeId } from './graph.js';
 import { fitFontSize } from './label-fit.js';
 
 /**
- * Draws an algorithm's queue (BFS) or recursion stack (DFS) as a horizontal strip in the
- * side panel:
+ * Draws an algorithm's queue (BFS), min-priority queue (Prim) or recursion stack (DFS) as
+ * a horizontal strip in the side panel:
  *
  *   queue:  ← pop  (front) (…) (back)  (incoming…)  ← push
+ *   priority queue:  ← min  (smallest key) (…) (largest key)
  *   stack:  ← pop   (incoming) (top) (…) (bottom)
  *           → push
  *
@@ -15,7 +16,9 @@ import { fitFontSize } from './label-fit.js';
  * white "current" ring; the vertices the next step will push are greyed out where they
  * will land. A stack's other vertices are still running, so they have the canvas's
  * yellow ring; its two arrows share the open (left) end, and the one the next step uses
- * is highlighted.
+ * is highlighted. A priority queue is drawn in extraction order, so vertices glide to
+ * their new places when their keys change; a snapshot can also name vertices to ring
+ * yellow (`running`).
  *
  * `update()` animates the change from the previous snapshot (FLIP): the popped vertex
  * turns green and slides out to the left, the rest glide into their new places,
@@ -45,9 +48,9 @@ const LABEL_WIDTH = 22;
 const LABEL_FONT = 12;
 
 export interface QueueViewOptions {
-  /** 'queue' (BFS, the default) or 'stack' (DFS's recursion stack). */
-  kind: 'queue' | 'stack';
-  /** How a vertex's label is read out to screen readers (default: "distance 2"). */
+  /** 'queue' (BFS, the default), 'priority' (Prim's min-priority queue) or 'stack' (DFS's recursion stack). */
+  kind: 'queue' | 'stack' | 'priority';
+  /** How a vertex's label is read out to screen readers (default: "distance 2"; priority: "key 2"). */
   describeLabel: (label: string) => string;
 }
 
@@ -62,13 +65,17 @@ export class QueueView {
   /** Stack only: whether the next step pops the top / pushes something (lights its arrow). */
   private popping = false;
   private pushing = false;
+  /** Vertices the snapshot asks to ring yellow. */
+  private running: ReadonlySet<NodeId> = new Set();
 
   constructor(
     private readonly strip: HTMLElement,
     private readonly emptyNote: HTMLElement,
     options: Partial<QueueViewOptions> = {},
   ) {
-    this.options = { kind: 'queue', describeLabel: (label) => `distance ${label}`, ...options };
+    const kind = options.kind ?? 'queue';
+    const describeLabel = (label: string) => (kind === 'priority' ? `key ${label}` : `distance ${label}`);
+    this.options = { kind, describeLabel, ...options };
     strip.classList.add(`strip-${this.options.kind}`);
     const peek = (on: boolean) => {
       strip.classList.toggle('peek-ids', on);
@@ -89,6 +96,7 @@ export class QueueView {
     this.labels = labels;
     this.popping = !!snapshot && 'popping' in snapshot && snapshot.popping;
     this.pushing = !!snapshot && snapshot.incoming.length > 0;
+    this.running = new Set(snapshot && 'running' in snapshot ? snapshot.running : []);
     this.strip.classList.toggle('has-labels', !!labels);
     const motion = animate && canAnimate() && !prefersReducedMotion();
     const live = this.liveElements();
@@ -196,7 +204,9 @@ export class QueueView {
     } else if (item.kind === 'pop' || item.kind === 'push') {
       el.className = `q-arrow q-${item.kind}`;
       el.setAttribute('aria-hidden', 'true');
-      el.innerHTML = `${ARROW_LEFT}<span>${item.kind}</span>`;
+      // A priority queue gives up its minimum, rather than "popping" its oldest.
+      const text = item.kind === 'pop' && this.options.kind === 'priority' ? 'min' : item.kind;
+      el.innerHTML = `${ARROW_LEFT}<span>${text}</span>`;
     } else {
       el.className = 'q-node';
       el.setAttribute('role', 'listitem');
@@ -222,7 +232,7 @@ export class QueueView {
     el.classList.toggle('front', item.kind === 'front');
     el.classList.toggle('incoming', item.kind === 'incoming');
     // A stack's vertices below the top are still running (DFS: gray).
-    el.classList.toggle('running', stack && item.kind === 'queued');
+    el.classList.toggle('running', item.kind === 'queued' && (stack || this.running.has(item.id)));
     const label = this.labels?.[item.id];
     const labelEl = el.querySelector<HTMLElement>('.q-label')!;
     labelEl.textContent = label ?? '';
@@ -230,7 +240,10 @@ export class QueueView {
     labelEl.style.fontSize = size < LABEL_FONT ? `${size}px` : '';
     let role = '';
     if (item.kind === 'incoming') role = ', about to be pushed';
-    else if (item.kind === 'front') role = stack ? (this.popping ? ', top, next to be popped' : ', top') : ', next to be popped';
+    else if (item.kind === 'front') {
+      if (stack) role = this.popping ? ', top, next to be popped' : ', top';
+      else role = this.options.kind === 'priority' ? ', smallest key, next to be extracted' : ', next to be popped';
+    }
     const described = label !== undefined ? `, ${this.options.describeLabel(label)}` : '';
     el.setAttribute('aria-label', `${item.id}${described}${role}`);
   }

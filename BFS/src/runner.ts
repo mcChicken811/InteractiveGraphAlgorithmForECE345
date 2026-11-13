@@ -14,13 +14,16 @@ export interface RunnerElements {
   stop: HTMLButtonElement;
   /** "Topological sort", offered next to Finish when the simulation has one (DFS). */
   topo?: HTMLButtonElement;
-  /** The Unweighted / Weighted switch (locked when an algorithm requires a weighting). */
+  /** The Unweighted / Weighted switch (locked when an algorithm requires a weighting or reads the weights). */
   weightSwitch: HTMLFieldSetElement;
   /** The Undirected / Directed switch (locked while running: changing it would change the graph). */
   directionSwitch: HTMLFieldSetElement;
   /** Side-panel card showing the algorithm's queue while it runs (if it has one). */
   queueCard?: HTMLElement;
   queueView?: QueueView;
+  /** Side-panel card showing the algorithm's min-priority queue while it runs (if it has one). */
+  priorityQueueCard?: HTMLElement;
+  priorityQueueView?: QueueView;
   /** Side-panel card showing the algorithm's recursion stack while it runs (if it has one). */
   stackCard?: HTMLElement;
   stackView?: QueueView;
@@ -35,7 +38,8 @@ const LOCKED_TITLE = 'Locked while the algorithm runs. Press Stop to change it.'
  * Runs the selected algorithm step by step:
  *   Run    → locks the graph (editing, the direction switch, and the weighting) and
  *            forces the reading the algorithm requires (BFS: "Unweighted"; DFS:
- *            "Unweighted" and "Directed"), then starts the simulation;
+ *            "Unweighted" and "Directed"; Prim: "Undirected", with the weighting left
+ *            as chosen but locked), then starts the simulation;
  *   Update → advances one step; after the last step it turns into Finish;
  *   Topological sort → (DFS, once finished) lines the vertices up in topological order
  *            as an arc diagram; greyed out when the graph has a cycle. The run goes on
@@ -95,7 +99,9 @@ export class AlgorithmRunner {
       this.editor.setDirected(directed);
       this.syncSwitch(this.el.directionSwitch, 'directed', this.graph.directed);
     }
-    this.lockSwitch(this.el.weightSwitch, weighted !== undefined);
+    // An algorithm that reads the weights keeps the user's weighting, but it must not
+    // change under it part-way.
+    this.lockSwitch(this.el.weightSwitch, weighted !== undefined || !!algorithm.usesWeights);
     this.lockSwitch(this.el.directionSwitch, true);
 
     this.simulation = algorithm.create(this.graph.currentView, start);
@@ -149,6 +155,8 @@ export class AlgorithmRunner {
     this.lockSwitch(this.el.directionSwitch, false);
     this.el.queueView?.update(null, false);
     if (this.el.queueCard) this.el.queueCard.hidden = true;
+    this.el.priorityQueueView?.update(null, false);
+    if (this.el.priorityQueueCard) this.el.priorityQueueCard.hidden = true;
     this.el.stackView?.update(null, false);
     if (this.el.stackCard) this.el.stackCard.hidden = true;
     this.el.timelineView?.collapse(false);
@@ -167,6 +175,9 @@ export class AlgorithmRunner {
     const queue = simulation.queueSnapshot?.() ?? null;
     if (this.el.queueCard) this.el.queueCard.hidden = queue === null;
     this.el.queueView?.update(queue, animate, highlight.labels);
+    const priorityQueue = simulation.priorityQueueSnapshot?.() ?? null;
+    if (this.el.priorityQueueCard) this.el.priorityQueueCard.hidden = priorityQueue === null;
+    this.el.priorityQueueView?.update(priorityQueue, animate, highlight.labels);
     const stack = simulation.stackSnapshot?.() ?? null;
     if (this.el.stackCard) this.el.stackCard.hidden = stack === null;
     this.el.stackView?.update(stack, animate, highlight.labels);

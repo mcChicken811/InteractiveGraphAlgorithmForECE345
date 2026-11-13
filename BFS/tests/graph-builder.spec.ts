@@ -1122,6 +1122,7 @@ test.describe('algorithm simulation (BFS)', () => {
     await expect(page.getByRole('listbox', { name: 'Algorithm' }).getByRole('option')).toHaveText([
       'Breadth-first search',
       'Depth-first search',
+      "Prim's algorithm",
     ]);
     await page.keyboard.press('Escape');
     await expect(runBtn(page)).toBeVisible();
@@ -2240,12 +2241,17 @@ test.describe('algorithm simulation (DFS)', () => {
       await steps(page, 13);
       await expect.poll(() => chart(page).evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
       await expect(page.locator('#timestamps-chart .tl-axis .now')).toBeInViewport();
-      const [nowBox, chartBox] = await Promise.all([
-        page.locator('#timestamps-chart .tl-axis .now').boundingBox(),
-        chart(page).boundingBox(),
-      ]);
-      expect(nowBox!.x).toBeGreaterThanOrEqual(chartBox!.x);
-      expect(nowBox!.x + nowBox!.width).toBeLessThanOrEqual(chartBox!.x + chartBox!.width);
+      // The chart scrolls smoothly to the current time: wait until its label is inside
+      // the chart rather than measuring part-way.
+      await expect
+        .poll(async () => {
+          const [nowBox, chartBox] = await Promise.all([
+            page.locator('#timestamps-chart .tl-axis .now').boundingBox(),
+            chart(page).boundingBox(),
+          ]);
+          return nowBox!.x >= chartBox!.x - 1 && nowBox!.x + nowBox!.width <= chartBox!.x + chartBox!.width + 1;
+        })
+        .toBe(true);
     });
 
     test('hovering the chart shows the expand button in its bottom-right corner', async ({ page }) => {
@@ -2436,6 +2442,268 @@ test.describe('algorithm simulation (DFS)', () => {
       await steps(page, 13);
       await expect(stackStrip(page)).toBeHidden();
       await expect(page.locator('#stack-empty')).toBeVisible();
+    });
+  });
+});
+
+test.describe("algorithm simulation (Prim's minimum spanning tree)", () => {
+  const run = (page: Page) => page.getByRole('button', { name: 'Run', exact: true }).click();
+  const update = (page: Page) => page.getByRole('button', { name: 'Update', exact: true }).click();
+  const message = (page: Page) => page.locator('#message');
+  const radio = (page: Page, name: string) => page.getByRole('radio', { name, exact: true });
+  const pqCard = (page: Page) => page.getByRole('region', { name: 'Priority queue' });
+  const pqStrip = (page: Page) => page.getByRole('list', { name: 'Priority queue, smallest key first' });
+
+  const WHITE = 'rgb(255, 255, 255)';
+  const YELLOW = 'rgb(242, 169, 0)';
+  const GREEN = 'rgb(47, 158, 68)';
+  const strokeOf = (id: number) => cv.node(id).locator('circle').evaluate((c) => getComputedStyle(c).stroke);
+
+  /**
+   * Edges with weights: 0—1 (4), 0—2 (8), 1—2 (2), 1—3 (5), 2—3 (9), 3—4 (3).
+   * Prim from 0 adds 0, 1 (0—1), 2 (1—2), 3 (1—3), 4 (3—4): weight 14; 0—2 and 2—3 stay out.
+   */
+  const S: Array<[number, number]> = [
+    [150, 200],
+    [420, 150],
+    [380, 430],
+    [640, 300],
+    [780, 480],
+  ];
+  const EDGES: Array<[number, number, number]> = [
+    [0, 1, 4],
+    [0, 2, 8],
+    [1, 2, 2],
+    [1, 3, 5],
+    [2, 3, 9],
+    [3, 4, 3],
+  ];
+
+  /** Builds the graph, sets the weights by scrolling, then leaves the switches as given and picks Prim. */
+  async function build(page: Page, { directed = false, weighted = true, spots = S, edges = EDGES } = {}): Promise<void> {
+    for (const p of spots) await cv.click(...p);
+    for (const [a, b] of edges) await connect(spots[a], spots[b]);
+    await page.locator('label[for="weights-on"]').click();
+    const height = page.viewportSize()!.height;
+    for (const [a, b, w] of edges) {
+      await cv.move(...mid(spots[a], spots[b]));
+      // 15 per page of scrolling, up = more. Aim a little past w: weights step in whole
+      // numbers, and the browser may deliver a fraction of a pixel less than asked.
+      await page.mouse.wheel(0, -((w + 0.4) / 15) * height);
+      await expect(cv.edge(a, b)).toHaveAttribute('data-weight', String(w));
+    }
+    if (!weighted) await page.locator('label[for="weights-off"]').click();
+    if (directed) await page.locator('label[for="mode-directed"]').click();
+    await page.getByRole('combobox', { name: 'Algorithm' }).click();
+    await page.getByRole('option', { name: "Prim's algorithm" }).click();
+  }
+
+  async function steps(page: Page, n: number): Promise<void> {
+    for (let i = 0; i < n; i++) await update(page);
+  }
+
+  const labels = (page: Page) =>
+    page.locator('#canvas [data-node-id]').evaluateAll((nodes) => nodes.map((g) => g.querySelector('.sim-label')!.textContent));
+
+  /** Edge "a-b" → 'tree' (in the tree), 'next' (about to join) or 'dashed' (the rest). */
+  const edgeLook = (page: Page) =>
+    page.locator('#canvas .edge').evaluateAll((edges) =>
+      Object.fromEntries(
+        edges.map((e) => {
+          const g = e as SVGGElement;
+          const dashed = getComputedStyle(g.querySelector('.edge-line')!).strokeDasharray !== 'none';
+          const look = g.classList.contains('sim-tree') ? 'tree' : g.classList.contains('sim-active') ? 'next' : dashed ? 'dashed' : 'plain';
+          return [`${g.dataset.edgeA}-${g.dataset.edgeB}`, look];
+        }),
+      ),
+    );
+
+  /** Priority queue tokens: 'min', then ids (+ '*' smallest key, '~' yellow ring), with their keys. */
+  const pqTokens = (page: Page) =>
+    page.locator('#pq-strip > [data-key]:not(.exiting)').evaluateAll((els) =>
+      els.map((el) => {
+        if ((el as HTMLElement).dataset.key === 'pop') return el.textContent!.trim();
+        return (
+          el.querySelector('.q-index')!.textContent! +
+          (el.classList.contains('front') ? '*' : '') +
+          (el.classList.contains('running') ? '~' : '') +
+          ':' +
+          el.querySelector('.q-label')!.textContent
+        );
+      }),
+    );
+
+  test('Run forces Undirected and locks both switches, but keeps the chosen weighting; Stop restores', async ({ page }) => {
+    await build(page, { directed: true, weighted: true });
+    await run(page);
+    await expect(message(page)).toHaveText("Prim from 0. Every key is ∞ except 0's, which is 0. Press Update to add 0 to the tree.");
+    await expect(radio(page, 'Undirected')).toBeChecked(); // forced
+    await expect(radio(page, 'Weighted')).toBeChecked(); // kept as chosen
+    for (const name of ['Undirected', 'Directed', 'Unweighted', 'Weighted']) await expect(radio(page, name)).toBeDisabled();
+    await expect(cv.canvas).not.toHaveClass(/directed/);
+    await expect(cv.edge(0, 1).locator('.edge-weight')).toBeVisible();
+    await expect(cv.edge(0, 1).locator('.edge-weight')).toHaveText('4');
+
+    await page.getByRole('button', { name: 'Stop', exact: true }).click();
+    await expect(radio(page, 'Directed')).toBeChecked();
+    await expect(radio(page, 'Weighted')).toBeChecked();
+    for (const name of ['Undirected', 'Directed', 'Unweighted', 'Weighted']) await expect(radio(page, name)).toBeEnabled();
+  });
+
+  test('vertices show their keys: ∞ until an edge reaches them from the tree', async ({ page }) => {
+    await build(page);
+    await run(page);
+    expect(await labels(page)).toEqual(['0', '∞', '∞', '∞', '∞']);
+    await update(page); // 0 joins: 1 and 2 get keys 4 and 8
+    expect(await labels(page)).toEqual(['0', '4', '8', '∞', '∞']);
+    await update(page); // 1 joins: 2 drops to 2, 3 gets 5
+    expect(await labels(page)).toEqual(['0', '4', '2', '5', '∞']);
+    await expect(message(page)).toHaveText('Added 1 by edge 0 — 1 (weight 4). Lowered keys: 2 to 2, 3 to 5. Tree weight 4.');
+  });
+
+  test('white marks the next vertex and the edge that will join it; the tree is green, other edges dashed', async ({ page }) => {
+    await build(page);
+    await run(page);
+    expect(await strokeOf(0)).toBe(WHITE); // extracted first, by no edge
+    expect(Object.values(await edgeLook(page)).every((l) => l === 'dashed')).toBe(true);
+
+    await update(page); // 0 in the tree → next: 1, by 0—1
+    expect(await strokeOf(0)).toBe(GREEN);
+    expect(await strokeOf(1)).toBe(WHITE);
+    expect(await strokeOf(2)).toBe(YELLOW); // has a key, still in the queue
+    expect(await strokeOf(3)).not.toBe(YELLOW); // key ∞
+    expect(await edgeLook(page)).toMatchObject({ '0-1': 'next', '0-2': 'dashed', '1-2': 'dashed' });
+
+    await update(page); // 1 in the tree → next: 2, by 1—2 (lighter than 0—2)
+    expect(await edgeLook(page)).toMatchObject({ '0-1': 'tree', '1-2': 'next', '0-2': 'dashed', '1-3': 'dashed' });
+    await expect(cv.edge(0, 1).locator('.edge-line')).toHaveCSS('stroke', GREEN); // tree edges: green, solid
+    await expect(cv.edge(0, 1).locator('.edge-line')).toHaveCSS('stroke-dasharray', 'none');
+    await expect(cv.edge(1, 2).locator('.edge-line')).toHaveCSS('stroke', WHITE);
+    expect(await strokeOf(2)).toBe(WHITE);
+    expect(await strokeOf(3)).toBe(YELLOW);
+  });
+
+  test('finishes with the minimum spanning tree and its total weight', async ({ page }) => {
+    await build(page);
+    await run(page);
+    await steps(page, 5);
+    await expect(page.getByRole('button', { name: 'Finish', exact: true })).toBeVisible();
+    await expect(message(page)).toHaveText('Prim finished: a minimum spanning tree of 4 edges, total weight 14. Press Finish.');
+    expect(await edgeLook(page)).toEqual({
+      '0-1': 'tree',
+      '0-2': 'dashed',
+      '1-2': 'tree',
+      '1-3': 'tree',
+      '2-3': 'dashed',
+      '3-4': 'tree',
+    });
+    for (const id of [0, 1, 2, 3, 4]) expect(await strokeOf(id)).toBe(GREEN);
+    await expect(page.getByRole('button', { name: 'Topological sort' })).toBeHidden(); // DFS only
+
+    await page.getByRole('button', { name: 'Finish', exact: true }).click();
+    await expect(cv.canvas.locator('.sim-tree, .sim-unexplored, .sim-done')).toHaveCount(0);
+    await expect(cv.node(3)).toHaveText(/^3/);
+  });
+
+  test('unweighted: stays unweighted (locked) and counts every edge as 1', async ({ page }) => {
+    await build(page, { weighted: false });
+    await run(page);
+    await expect(radio(page, 'Unweighted')).toBeChecked();
+    for (const name of ['Unweighted', 'Weighted']) await expect(radio(page, name)).toBeDisabled();
+    await expect(cv.edge(0, 1).locator('.edge-weight')).toBeHidden();
+    await update(page);
+    expect(await labels(page)).toEqual(['0', '1', '1', '∞', '∞']);
+    await steps(page, 4);
+    await expect(message(page)).toHaveText(
+      'Prim finished: a minimum spanning tree of 4 edges, total weight 4 (every edge counts as 1). Press Finish.',
+    );
+    await page.getByRole('button', { name: 'Finish', exact: true }).click();
+    await expect(radio(page, 'Unweighted')).toBeChecked();
+    await expect(radio(page, 'Unweighted')).toBeEnabled();
+  });
+
+  test('a graph that is not connected gives a minimum spanning forest', async ({ page }) => {
+    const spots: Array<[number, number]> = [...S, [200, 520]];
+    await build(page, { spots }); // vertex 5 has no edges
+    await run(page);
+    await steps(page, 5);
+    expect(await strokeOf(5)).toBe(WHITE); // key ∞: starts a new tree
+    await expect(cv.canvas.locator('.edge.sim-active')).toHaveCount(0);
+    await update(page);
+    await expect(message(page)).toHaveText(
+      'Prim finished: the graph is not connected, so this is a minimum spanning forest of 2 trees, 4 edges, total weight 14. Press Finish.',
+    );
+  });
+
+  test('starts from the selected node', async ({ page }) => {
+    await build(page);
+    await cv.click(...S[3]);
+    await run(page);
+    await expect(message(page)).toHaveText("Prim from 3. Every key is ∞ except 3's, which is 0. Press Update to add 3 to the tree.");
+    expect(await labels(page)).toEqual(['∞', '∞', '∞', '0', '∞']);
+  });
+
+  test.describe('priority queue card', () => {
+    test.beforeEach(async ({ page }) => {
+      await page.getByRole('button', { name: 'Help and adjacency list' }).click();
+      await page.getByRole('button', { name: 'How to use' }).click(); // make room
+    });
+
+    test('appears only while Prim runs, in place of the BFS queue', async ({ page }) => {
+      await build(page);
+      await expect(pqCard(page)).toBeHidden();
+      await run(page);
+      await expect(pqCard(page)).toBeVisible();
+      await expect(page.getByRole('region', { name: 'Queue', exact: true })).toBeHidden();
+      await expect(page.getByRole('region', { name: 'Recursion stack' })).toBeHidden();
+      await page.getByRole('button', { name: 'Stop', exact: true }).click();
+      await expect(pqCard(page)).toBeHidden();
+    });
+
+    test('lists every vertex by key, smallest first, and re-orders as keys drop', async ({ page }) => {
+      await build(page);
+      await run(page);
+      expect(await pqTokens(page)).toEqual(['min', '0*:0', '1:∞', '2:∞', '3:∞', '4:∞']);
+      await update(page);
+      expect(await pqTokens(page)).toEqual(['min', '1*:4', '2~:8', '3:∞', '4:∞']);
+      await update(page); // 2's key drops to 2, 3's to 5
+      expect(await pqTokens(page)).toEqual(['min', '2*:2', '3~:5', '4:∞']);
+      await expect(pqStrip(page).getByRole('listitem').first()).toHaveAttribute(
+        'aria-label',
+        '2, key 2, smallest key, next to be extracted',
+      );
+      await steps(page, 3);
+      await expect(page.locator('#pq-empty')).toBeVisible();
+    });
+
+    test('the extracted vertex slides out green; its ring colours match the canvas', async ({ page }) => {
+      await build(page);
+      await run(page);
+      await update(page);
+      await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => {}))));
+      const border = (sel: string) => page.locator(sel).first().evaluate((el) => getComputedStyle(el).borderTopColor);
+      expect(await border('#pq-strip .q-node.front')).toBe(WHITE);
+      expect(await border('#pq-strip .q-node.running')).toBe(YELLOW);
+      await update(page);
+      const leaving = page.locator('#pq-strip > .exiting');
+      await expect(leaving).toHaveCount(1);
+      await expect(leaving.locator('.q-index')).toHaveText('1');
+      await expect(leaving).toHaveClass(/popped/);
+      await expect(leaving).toHaveCount(0, { timeout: 2000 });
+    });
+
+    test('hovering the queue shows the vertex numbers, here and on the canvas', async ({ page }) => {
+      await build(page);
+      await run(page);
+      await update(page);
+      await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => {}))));
+      await pqStrip(page).hover();
+      await expect(cv.canvas).toHaveClass(/peek-ids/);
+      await expect
+        .poll(() => cv.node(1).locator('.node-index').evaluate((el) => Number(getComputedStyle(el).opacity)))
+        .toBe(1);
+      await cv.move(...S[4]);
+      await expect(cv.canvas).not.toHaveClass(/peek-ids/);
     });
   });
 });

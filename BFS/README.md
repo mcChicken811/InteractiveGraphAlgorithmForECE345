@@ -48,6 +48,7 @@ Pass Playwright options after `--`, e.g. `npm run test:e2e -- --grep "edge"`.
 - `unit_tests/status-bar.test.ts`: when the status bar hides and reappears (fake timers).
 - `unit_tests/queue-view.test.ts`: the queue and stack strips' contents, order, arrows, labels, reuse of elements, empty state.
 - `unit_tests/dfs.test.ts`: the DFS simulation against CLRS: discovery and finish times, edge classes, every step's message, stack snapshots, the outer loop over all vertices, and (on random graphs) the parenthesis theorem and each class's time rules. Also the topological sort: decreasing finish times, and (checked against Kahn's algorithm on random graphs) offered exactly when the graph is acyclic, with every edge pointing forward.
+- `unit_tests/prim.test.ts`: Prim's algorithm against CLRS: keys, every step's message, the tree, tie-breaking, negative weights, the unweighted view, graphs that are not connected, and (on random graphs) the same total weight as an independent Kruskal implementation.
 - `unit_tests/label-fit.test.ts`: label font shrinking.
 - `unit_tests/timeline-view.test.ts`: the timestamp chart's bars, rows, axis and now line, and expanding into the dialog and back (button, Esc, backdrop click).
 - `unit_tests/arc-diagram.test.ts`: the topological sort's row layout (centring, wrapping, room for arcs) and half-circle geometry.
@@ -84,6 +85,9 @@ The browser tests drive a UI that animates almost everything, so most flakiness 
 | --- | --- | --- |
 | A hover test fails about 1 run in 25: the ids don't come back after hovering a strip ("shows the times in the circles; hovering the stack shows the ids…") | After an Update, the Timestamps card can grow a row (a 0.34 s transition), which moves the cards above it. The strip slides out from under the still pointer, `pointerleave` fires, and the peek switches off. | Wait for `document.getAnimations()` to finish before hovering. Any new test that hovers or measures the side panel right after an Update should do the same. |
 | A position or size is off by a few dozen px ("expands to the middle of the screen…": the card came back 24 px higher than measured) | The "before" value was read while the panel was still reflowing (same cause as above), or during a FLIP move or the status bar's resize. | Let animations finish before measuring, or read everything in one `page.evaluate` call. |
+| "scrolls when the axis overflows…" fails about 2 runs in 25: the current-time label is a few px outside the chart | The Timestamps chart scrolls *smoothly* to the current time, and the label was measured while it was still scrolling. | Poll until the label is inside the chart instead of measuring once. |
+| A weight set by a scripted scroll is one less than intended (4 becomes 3) | Weights step in whole numbers, and the browser can deliver a fraction of a pixel less scroll than the test asked for. | Scroll a little past the target (*w* + 0.4 steps), as the Prim tests' `build` does. |
+| An edge's colour reads as an in-between value | The edge's stroke has a 0.12 s transition, and the colour was read part-way. | Check state by class, and colours with the auto-retrying `toHaveCSS`. |
 | The page-load test reports a failed request for the favicon | Chrome sometimes cancels a duplicate favicon request with `net::ERR_ABORTED`. | The load test ignores aborted favicon requests only; every other failed request still fails it. `src/favicon.ts` only changes the icon when it actually differs. |
 | Edges are missing and a DFS test times out waiting for a button | With auto-layout on while the graph is being built, nodes drift away from the test's scripted clicks. | Turn auto-layout on only after building the graph. |
 
@@ -117,15 +121,15 @@ Checking a test for flakiness: `npm run test:e2e:local -- --grep "<name>" --repe
 
 ## Algorithm simulation
 
-The header's picker lists the available algorithms: **Breadth-first search** and **Depth-first search**.
+The header's picker lists the available algorithms: **Breadth-first search**, **Depth-first search** and **Prim's algorithm** (minimum spanning tree).
 
 - **Run** starts the simulation from the **selected node**, or from the lowest id if none is selected.
 - **Run** turns into **Update** and **Stop**. **Update** takes one step; after the last step it becomes **Finish**.
 - **Finish** and **Stop** both end the run: they clear the highlighting and release every lock.
 - **While running, the graph is locked:**
   - **Edits are blocked:** you can't add, connect, delete or re-weight anything, and Clear is disabled. Dragging nodes and auto-layout still work.
-  - **Undirected / Directed** is locked. DFS also forces **Directed**.
-  - **Weighting:** the weighting the algorithm needs is forced and its switch is greyed out. BFS and DFS force **Unweighted**.
+  - **Undirected / Directed** is locked. DFS also forces **Directed**, and Prim forces **Undirected**.
+  - **Weighting:** the weighting the algorithm needs is forced and its switch is greyed out. BFS and DFS force **Unweighted**. Prim reads the weights but accepts either setting, so the switch keeps your choice and is only locked for the run.
   - Stop / Finish restore the direction and weighting you had chosen before.
 
 **BFS steps.** The canvas always shows what the next Update will do:
@@ -207,13 +211,33 @@ When DFS has finished, a **Topological sort** button appears next to **Finish**.
 - **Ending:** the run is not over until **Finish** or **Stop**. Ending it straightens the edges and leaves the vertices where they are.
 - **Reduced motion:** with "reduce motion", everything jumps straight into place.
 
+### Prim's algorithm
+
+Prim's algorithm follows `MST-PRIM(G, w, r)` in *Introduction to Algorithms* (CLRS, 4th ed., §21.2). Every vertex starts in a min-priority queue with key ∞, except the root *r* (the selected node, or the lowest id), whose key is 0. Each Update is one iteration of the loop:
+
+1. **Extract the minimum:** the vertex *u* with the smallest key leaves the queue and joins the tree, by the edge (*u.π*, *u*). Ties go to the lowest id.
+2. **Update keys:** for each neighbour *v* still in the queue with *w*(*u*, *v*) < *v.key*, set *v.π* = *u* and lower *v.key* to *w*(*u*, *v*).
+
+A graph with *n* vertices takes exactly *n* Updates.
+
+- **Undirected only:** CLRS defines the minimum-spanning-tree problem for a connected, *undirected*, weighted graph (Chapter 21), so Run forces **Undirected** and locks it. Where arcs run both ways with different weights, the undirected edge has the smaller one.
+- **Weights:** in weighted mode Prim uses the edge weights (negative ones are fine). In unweighted mode every edge counts as 1, so any spanning tree is minimum and the result is simply a spanning tree.
+- **Colours:** the canvas always shows what the next Update will do.
+  - **White:** the vertex it will extract, and the edge that will join it to the tree.
+  - **Green:** vertices in the tree, and the tree's edges.
+  - **Yellow:** vertices still in the queue with a finite key (an edge joins them to the tree).
+  - **Dashed:** every edge not in the tree.
+- **Keys:** each vertex shows its key, ∞ until some edge reaches it from the tree. Unlike BFS and DFS, unreached vertices are not blank: every vertex is in the queue from the start, and ∞ is the value that orders it.
+- **Priority queue card:** a **Priority queue** card appears at the bottom of the ☰ panel, listing the queue as `← min  (smallest key) … (largest key)`. The front vertex has the white ring, and vertices with a finite key the yellow one. On Update the extracted vertex turns green and slides out, and vertices whose keys dropped glide to their new places. Hovering or focusing the strip shows the vertex numbers, on the canvas too.
+- **Graphs that are not connected:** CLRS assumes a connected graph, but the pseudocode still terminates. When only keys of ∞ are left, the extracted vertex has no joining edge and starts a new tree, so the result is a minimum spanning forest, one tree per connected part. The final message says so.
+
 ### Adding another algorithm
 
-1. Implement `Simulation` (in `src/algorithms/types.ts`). An algorithm with a queue can also implement `queueSnapshot()`, returning `{ items, incoming }`, to get the animated Queue card. One with a recursion stack can implement `stackSnapshot()`, returning `{ items, incoming, popping }` (top first), to get the Recursion stack card. One with timestamps can implement `timestamps()`, returning `{ clock, end, intervals, current }`, to get the Timestamps card. It works on a read-only `GraphView`, takes one step per `step()`, and reports `highlight()` (current vertex, finished vertices, active edges) and `describe()` (the status message).
-2. Export an `AlgorithmDefinition` from its own file: `id`, `name`, `requires` (e.g. `{ weighted: true }` for Dijkstra; DFS uses `{ weighted: false, directed: true }`), and `create(view, start)`. By convention `highlight()` previews the *next* step: `current` is what it will process and `activeEdges` what it will travel. It may also return:
+1. Implement `Simulation` (in `src/algorithms/types.ts`). An algorithm with a queue can also implement `queueSnapshot()`, returning `{ items, incoming }`, to get the animated Queue card. One with a min-priority queue can implement `priorityQueueSnapshot()` (same shape, smallest key first, plus optional `running` vertices to ring yellow) to get the Priority queue card. One with a recursion stack can implement `stackSnapshot()`, returning `{ items, incoming, popping }` (top first), to get the Recursion stack card. One with timestamps can implement `timestamps()`, returning `{ clock, end, intervals, current }`, to get the Timestamps card. It works on a read-only `GraphView`, takes one step per `step()`, and reports `highlight()` (current vertex, finished vertices, active edges) and `describe()` (the status message).
+2. Export an `AlgorithmDefinition` from its own file: `id`, `name`, `requires` (e.g. `{ weighted: true }` for Dijkstra; DFS uses `{ weighted: false, directed: true }`; Prim uses `{ directed: false }`), and `create(view, start)`. An algorithm that reads weights but accepts either weighting sets `usesWeights: true`, which locks the weight switch at the user's choice without forcing it. By convention `highlight()` previews the *next* step: `current` is what it will process and `activeEdges` what it will travel. It may also return:
    - `labels` (vertex → text) to draw inside the vertices instead of their ids, as BFS does with distances and DFS with times; Dijkstra could do the same with tentative distances.
    - `running` (vertices drawn yellow).
-   - `exploredEdges` (`{ from, to, label? }`). When present, every other edge is drawn dashed, as DFS does.
+   - `exploredEdges` (`{ from, to, label?, done? }`). When present, every other edge is drawn dashed, as DFS does. `done: true` draws the edge green, as Prim does for tree edges.
    - Once finished, a simulation can also offer `topologicalSort()`, returning an `ArcDiagram` (`order`, `spine`, `below`) or null. The Topological sort button then appears next to Finish.
 3. Add it to `ALGORITHMS` in `src/algorithms/index.ts`. The picker, the locks and the drawing then work without further changes.
 
@@ -340,9 +364,9 @@ Freivalds, Dogrusoz & Kikusts study this approach in *Disconnected Graph Layout 
 - `src/main.ts` — wires the editor to the stats, status message, Auto-layout toggle and the ☰ help/adjacency-list panel.
 - `src/representations.ts` — renders the adjacency list (a column of vertex boxes, then each vertex's neighbours as a joined strip of boxes) and the adjacency matrix, and the list/matrix switch (ARIA tabs). The data comes from `Graph.adjacencyList()` and `Graph.adjacencyMatrix()`.
 - `src/style.css` — styles, linked directly from `index.html`.
-- `src/algorithms/` — step-by-step algorithm simulations: `types.ts` (the `Simulation` / `AlgorithmDefinition` interfaces), `bfs.ts` (`BfsSimulation`, which also exposes `order`, `parent` and `distance`), `dfs.ts` (`DfsSimulation`, which also exposes `discovery`, `finish`, `parent`, `edges` with their classes, and `trees`), `index.ts` (the `ALGORITHMS` registry).
+- `src/algorithms/` — step-by-step algorithm simulations: `types.ts` (the `Simulation` / `AlgorithmDefinition` interfaces), `bfs.ts` (`BfsSimulation`, which also exposes `order`, `parent` and `distance`), `dfs.ts` (`DfsSimulation`, which also exposes `discovery`, `finish`, `parent`, `edges` with their classes, and `trees`), `prim.ts` (`PrimSimulation`, which also exposes `key`, `parent`, `order`, `treeEdges`, `roots` and `totalWeight`), `index.ts` (the `ALGORITHMS` registry).
 - `src/select-menu.ts` — `SelectMenu`: the styled program picker. It replaces a native `<select>`, whose open list the browser draws and which can't be styled or positioned (on macOS it pops up over the box). It follows the WAI-ARIA "select-only combobox" pattern: mouse, ↑/↓/Home/End/Enter/Space/Esc/Tab, and closes on an outside click. The list drops down below the box, in the page's panel style, with the option text in line with the box's text.
-- `src/queue-view.ts` — `QueueView`: the side panel's animated queue strip (BFS), or with `kind: 'stack'` the recursion stack strip (DFS). Elements are reused by vertex id, and changes are animated with the FLIP technique (record positions, update, play from the old positions).
+- `src/queue-view.ts` — `QueueView`: the side panel's animated queue strip (BFS), or with `kind: 'priority'` the min-priority queue strip (Prim), or with `kind: 'stack'` the recursion stack strip (DFS). Elements are reused by vertex id, and changes are animated with the FLIP technique (record positions, update, play from the old positions).
 - `src/arc-diagram.ts` — `rowLayout` (vertices in a centred line that wraps into rows) and `halfEllipse` (an edge as a half circle over its two ends, trimmed to the node rims), for the topological sort; pure, no DOM.
 - `src/timeline-view.ts` — `TimelineView`: the Timestamps card's chart (bars positioned with CSS custom properties, so they animate and rescale) and its expand / shrink into a centred modal dialog (animated between the two positions).
 - `src/label-fit.ts` — `fitFontSize`: shrinks a label's font so long labels (DFS's `d,f`) fit inside a vertex circle.

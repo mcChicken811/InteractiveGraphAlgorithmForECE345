@@ -2,7 +2,7 @@ import type { NodeId } from '../graph.js';
 import type { GraphView } from '../graph-views.js';
 
 /**
- * Shared shape of every step-by-step algorithm simulation (BFS, DFS; Dijkstra, …
+ * Shared shape of every step-by-step algorithm simulation (BFS, DFS, Prim; Dijkstra, …
  * later). A simulation is pure: it reads the graph only through a read-only GraphView and
  * keeps its own state, so it can be unit-tested without any DOM.
  */
@@ -42,6 +42,8 @@ export interface ExploredEdge {
   to: NodeId;
   /** Short tag drawn on the edge, e.g. "backward". */
   label?: string;
+  /** Draw the edge in the finished (green) colour, like a finished vertex (Prim: a tree edge). */
+  done?: boolean;
 }
 
 /** A queue-like structure for the side panel (BFS's queue). */
@@ -50,6 +52,8 @@ export interface QueueSnapshot {
   items: NodeId[];
   /** Vertices the next step will push onto the back, in push order. */
   incoming: NodeId[];
+  /** Vertices drawn with the running (yellow) ring, as on the canvas (Prim: finite keys). */
+  running?: NodeId[];
 }
 
 /** A recursion stack for the side panel (DFS). */
@@ -112,6 +116,11 @@ export interface Simulation {
   describe(): string;
   /** The algorithm's queue, if it has one; shown in the side panel while running. */
   queueSnapshot?(): QueueSnapshot;
+  /**
+   * The algorithm's min-priority queue, if it has one (Prim): `items` in extraction order,
+   * smallest key first; shown in the side panel while running.
+   */
+  priorityQueueSnapshot?(): QueueSnapshot;
   /** The algorithm's recursion stack, if it has one; shown in the side panel while running. */
   stackSnapshot?(): StackSnapshot;
   /** The algorithm's timestamps, if it keeps them; shown as a chart in the side panel while running. */
@@ -133,9 +142,16 @@ export interface AlgorithmDefinition {
   /**
    * How the graph must be read while the algorithm runs. The UI forces and locks the
    * matching switches for the duration (e.g. BFS forces the unweighted view; DFS forces
-   * the unweighted, directed view).
+   * the unweighted, directed view; Prim forces the undirected view).
    */
   requires: { weighted?: boolean; directed?: boolean };
+  /**
+   * The algorithm reads edge weights but accepts either weighting (Prim): the
+   * Unweighted / Weighted switch is not forced, only locked at the user's choice for the
+   * run, since switching part-way would change the weights under the algorithm.
+   * Unweighted views report every edge as weight 1.
+   */
+  usesWeights?: boolean;
   /** Creates a simulation over `view`, starting from `start`. */
   create(view: GraphView, start: NodeId): Simulation;
 }

@@ -104,6 +104,14 @@ const queueView = new QueueView(
 );
 queueView.onPeek = (peek) => editor.setLabelPeek(peek);
 
+// Prim's min-priority queue, smallest key first; its vertices show their keys.
+const priorityQueueView = new QueueView(
+  document.querySelector<HTMLElement>('#pq-strip')!,
+  document.querySelector<HTMLElement>('#pq-empty')!,
+  { kind: 'priority' },
+);
+priorityQueueView.onPeek = (peek) => editor.setLabelPeek(peek);
+
 // DFS's recursion stack works the same way; its vertices show "discovery,finish" times.
 const stackView = new QueueView(
   document.querySelector<HTMLElement>('#stack-strip')!,
@@ -144,6 +152,8 @@ runner = new AlgorithmRunner(
     directionSwitch: document.querySelector<HTMLFieldSetElement>('#direction-switch')!,
     queueCard: document.querySelector<HTMLElement>('#queue-card')!,
     queueView,
+    priorityQueueCard: document.querySelector<HTMLElement>('#pq-card')!,
+    priorityQueueView,
     stackCard: document.querySelector<HTMLElement>('#stack-card')!,
     stackView,
     timestampsCard: document.querySelector<HTMLElement>('#timestamps-card')!,

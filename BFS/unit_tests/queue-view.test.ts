@@ -180,3 +180,53 @@ describe('QueueView as a recursion stack', () => {
     expect(parseFloat(size(1))).toBeLessThan(12);
   });
 });
+
+describe('QueueView as a min-priority queue', () => {
+  let pq: QueueView;
+  beforeEach(() => {
+    document.body.innerHTML = `<div id="strip" role="list"></div><p id="empty" hidden></p>`;
+    strip = document.querySelector('#strip')!;
+    empty = document.querySelector('#empty')!;
+    pq = new QueueView(strip, empty, { kind: 'priority' });
+  });
+
+  /** Tokens: 'min', then '<id>' (+ '*' smallest key, '~' ringed yellow). */
+  function pqTokens(): string[] {
+    return [...strip.querySelectorAll<HTMLElement>(':scope > [data-key]:not(.exiting)')].map((el) => {
+      if (el.dataset.key === 'pop') return el.textContent!;
+      return (
+        el.querySelector('.q-index')!.textContent! +
+        (el.classList.contains('front') ? '*' : '') +
+        (el.classList.contains('running') ? '~' : '')
+      );
+    });
+  }
+
+  it('draws ← min, then the vertices in extraction order; no push arrow', () => {
+    pq.update({ items: [2, 0, 1], incoming: [], running: [2, 0] }, false);
+    expect(pqTokens()).toEqual(['min', '2*', '0~', '1']); // 2 is white (front), 0 yellow, 1 plain (key ∞)
+    expect(strip.querySelector('.q-push')).toBeNull();
+    expect(strip.classList.contains('strip-priority')).toBe(true);
+  });
+
+  it('re-orders the same elements when keys change, so they can glide to their new places', () => {
+    pq.update({ items: [0, 1, 2], incoming: [] }, false);
+    const two = strip.querySelector('[data-key="v2"]');
+    pq.update({ items: [2, 1], incoming: [], running: [2, 1] }, false); // 0 extracted; 2's key dropped below 1's
+    expect(pqTokens()).toEqual(['min', '2*', '1~']);
+    expect(strip.querySelector('[data-key="v2"]')).toBe(two);
+  });
+
+  it('reads keys out as keys, and the front as the next to be extracted', () => {
+    pq.update({ items: [1, 2], incoming: [] }, false, { 1: '4', 2: '∞' });
+    const labels = [...strip.querySelectorAll('[role="listitem"]')].map((el) => el.getAttribute('aria-label'));
+    expect(labels).toEqual(['1, key 4, smallest key, next to be extracted', '2, key ∞']);
+    expect([...strip.querySelectorAll('.q-label')].map((el) => el.textContent)).toEqual(['4', '∞']);
+  });
+
+  it('shows the empty note once every vertex has been extracted', () => {
+    pq.update({ items: [], incoming: [] }, false);
+    expect(empty.hidden).toBe(false);
+    expect(strip.hidden).toBe(true);
+  });
+});
