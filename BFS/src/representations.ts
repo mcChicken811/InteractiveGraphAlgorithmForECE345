@@ -7,12 +7,57 @@ import type { Graph } from './graph.js';
 
 const EMPTY = 'No nodes yet.';
 
-/** Renders "id: neighbours" lines into a <pre>. */
+/**
+ * Renders the adjacency list as boxes: a column of vertex boxes on the left, then, after
+ * a gap, each vertex's neighbours as boxes joined left to right (like an array).
+ * Built from nested lists so screen readers announce "Neighbours of 0, 2 items" etc.
+ */
 export function renderAdjacencyList(target: HTMLElement, graph: Graph): void {
   const rows = graph.adjacencyList();
-  target.textContent = rows.length
-    ? rows.map(({ id, neighbors }) => `${id}: ${neighbors.length ? neighbors.join(', ') : '—'}`).join('\n')
-    : EMPTY;
+  if (rows.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'adj-empty';
+    empty.textContent = EMPTY;
+    target.replaceChildren(empty);
+    return;
+  }
+
+  const list = document.createElement('ul');
+  list.className = 'adj-list';
+  list.setAttribute('aria-label', 'Adjacency list');
+  // Every box shares one width (sized for the longest id), keeping the vertex column aligned.
+  const digits = Math.max(...rows.map((r) => String(r.id).length));
+  list.style.setProperty('--adj-cell', `${Math.max(28, 12 + digits * 9)}px`);
+
+  for (const { id, neighbors } of rows) {
+    const row = document.createElement('li');
+    row.className = 'adj-row';
+
+    const vertex = document.createElement('span');
+    vertex.className = 'adj-vertex';
+    vertex.textContent = String(id);
+
+    const chain = document.createElement('ul');
+    chain.className = 'adj-neighbors';
+    chain.setAttribute('aria-label', `${graph.directed ? 'Out-neighbours' : 'Neighbours'} of ${id}`);
+    for (const n of neighbors) {
+      const box = document.createElement('li');
+      box.className = 'adj-box';
+      box.textContent = String(n);
+      chain.append(box);
+    }
+
+    row.append(vertex, chain);
+    if (neighbors.length === 0) {
+      const none = document.createElement('span');
+      none.className = 'adj-none';
+      none.setAttribute('aria-hidden', 'true');
+      none.textContent = '∅';
+      row.append(none);
+    }
+    list.append(row);
+  }
+  target.replaceChildren(list);
 }
 
 /** Renders the adjacency matrix as a table with node ids as row and column headers. */

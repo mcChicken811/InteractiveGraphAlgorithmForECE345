@@ -458,14 +458,85 @@ button:disabled {
   opacity: 1;
 }
 
+/* Adjacency list drawn as boxes: vertex column | gap | neighbours joined left to right. */
 .adjacency {
-  margin: 0;
-  padding: 10px 12px;
+  overflow-x: auto; /* long neighbour rows scroll inside the panel */
+  padding: 10px;
   border-radius: 8px;
   background: var(--bg);
   border: 1px solid var(--border);
-  font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
-  white-space: pre-wrap;
+  font: 13px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.adj-empty {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.adj-list,
+.adj-neighbors {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.adj-list {
+  display: grid;
+  gap: 6px;
+  width: max-content; /* let rows be wider than the panel and scroll */
+}
+
+.adj-row {
+  display: flex;
+  align-items: center;
+  gap: 16px; /* the space between the vertex column and its neighbours */
+}
+
+.adj-vertex,
+.adj-box {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--adj-cell, 28px);
+  height: 28px;
+  font-variant-numeric: tabular-nums;
+}
+
+.adj-vertex {
+  border: 2px solid var(--accent);
+  border-radius: 6px;
+  background: var(--node-fill);
+  color: var(--text);
+  font-weight: 700;
+}
+
+.adj-neighbors {
+  display: flex;
+}
+
+/* Neighbour boxes share borders, forming one horizontal strip. */
+.adj-box {
+  border: 1px solid var(--edge);
+  margin-left: -1px;
+  background: var(--panel);
+  color: var(--text);
+}
+
+.adj-box:first-child {
+  margin-left: 0;
+  border-radius: 5px 0 0 5px;
+}
+
+.adj-box:last-child {
+  border-radius: 0 5px 5px 0;
+}
+
+.adj-box:only-child {
+  border-radius: 5px;
+}
+
+.adj-none {
+  color: var(--muted);
 }
 
 /* -------------------------------------------------------------- graph */

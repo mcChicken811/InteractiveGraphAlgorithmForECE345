@@ -62,6 +62,29 @@ const mid = (p: readonly [number, number], q: readonly [number, number]): [numbe
   (p[1] + q[1]) / 2,
 ];
 
+/**
+ * Reads the boxed adjacency list back as text, one "vertex: neighbours" line per row
+ * ("—" for none), or "No nodes yet." when the graph is empty.
+ */
+async function adjacencyText(page: Page): Promise<string> {
+  return page.locator('#adjacency').evaluate((root) => {
+    const rows = [...root.querySelectorAll('.adj-row')];
+    if (rows.length === 0) return root.textContent?.trim() ?? '';
+    return rows
+      .map((row) => {
+        const vertex = row.querySelector('.adj-vertex')!.textContent;
+        const boxes = [...row.querySelectorAll('.adj-box')].map((b) => b.textContent);
+        return `${vertex}: ${boxes.length ? boxes.join(', ') : '—'}`;
+      })
+      .join('\n');
+  });
+}
+
+/** Waits until the adjacency list shows exactly `expected` (in adjacencyText's format). */
+async function expectAdjacency(page: Page, expected: string): Promise<void> {
+  await expect.poll(() => adjacencyText(page)).toBe(expected);
+}
+
 let cv: CanvasDriver;
 
 test.beforeEach(async ({ page }) => {
@@ -106,7 +129,7 @@ test('shows an empty editor on load', async ({ page }) => {
   await expect(page).toHaveTitle('BFS Graph Builder');
   await expect(page.locator('#stats')).toHaveText('0 nodes · 0 edges');
   await expect(page.locator('#message')).toHaveText('Click empty space to add a node.');
-  await expect(page.locator('#adjacency')).toHaveText('No nodes yet.');
+  await expectAdjacency(page, 'No nodes yet.');
   await expect(page.getByRole('button', { name: 'Clear graph' })).toBeDisabled();
   await expect(cv.nodes).toHaveCount(0);
 });
@@ -120,7 +143,7 @@ test('clicking empty space spawns numbered nodes', async ({ page }) => {
   await expect(cv.node(1)).toHaveAttribute('transform', `translate(${P.b[0]} ${P.b[1]})`);
   await expect(page.locator('#stats')).toHaveText('3 nodes · 0 edges');
   await expect(page.locator('#message')).toHaveText('Added node 2.');
-  await expect(page.locator('#adjacency')).toHaveText('0: —\n1: —\n2: —');
+  await expectAdjacency(page, '0: —\n1: —\n2: —');
   await expect(page.getByRole('button', { name: 'Clear graph' })).toBeEnabled();
 });
 
@@ -151,7 +174,7 @@ test('clicking one node then another creates an edge', async ({ page }) => {
   await expect(cv.node(0)).not.toHaveClass(/selected/);
   await expect(preview).toBeHidden();
   await expect(page.locator('#stats')).toHaveText('3 nodes · 1 edge');
-  await expect(page.locator('#adjacency')).toHaveText('0: 1\n1: 0\n2: —');
+  await expectAdjacency(page, '0: 1\n1: 0\n2: —');
 });
 
 test('builds a triangle and reports the adjacency list', async ({ page }) => {
@@ -162,7 +185,7 @@ test('builds a triangle and reports the adjacency list', async ({ page }) => {
 
   await expect(cv.edges).toHaveCount(3);
   await expect(page.locator('#stats')).toHaveText('3 nodes · 3 edges');
-  await expect(page.locator('#adjacency')).toHaveText('0: 1, 2\n1: 0, 2\n2: 0, 1');
+  await expectAdjacency(page, '0: 1, 2\n1: 0, 2\n2: 0, 1');
 });
 
 test('connecting an already connected pair is rejected', async ({ page }) => {
@@ -246,7 +269,7 @@ test('right-clicking a node deletes it with its edges', async ({ page }) => {
   await expect(cv.node(1)).toHaveCount(0);
   await expect(cv.edges).toHaveCount(1);
   await expect(page.locator('#stats')).toHaveText('2 nodes · 1 edge');
-  await expect(page.locator('#adjacency')).toHaveText('0: 2\n2: 0');
+  await expectAdjacency(page, '0: 2\n2: 0');
 });
 
 test('Delete key removes the selected node and its id is reused', async ({ page }) => {
@@ -271,7 +294,7 @@ test('Clear graph removes everything', async ({ page }) => {
   await expect(cv.nodes).toHaveCount(0);
   await expect(cv.edges).toHaveCount(0);
   await expect(page.locator('#stats')).toHaveText('0 nodes · 0 edges');
-  await expect(page.locator('#adjacency')).toHaveText('No nodes yet.');
+  await expectAdjacency(page, 'No nodes yet.');
   await expect(page.getByRole('button', { name: 'Clear graph' })).toBeDisabled();
 });
 
@@ -337,7 +360,7 @@ test.describe('help & adjacency panel (hamburger menu)', () => {
     await addTriangleNodes();
     await connect(P.a, P.b);
     await expect(panel(page)).toBeVisible();
-    await expect(panel(page).locator('#adjacency')).toHaveText('0: 1\n1: 0\n2: —');
+    await expectAdjacency(page, '0: 1\n1: 0\n2: —');
   });
 
   test('clicks inside the panel do not touch the graph', async ({ page }) => {
@@ -372,8 +395,14 @@ test.describe('adjacency list / matrix switch', () => {
     await expect(page.locator('#adjacency')).toBeVisible();
     await expect(page.locator('#rep-matrix')).toBeHidden();
 
-    const l = (await listTab(page).boundingBox())!;
-    const m = (await matrixTab(page).boundingBox())!;
+    // Measure both tabs in one go: the panel slides in, so separate measurements could
+    // land on different animation frames.
+    const [l, m] = await page.getByRole('tab').evaluateAll((tabs) =>
+      tabs.map((t) => {
+        const r = t.getBoundingClientRect();
+        return { x: r.x, y: r.y, width: r.width };
+      }),
+    );
     expect(l.x + l.width).toBeLessThanOrEqual(m.x); // left / right
     expect(Math.abs(l.y - m.y)).toBeLessThan(1);
   });
@@ -431,7 +460,7 @@ test.describe('adjacency list / matrix switch', () => {
     await addTriangleNodes();
     await connect(P.a, P.c);
     await cv.click(...P.b, 'right'); // remove node 1: ids are now 0 and 2
-    await expect(page.locator('#adjacency')).toHaveText('0: 2\n2: 0');
+    await expectAdjacency(page, '0: 2\n2: 0');
 
     await matrixTab(page).click();
     expect(await matrixText(page)).toEqual([
@@ -452,6 +481,86 @@ test.describe('adjacency list / matrix switch', () => {
     const p = (await page.locator('#info-panel').boundingBox())!;
     const c = (await cv.canvas.boundingBox())!;
     expect(p.x + p.width).toBeLessThanOrEqual(c.x + c.width);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+  });
+});
+
+test.describe('boxed adjacency list', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.getByRole('button', { name: 'Help and adjacency list' }).click();
+  });
+
+  type Box = { x: number; y: number; width: number; height: number };
+  const boxesOf = (page: Page, selector: string): Promise<Box[]> =>
+    page.locator(selector).evaluateAll((els) =>
+      els.map((e) => {
+        const r = e.getBoundingClientRect();
+        return { x: r.x, y: r.y, width: r.width, height: r.height };
+      }),
+    );
+
+  test('vertices form a left column of boxes, neighbours a joined strip after a gap', async ({ page }) => {
+    await addTriangleNodes();
+    await connect(P.a, P.b);
+    await connect(P.a, P.c);
+    await expectAdjacency(page, '0: 1, 2\n1: 0\n2: 0');
+
+    // The vertex boxes line up in one column, one row each, top to bottom.
+    const vertices = await boxesOf(page, '#adjacency .adj-vertex');
+    expect(vertices).toHaveLength(3);
+    for (const v of vertices) expect(v.x).toBeCloseTo(vertices[0].x, 0);
+    expect(vertices[1].y).toBeGreaterThan(vertices[0].y + vertices[0].height - 1);
+    expect(vertices[2].y).toBeGreaterThan(vertices[1].y + vertices[1].height - 1);
+
+    // Row 0's neighbours: boxes stacked left to right, touching (shared border).
+    const row0 = await boxesOf(page, '#adjacency .adj-row:first-child .adj-box');
+    expect(row0).toHaveLength(2);
+    expect(row0[1].x).toBeGreaterThan(row0[0].x);
+    expect(row0[1].x - (row0[0].x + row0[0].width)).toBeLessThanOrEqual(0); // no gap between them
+    expect(Math.abs(row0[1].y - row0[0].y)).toBeLessThan(1); // same line
+
+    // A clear space separates the vertex column from the neighbour strip.
+    const gap = row0[0].x - (vertices[0].x + vertices[0].width);
+    expect(gap).toBeGreaterThanOrEqual(10);
+
+    // Every neighbour strip starts at the same x.
+    const firsts = await boxesOf(page, '#adjacency .adj-box:first-child');
+    for (const f of firsts) expect(f.x).toBeCloseTo(firsts[0].x, 0);
+  });
+
+  test('a vertex without neighbours shows an empty marker instead of boxes', async ({ page }) => {
+    await addTriangleNodes();
+    await expect(page.locator('#adjacency .adj-row').nth(2).locator('.adj-box')).toHaveCount(0);
+    await expect(page.locator('#adjacency .adj-row').nth(2).locator('.adj-none')).toHaveText('∅');
+  });
+
+  test('is announced as nested lists', async ({ page }) => {
+    await addTriangleNodes();
+    await connect(P.a, P.b);
+    const list = page.getByRole('list', { name: 'Adjacency list' });
+    await expect(list).toBeVisible();
+    await expect(page.getByRole('list', { name: 'Neighbours of 0' }).getByRole('listitem')).toHaveText(['1']);
+
+    await page.locator('label[for="mode-directed"]').click();
+    await expect(page.getByRole('list', { name: 'Out-neighbours of 1' }).getByRole('listitem')).toHaveCount(0);
+  });
+
+  test('keeps the vertex column aligned with two-digit ids, and long rows scroll in the panel', async ({ page }) => {
+    // 12 nodes, node 0 connected to all others: ids reach 11 and row 0 is long.
+    const spots: Array<[number, number]> = [];
+    for (let i = 0; i < 12; i++) spots.push([90 + (i % 6) * 110, 200 + Math.floor(i / 6) * 160]);
+    for (const p of spots) await cv.click(...p);
+    for (let i = 1; i < 12; i++) await connect(spots[0], spots[i]);
+    await expect(page.locator('#adjacency .adj-row').first().locator('.adj-box')).toHaveCount(11);
+
+    const vertices = await boxesOf(page, '#adjacency .adj-vertex');
+    for (const v of vertices) {
+      expect(v.x).toBeCloseTo(vertices[0].x, 0);
+      expect(v.width).toBeCloseTo(vertices[0].width, 0);
+    }
+
+    const overflow = await page.locator('#adjacency').evaluate((el) => el.scrollWidth - el.clientWidth);
+    expect(overflow).toBeGreaterThan(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
   });
 });
@@ -503,7 +612,7 @@ test.describe('directed / undirected switch', () => {
     await expect(cv.edge(0, 1)).toHaveCount(0);
     await expect(cv.edge(1, 0).locator('.edge-line')).toHaveCSS('marker-end', 'url("#arrow")');
     await expect(page.locator('#stats')).toHaveText('3 nodes · 1 edge');
-    await expect(page.locator('#adjacency')).toHaveText('0: —\n1: 0\n2: —');
+    await expectAdjacency(page, '0: —\n1: 0\n2: —');
 
     await page.getByRole('button', { name: 'Help and adjacency list' }).click();
     await page.getByRole('tab', { name: 'Adjacency matrix' }).click();
@@ -524,7 +633,7 @@ test.describe('directed / undirected switch', () => {
     await expect(cv.edge(0, 1)).toHaveCount(1);
     await expect(cv.edge(0, 1).locator('.edge-line')).toHaveCSS('marker-end', 'none');
     await expect(page.locator('#stats')).toHaveText('3 nodes · 1 edge');
-    await expect(page.locator('#adjacency')).toHaveText('0: 1\n1: 0\n2: —');
+    await expectAdjacency(page, '0: 1\n1: 0\n2: —');
 
     await page.getByRole('button', { name: 'Help and adjacency list' }).click();
     await page.getByRole('tab', { name: 'Adjacency matrix' }).click();
@@ -552,7 +661,7 @@ test.describe('directed / undirected switch', () => {
     await choose(page, 'undirected');
     await expect(cv.edges).toHaveCount(1);
     await expect(page.locator('#stats')).toHaveText('3 nodes · 1 edge');
-    await expect(page.locator('#adjacency')).toHaveText('0: 1\n1: 0\n2: —');
+    await expectAdjacency(page, '0: 1\n1: 0\n2: —');
   });
 
   test('directed: clicking one of two opposite arcs deletes only that one', async ({ page }) => {
@@ -765,7 +874,7 @@ test.describe('auto-layout', () => {
     expect(minPairDistance(settled)).toBeGreaterThan(100);
     // Edges and the adjacency list are unchanged; only positions moved.
     await expect(cv.edges).toHaveCount(3);
-    await expect(page.locator('#adjacency')).toHaveText('0: 1\n1: 0, 2\n2: 1, 3\n3: 2');
+    await expectAdjacency(page, '0: 1\n1: 0, 2\n2: 1, 3\n3: 2');
     // Edge lines follow their nodes.
     await expect(cv.edge(0, 1).locator('.edge-line')).toHaveAttribute('x1', String(settled['0'].x));
   });
@@ -864,7 +973,7 @@ test.describe('auto-layout', () => {
       await cv.click(before['0'].x, before['0'].y);
       await cv.click(before['3'].x, before['3'].y);
       await expect(cv.edge(0, 3)).toHaveCount(1);
-      await expect(page.locator('#adjacency')).toHaveText('0: 1, 3\n1: 0, 2\n2: 1, 3\n3: 0, 2');
+      await expectAdjacency(page, '0: 1, 3\n1: 0, 2\n2: 1, 3\n3: 0, 2');
       await expect.poll(async () => JSON.stringify(await positions(page))).not.toBe(JSON.stringify(before));
     });
 
