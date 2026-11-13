@@ -1,10 +1,11 @@
 import { ALGORITHMS, type AlgorithmDefinition, type Simulation } from './algorithms/index.js';
 import type { GraphEditor } from './editor.js';
 import type { Graph } from './graph.js';
+import type { SelectMenu } from './select-menu.js';
 
 export interface RunnerElements {
   /** Algorithm picker. */
-  select: HTMLSelectElement;
+  select: SelectMenu;
   run: HTMLButtonElement;
   /** "Update" while steps remain, "Finish" after the last one. */
   step: HTMLButtonElement;
@@ -41,14 +42,7 @@ export class AlgorithmRunner {
       onStateChange: () => void;
     },
   ) {
-    el.select.replaceChildren(
-      ...ALGORITHMS.map((a) => {
-        const option = document.createElement('option');
-        option.value = a.id;
-        option.textContent = a.name;
-        return option;
-      }),
-    );
+    el.select.setOptions(ALGORITHMS.map((a) => ({ value: a.id, label: a.name })));
     el.run.addEventListener('click', () => this.run());
     el.step.addEventListener('click', () => this.step());
     el.stop.addEventListener('click', () => this.stop('Stopped.'));

@@ -1117,7 +1117,10 @@ test.describe('algorithm simulation (BFS)', () => {
 
   test('the header has the program picker, then Run, on the right', async ({ page }) => {
     await expect(picker(page)).toBeVisible();
-    await expect(picker(page).locator('option')).toHaveText(['Breadth-first search']);
+    await expect(picker(page)).toHaveText('Breadth-first search');
+    await picker(page).click();
+    await expect(page.getByRole('listbox', { name: 'Algorithm' }).getByRole('option')).toHaveText(['Breadth-first search']);
+    await page.keyboard.press('Escape');
     await expect(runBtn(page)).toBeVisible();
     await expect(updateBtn(page)).toBeHidden();
     await expect(stopBtn(page)).toBeHidden();
@@ -1125,6 +1128,125 @@ test.describe('algorithm simulation (BFS)', () => {
     const run = (await runBtn(page).boundingBox())!;
     expect(sel.x + sel.width).toBeLessThanOrEqual(run.x); // picker left of Run
     expect(run.x + run.width).toBeGreaterThan(page.viewportSize()!.width - 40); // at the right edge
+  });
+
+  test('the picker matches the buttons: same height and line, page styling, room for its text', async ({ page }) => {
+    const [sel, run, clear] = await page.evaluate(() =>
+      ['#algorithm', '#run-btn', '#clear-btn'].map((q) => {
+        const el = document.querySelector<HTMLElement>(q)!;
+        const r = el.getBoundingClientRect();
+        const cs = getComputedStyle(el);
+        return {
+          top: r.top,
+          height: r.height,
+          appearance: cs.appearance,
+          radius: cs.borderTopLeftRadius,
+          padLeft: parseFloat(cs.paddingLeft),
+          padRight: parseFloat(cs.paddingRight),
+          border: cs.borderTopColor,
+          background: cs.backgroundColor,
+        };
+      }),
+    );
+    expect(sel.height).toBe(run.height);
+    expect(sel.top).toBe(run.top);
+    expect(clear.height).toBe(run.height);
+    expect(sel.appearance).toBe('none'); // not the browser's default control
+    expect(sel.radius).toBe(clear.radius);
+    expect(sel.border).toBe(clear.border);
+    expect(sel.background).toBe(clear.background);
+    expect(sel.padLeft).toBeGreaterThanOrEqual(12);
+    expect(sel.padRight).toBeGreaterThanOrEqual(32); // room for the chevron
+
+    // The text fits without being clipped.
+    const fits = await picker(page).evaluate((el) => el.scrollWidth <= el.clientWidth);
+    expect(fits).toBe(true);
+
+    // Hover uses the accent colour, like the other controls.
+    await picker(page).hover();
+    const accent = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim());
+    const hovered = await picker(page).evaluate((el) => getComputedStyle(el).borderTopColor);
+    const toRgb = (hex: string) =>
+      `rgb(${parseInt(hex.slice(1, 3), 16)}, ${parseInt(hex.slice(3, 5), 16)}, ${parseInt(hex.slice(5, 7), 16)})`;
+    expect(hovered).toBe(toRgb(accent));
+  });
+
+  test('the picker opens a page-styled list right below it, aligned with its text', async ({ page }) => {
+    const list = page.getByRole('listbox', { name: 'Algorithm' });
+    await expect(list).toBeHidden();
+    await picker(page).click();
+    await expect(list).toBeVisible();
+    await expect(picker(page)).toHaveAttribute('aria-expanded', 'true');
+    await list.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+
+    const m = await page.evaluate(() => {
+      const textLeft = (el: Element) => {
+        const r = document.createRange();
+        r.selectNodeContents(el);
+        return r.getBoundingClientRect().left;
+      };
+      const box = document.querySelector('#algorithm')!;
+      const list = document.querySelector('#algorithm-list')!;
+      const option = list.querySelector('[role="option"]')!;
+      const b = box.getBoundingClientRect();
+      const l = list.getBoundingClientRect();
+      const ls = getComputedStyle(list);
+      return {
+        gap: l.top - b.bottom,
+        leftDelta: l.left - b.left,
+        widthDelta: l.width - b.width,
+        textDelta: textLeft(option) - textLeft(box.querySelector('.select-value')!),
+        radius: ls.borderTopLeftRadius,
+        boxRadius: getComputedStyle(box).borderTopLeftRadius,
+        background: ls.backgroundColor,
+        panelBackground: getComputedStyle(document.querySelector('.topbar')!).backgroundColor,
+      };
+    });
+    expect(m.gap).toBeGreaterThanOrEqual(0); // drops down, below the box
+    expect(m.gap).toBeLessThanOrEqual(8);
+    expect(m.leftDelta).toBe(0); // same left edge
+    expect(m.widthDelta).toBeGreaterThanOrEqual(0); // at least as wide
+    expect(Math.abs(m.textDelta)).toBeLessThan(0.5); // option text lines up with the box text
+    expect(m.radius).toBe(m.boxRadius);
+    expect(m.background).toBe(m.panelBackground); // the page's panel colour
+    await expect(list.getByRole('option', { name: 'Breadth-first search' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  test('the picker list closes on choosing, on Esc and on clicking elsewhere', async ({ page }) => {
+    const list = page.getByRole('listbox', { name: 'Algorithm' });
+    await picker(page).click();
+    await list.getByRole('option', { name: 'Breadth-first search' }).click();
+    await expect(list).toBeHidden();
+    await expect(picker(page)).toHaveAttribute('aria-expanded', 'false');
+
+    await picker(page).click();
+    await page.keyboard.press('Escape');
+    await expect(list).toBeHidden();
+
+    await picker(page).click();
+    await cv.click(...P.d); // clicking the canvas closes the list
+    await expect(list).toBeHidden();
+  });
+
+  test('the picker works from the keyboard', async ({ page }) => {
+    const list = page.getByRole('listbox', { name: 'Algorithm' });
+    await picker(page).focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(list).toBeVisible();
+    await expect(picker(page)).toHaveAttribute('aria-activedescendant', /algorithm-list-option-0/);
+    await page.keyboard.press('Enter');
+    await expect(list).toBeHidden();
+    await expect(picker(page)).toBeFocused();
+  });
+
+  test('the picker cannot be opened while an algorithm runs', async ({ page }) => {
+    await cv.click(...P.a);
+    await runBtn(page).click();
+    await expect(picker(page)).toHaveAttribute('aria-disabled', 'true');
+    await picker(page).click({ force: true });
+    await expect(page.getByRole('listbox', { name: 'Algorithm' })).toBeHidden();
+    await stopBtn(page).click();
+    await expect(picker(page)).not.toHaveAttribute('aria-disabled', 'true');
   });
 
   test('Run is disabled on an empty graph', async ({ page }) => {

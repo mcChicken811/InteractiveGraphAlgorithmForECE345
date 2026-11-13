@@ -21,7 +21,22 @@
       <button id="clear-btn" type="button">Clear graph</button>
       <!-- Algorithm simulation: pick a program, then Run → Update (one step) … Finish, or Stop. -->
       <div class="run-controls" role="group" aria-label="Algorithm simulation">
-        <select id="algorithm" aria-label="Algorithm"></select>
+        <!-- Styled drop-down (src/select-menu.ts): a select-only combobox and its listbox. -->
+        <span class="select">
+          <div
+            id="algorithm"
+            class="select-box"
+            role="combobox"
+            tabindex="0"
+            aria-label="Algorithm"
+            aria-haspopup="listbox"
+            aria-expanded="false"
+            aria-controls="algorithm-list"
+          >
+            <span class="select-value"></span>
+          </div>
+          <ul id="algorithm-list" class="select-list" role="listbox" aria-label="Algorithm" hidden></ul>
+        </span>
         <button id="run-btn" class="primary" type="button">Run</button>
         <button id="step-btn" class="primary" type="button" hidden>Update</button>
         <button id="stop-btn" type="button" hidden>Stop</button>

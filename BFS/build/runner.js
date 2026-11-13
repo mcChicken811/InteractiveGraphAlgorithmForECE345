@@ -21,12 +21,7 @@ export class AlgorithmRunner {
         this.editor = editor;
         this.el = el;
         this.hooks = hooks;
-        el.select.replaceChildren(...ALGORITHMS.map((a) => {
-            const option = document.createElement('option');
-            option.value = a.id;
-            option.textContent = a.name;
-            return option;
-        }));
+        el.select.setOptions(ALGORITHMS.map((a) => ({ value: a.id, label: a.name })));
         el.run.addEventListener('click', () => this.run());
         el.step.addEventListener('click', () => this.step());
         el.stop.addEventListener('click', () => this.stop('Stopped.'));

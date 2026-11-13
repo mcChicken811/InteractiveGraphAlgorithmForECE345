@@ -6,6 +6,7 @@ import { renderAdjacencyList, renderAdjacencyMatrix, setupTabs } from './represe
 import { followColorScheme } from './favicon.js';
 import { setupCollapsible } from './collapsible.js';
 import { AlgorithmRunner } from './runner.js';
+import { SelectMenu } from './select-menu.js';
 
 followColorScheme();
 
@@ -85,7 +86,10 @@ runner = new AlgorithmRunner(
   graph,
   editor,
   {
-    select: document.querySelector<HTMLSelectElement>('#algorithm')!,
+    select: new SelectMenu(
+      document.querySelector<HTMLElement>('#algorithm')!,
+      document.querySelector<HTMLElement>('#algorithm-list')!,
+    ),
     run: document.querySelector<HTMLButtonElement>('#run-btn')!,
     step: document.querySelector<HTMLButtonElement>('#step-btn')!,
     stop: document.querySelector<HTMLButtonElement>('#stop-btn')!,

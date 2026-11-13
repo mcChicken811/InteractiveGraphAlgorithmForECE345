@@ -6,6 +6,7 @@ import { renderAdjacencyList, renderAdjacencyMatrix, setupTabs } from './represe
 import { followColorScheme } from './favicon.js';
 import { setupCollapsible } from './collapsible.js';
 import { AlgorithmRunner } from './runner.js';
+import { SelectMenu } from './select-menu.js';
 followColorScheme();
 const svg = document.querySelector('#canvas');
 const stats = document.querySelector('#stats');
@@ -71,7 +72,7 @@ clearBtn.addEventListener('click', () => editor.clear());
 // Algorithm simulation (header, top right). `runner` is declared above so refreshPanels,
 // which can run before this point, can check it.
 runner = new AlgorithmRunner(graph, editor, {
-    select: document.querySelector('#algorithm'),
+    select: new SelectMenu(document.querySelector('#algorithm'), document.querySelector('#algorithm-list')),
     run: document.querySelector('#run-btn'),
     step: document.querySelector('#step-btn'),
     stop: document.querySelector('#stop-btn'),
