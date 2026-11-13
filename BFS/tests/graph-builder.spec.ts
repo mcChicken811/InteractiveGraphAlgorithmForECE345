@@ -2095,6 +2095,24 @@ test.describe('algorithm simulation (DFS)', () => {
       for (let i = 1; i < again.length; i++) expect(again[i].x).toBeGreaterThan(again[i - 1].x);
     });
 
+    test('the canvas keeps its own compositing layer (Safari left trails of moving vertices without it)', async ({
+      page,
+    }) => {
+      // WebKit lost repaints of the gliding vertices while overlapping elements animated.
+      // Chrome never showed it, so this only guards the fix; see #canvas in style.css.
+      await expect(cv.canvas).toHaveCSS('will-change', 'transform');
+      // The overlays still draw above it.
+      await runToEnd(page);
+      for (const sel of ['.canvas-toolbar', '#panel-toggle', '#message']) {
+        const box = (await page.locator(sel).boundingBox())!;
+        const top = await page.evaluate(
+          ([x, y]) => document.elementFromPoint(x, y)?.closest('#canvas') === null,
+          [box.x + 4, box.y + box.height / 2],
+        );
+        expect(top).toBe(true);
+      }
+    });
+
     test.describe('with reduced motion', () => {
       test.use({ reducedMotion: 'reduce' });
 
@@ -2397,6 +2415,9 @@ test.describe('algorithm simulation (DFS)', () => {
       expect(stackLabels).toEqual(['3,', '2,', '1,']);
       await expect(stackStrip(page).getByRole('listitem').first()).toHaveAttribute('aria-label', '2, discovered at 3, top');
 
+      // The Timestamps card below may still be growing a row, which moves this card up; hover
+      // once it has settled, or the strip slides out from under the pointer.
+      await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => {}))));
       await stackStrip(page).hover();
       await expect(cv.canvas).toHaveClass(/peek-ids/);
       await expect

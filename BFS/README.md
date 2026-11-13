@@ -76,6 +76,26 @@ The image tag in `docker/playwright.Dockerfile` must match the exact `@playwrigh
 
 `npm run test:e2e:local` skips Docker and runs the same tests on the host in the installed Google Chrome.
 
+### Known flakiness
+
+The browser tests drive a UI that animates almost everything, so most flakiness is about timing. These cases have been seen, and are handled as described:
+
+| Symptom | Cause | Handling |
+| --- | --- | --- |
+| A hover test fails about 1 run in 25: the ids don't come back after hovering a strip ("shows the times in the circles; hovering the stack shows the ids…") | After an Update, the Timestamps card can grow a row (a 0.34 s transition), which moves the cards above it. The strip slides out from under the still pointer, `pointerleave` fires, and the peek switches off. | Wait for `document.getAnimations()` to finish before hovering. Any new test that hovers or measures the side panel right after an Update should do the same. |
+| A position or size is off by a few dozen px ("expands to the middle of the screen…": the card came back 24 px higher than measured) | The "before" value was read while the panel was still reflowing (same cause as above), or during a FLIP move or the status bar's resize. | Let animations finish before measuring, or read everything in one `page.evaluate` call. |
+| The page-load test reports a failed request for the favicon | Chrome sometimes cancels a duplicate favicon request with `net::ERR_ABORTED`. | The load test ignores aborted favicon requests only; every other failed request still fails it. `src/favicon.ts` only changes the icon when it actually differs. |
+| Edges are missing and a DFS test times out waiting for a button | With auto-layout on while the graph is being built, nodes drift away from the test's scripted clicks. | Turn auto-layout on only after building the graph. |
+
+Checking a test for flakiness: `npm run test:e2e:local -- --grep "<name>" --repeat-each=25`.
+
+**Not covered by the tests.** The suite runs only in Chromium, so engine-specific rendering bugs can slip through:
+
+- **Safari (WebKit) left trails of stale rings** behind the vertices gliding into a topological sort. The fix is `will-change: transform` on `#canvas` (see the comment in `src/style.css`); a test only checks that the property is set.
+- **Screenshots can't show stale paint:** Playwright screenshots force a full repaint, so they always look clean.
+- **Reproducing in WebKit:** install WebKit into the project with `PLAYWRIGHT_BROWSERS_PATH=$PWD/.pw-browsers npx playwright install webkit` (`.pw-browsers/` is git-ignored). Run it headed with `recordVideo`, and inspect the last frames of the video.
+- **Docker:** the Docker run (`npm run test:e2e`) was last run before the DFS work. The suite has only been run locally since.
+
 ## Controls
 
 | Action | Result |

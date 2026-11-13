@@ -375,6 +375,11 @@ button:disabled {
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
+  /* Keep the canvas on its own compositing layer. Without it, Safari (WebKit) loses
+     repaints of moving vertices while overlapping elements animate (the auto-layout
+     switch's knob, the status bar resizing): the topological sort's gliding vertices
+     then left trails of stale rings behind. */
+  will-change: transform;
 }
 
 .message {
