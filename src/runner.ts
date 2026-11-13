@@ -109,11 +109,13 @@ export class AlgorithmRunner {
 
     // Locks: no editing; the direction switch; and the weighting the algorithm needs.
     this.editor.setLocked(true);
-    const { weighted, directed } = algorithm.requires;
-    if (weighted !== undefined) {
+    const { weighted, weighting, directed } = algorithm.requires;
+    const forcesWeighting = weighted !== undefined || weighting !== undefined;
+    if (forcesWeighting) {
       this.savedWeighting = this.graph.weighting;
       // Requiring weights keeps Positive if it is chosen; requiring none forces Unweighted.
-      if (weighted !== this.graph.weighted) this.editor.setWeighted(weighted);
+      if (weighting !== undefined) this.editor.setWeighting(weighting);
+      else if (weighted !== this.graph.weighted) this.editor.setWeighted(weighted!);
       this.syncSwitch(this.el.weightSwitch, this.graph.weighting);
     }
     if (directed !== undefined) {
@@ -123,7 +125,7 @@ export class AlgorithmRunner {
     }
     // An algorithm that reads the weights keeps the user's weighting, but it must not
     // change under it part-way.
-    this.lockSwitch(this.el.weightSwitch, weighted !== undefined || !!algorithm.usesWeights);
+    this.lockSwitch(this.el.weightSwitch, forcesWeighting || !!algorithm.usesWeights);
     this.lockSwitch(this.el.directionSwitch, true);
 
     this.simulation = algorithm.create(this.graph.currentView, start);

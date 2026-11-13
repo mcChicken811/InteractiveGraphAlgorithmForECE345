@@ -1,5 +1,5 @@
 import type { NodeId } from '../graph.js';
-import type { GraphView } from '../graph-views.js';
+import type { GraphView, Weighting } from '../graph-views.js';
 
 /**
  * Shared shape of every step-by-step algorithm simulation (BFS, DFS, Prim, Kruskal;
@@ -244,8 +244,11 @@ export interface AlgorithmDefinition {
    * matching switches for the duration (e.g. BFS forces the unweighted view; DFS forces
    * the unweighted, directed view; Prim forces the undirected view).
    */
-  /** `weighted: false` forces Unweighted; `true` forces Weighted unless Positive is chosen. */
-  requires: { weighted?: boolean; directed?: boolean };
+  /**
+   * `weighted: false` forces Unweighted; `true` forces Weighted unless Positive is chosen.
+   * `weighting` forces exactly that reading (Dijkstra: 'positive').
+   */
+  requires: { weighted?: boolean; weighting?: Weighting; directed?: boolean };
   /**
    * The algorithm reads edge weights but accepts any weighting (Prim): the
    * Unweighted / Weighted / Positive switch is not forced, only locked at the user's

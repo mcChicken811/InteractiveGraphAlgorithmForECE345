@@ -3629,18 +3629,148 @@
 			return `${added ? `Added ${name(e)}: it joined two trees.` : `Skipped ${name(e)}: both ends were already in one tree.`} Forest weight ${this.totalWeight}. ${upcoming(edge)}`;
 		}
 	};
+	const kruskal = {
+		id: "kruskal",
+		name: "Kruskal's algorithm",
+		requires: { directed: false },
+		usesWeights: true,
+		create: (view) => new KruskalSimulation(view)
+	};
+	// src/algorithms/dijkstra.ts
+	var DijkstraSimulation = class {
+		view;
+		source;
+		/** The min-priority queue's contents (membership; order comes from d). */
+		inQueue;
+		last = null;
+		/** v.d: the shortest-path estimate (Infinity for ∞). */
+		distance = /* @__PURE__ */ new Map();
+		/** v.π: the predecessor on the shortest path found so far (null for NIL). */
+		parent = /* @__PURE__ */ new Map();
+		/** S: the vertices in the order they were extracted. */
+		order = [];
+		constructor(view, source) {
+			this.view = view;
+			this.source = source;
+			const ids = view.nodeIds();
+			for (const id of ids) {
+				this.distance.set(id, Infinity);
+				this.parent.set(id, null);
+			}
+			if (this.distance.has(source)) this.distance.set(source, 0);
+			this.inQueue = new Set(ids);
+		}
+		/** The queue in extraction order: smallest d first, ties by lowest id. */
+		get queued() {
+			return [...this.inQueue].sort((a, b) => {
+				const [da, db] = [this.distance.get(a), this.distance.get(b)];
+				return da === db ? a - b : da < db ? -1 : 1;
+			});
+		}
+		/** The vertex the next step extracts, or null once the rest (if any) are unreachable. */
+		get next() {
+			const u = this.queued[0];
+			return u !== void 0 && Number.isFinite(this.distance.get(u)) ? u : null;
+		}
+		/** True once every reachable vertex is in S. */
+		get finished() {
+			return this.next === null;
+		}
+		/** The edges the next step relaxes: from the next vertex to its neighbours still in the queue. */
+		edgesToRelax() {
+			const u = this.next;
+			if (u === null) return [];
+			return this.view.neighbors(u).filter((v) => this.inQueue.has(v)).map((v) => [u, v]);
+		}
+		/** The shortest-paths tree found so far: (v.π, v) for every v with a predecessor. */
+		predecessorEdges() {
+			const edges = [];
+			for (const [v, p] of this.parent) if (p !== null) edges.push([p, v]);
+			return edges;
+		}
+		step() {
+			const u = this.next;
+			if (u === null) return false;
+			this.inQueue.delete(u);
+			this.order.push(u);
+			const du = this.distance.get(u);
+			const relaxed = [];
+			for (const v of this.view.neighbors(u)) {
+				if (!this.inQueue.has(v)) continue;
+				const before = this.distance.get(v);
+				const through = du + this.view.weight(u, v);
+				if (through < before) {
+					this.distance.set(v, through);
+					this.parent.set(v, u);
+				}
+				relaxed.push({
+					v,
+					before,
+					after: this.distance.get(v)
+				});
+			}
+			this.last = {
+				u,
+				relaxed
+			};
+			return true;
+		}
+		highlight() {
+			const next = this.next;
+			return {
+				current: next,
+				done: [...this.order],
+				activeEdges: next !== null ? this.edgesToRelax() : this.predecessorEdges(),
+				labels: Object.fromEntries([...this.distance].map(([id, d]) => [id, formatDistance(d)]))
+			};
+		}
+		priorityQueueSnapshot() {
+			return {
+				items: this.queued,
+				incoming: []
+			};
+		}
+		describe() {
+			const arrow = this.view.directed ? "→" : "—";
+			const last = this.last;
+			const next = this.next;
+			const nextText = () => `Next: extract ${next} (d = ${this.distance.get(next)}).`;
+			if (last === null) {
+				if (next === null) return `Dijkstra from ${this.source}: there is no such vertex. Press Finish.`;
+				return `Dijkstra from ${this.source}. Every d is ∞ except ${this.source}.d = 0. Press Update to extract ${this.source} and relax its edges.`;
+			}
+			const { u, relaxed } = last;
+			const lowered = relaxed.filter((r) => r.after < r.before);
+			const kept = relaxed.filter((r) => r.after === r.before);
+			const parts = [`Extracted ${u} (d = ${this.distance.get(u)}).`];
+			if (relaxed.length === 0) parts.push("No edge to relax.");
+			else {
+				if (lowered.length) parts.push(`Relaxed ${lowered.map((r) => `${u} ${arrow} ${r.v}: d ${formatDistance(r.before)} → ${r.after}`).join(", ")}.`);
+				if (kept.length) parts.push(`No shorter path to ${kept.map((r) => r.v).join(", ")}.`);
+			}
+			if (!this.finished) return `${parts.join(" ")} ${nextText()}`;
+			const n = this.view.nodeIds().length;
+			const reached = this.order.length;
+			const unreachable = n - reached;
+			const ending = unreachable === 0 ? `Dijkstra finished: shortest paths from ${this.source} to all ${n} vertices; the white edges (v.π, v) form the shortest-paths tree. Press Finish.` : `Dijkstra finished: shortest paths from ${this.source} to ${reached} of ${n} vertices; ${unreachable} not reachable (d = ∞). The white edges (v.π, v) form the shortest-paths tree. Press Finish.`;
+			return `${parts.join(" ")} ${ending}`;
+		}
+	};
+	function formatDistance(d) {
+		return Number.isFinite(d) ? String(d) : "∞";
+	}
 	// src/algorithms/index.ts
 	/** Algorithms offered in the header's picker, in order. Add new simulations here. */
 	const ALGORITHMS = [
 		bfs,
 		dfs,
 		prim,
+		kruskal,
 		{
-			id: "kruskal",
-			name: "Kruskal's algorithm",
-			requires: { directed: false },
-			usesWeights: true,
-			create: (view) => new KruskalSimulation(view)
+			id: "dijkstra",
+			name: "Dijkstra's algorithm",
+			requires: { weighting: "positive" },
+			create: (view, start) => new DijkstraSimulation(view, start)
 		}
 	];
 	// src/runner.ts
@@ -3706,10 +3836,12 @@
 			const algorithm = this.algorithm;
 			const start = this.editor.selectedNode ?? this.graph.getNodes()[0].id;
 			this.editor.setLocked(true);
-			const { weighted, directed } = algorithm.requires;
-			if (weighted !== void 0) {
+			const { weighted, weighting, directed } = algorithm.requires;
+			const forcesWeighting = weighted !== void 0 || weighting !== void 0;
+			if (forcesWeighting) {
 				this.savedWeighting = this.graph.weighting;
-				if (weighted !== this.graph.weighted) this.editor.setWeighted(weighted);
+				if (weighting !== void 0) this.editor.setWeighting(weighting);
+				else if (weighted !== this.graph.weighted) this.editor.setWeighted(weighted);
 				this.syncSwitch(this.el.weightSwitch, this.graph.weighting);
 			}
 			if (directed !== void 0) {
@@ -3717,7 +3849,7 @@
 				this.editor.setDirected(directed);
 				this.syncSwitch(this.el.directionSwitch, this.graph.directed ? "directed" : "undirected");
 			}
-			this.lockSwitch(this.el.weightSwitch, weighted !== void 0 || !!algorithm.usesWeights);
+			this.lockSwitch(this.el.weightSwitch, forcesWeighting || !!algorithm.usesWeights);
 			this.lockSwitch(this.el.directionSwitch, true);
 			this.simulation = algorithm.create(this.graph.currentView, start);
 			this.show(false);
@@ -4108,7 +4240,8 @@
 			};
 			strip.classList.add(`strip-${this.options.kind}`);
 			const peek = (on) => {
-				strip.classList.toggle("peek-ids", on && this.options.peekIds);
+				const { peekIds } = this.options;
+				strip.classList.toggle("peek-ids", on && (typeof peekIds === "function" ? peekIds() : peekIds));
 				this.onPeek?.(on);
 			};
 			strip.addEventListener("pointerenter", () => peek(true));
@@ -4902,8 +5035,12 @@
 	randomBtn.addEventListener("click", () => editor.randomise());
 	const queueView = new QueueView(document.querySelector("#queue-strip"), document.querySelector("#queue-empty"));
 	queueView.onPeek = (peek) => editor.setPeek(peek ? "ids" : null);
-	const priorityQueueView = new QueueView(document.querySelector("#pq-strip"), document.querySelector("#pq-empty"), { kind: "priority" });
-	priorityQueueView.onPeek = (peek) => editor.setPeek(peek ? "labels" : null);
+	const compactVertices = () => svg.classList.contains("sim-compact");
+	const priorityQueueView = new QueueView(document.querySelector("#pq-strip"), document.querySelector("#pq-empty"), {
+		kind: "priority",
+		peekIds: () => !compactVertices()
+	});
+	priorityQueueView.onPeek = (peek) => editor.setPeek(peek ? compactVertices() ? "labels" : "ids" : null);
 	const edgeQueueView = new EdgeQueueView(document.querySelector("#edges-strip"), document.querySelector("#edges-empty"));
 	edgeQueueView.onPeek = (peek) => editor.setPeek(peek ? "labels" : null);
 	const stackView = new QueueView(document.querySelector("#stack-strip"), document.querySelector("#stack-empty"), {

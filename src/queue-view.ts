@@ -52,8 +52,9 @@ export interface QueueViewOptions {
   /**
    * Whether hovering the strip switches its own circles to vertex ids (default: true; the
    * priority queue keeps showing its keys, since hovering it shows keys on the canvas).
+   * A function is asked on each hover (Prim's keys stay, Dijkstra's distances give way to ids).
    */
-  peekIds: boolean;
+  peekIds: boolean | (() => boolean);
   /** How a vertex's label is read out to screen readers (default: "distance 2"; priority: "key 2"). */
   describeLabel: (label: string) => string;
 }
@@ -80,7 +81,8 @@ export class QueueView {
     this.options = { kind, describeLabel, peekIds: kind !== 'priority', ...options };
     strip.classList.add(`strip-${this.options.kind}`);
     const peek = (on: boolean) => {
-      strip.classList.toggle('peek-ids', on && this.options.peekIds);
+      const { peekIds } = this.options;
+      strip.classList.toggle('peek-ids', on && (typeof peekIds === 'function' ? peekIds() : peekIds));
       this.onPeek?.(on);
     };
     strip.addEventListener('pointerenter', () => peek(true));

@@ -115,14 +115,17 @@ const queueView = new QueueView(
 );
 queueView.onPeek = (peek) => editor.setPeek(peek ? 'ids' : null);
 
-// Prim's min-priority queue, smallest key first; its vertices show their keys.
+// The min-priority queue (Prim's keys, Dijkstra's distances), smallest first; its vertices
+// show their keys. Hovering it shows the keys on the canvas when the vertices are compact
+// dots (Prim); when they already show them (Dijkstra), it shows the ids instead, there and
+// in the strip, as the BFS queue does.
+const compactVertices = () => svg.classList.contains('sim-compact');
 const priorityQueueView = new QueueView(
   document.querySelector<HTMLElement>('#pq-strip')!,
   document.querySelector<HTMLElement>('#pq-empty')!,
-  { kind: 'priority' },
+  { kind: 'priority', peekIds: () => !compactVertices() },
 );
-// Hovering it shows the keys on the canvas (Prim's vertices are compact dots otherwise).
-priorityQueueView.onPeek = (peek) => editor.setPeek(peek ? 'labels' : null);
+priorityQueueView.onPeek = (peek) => editor.setPeek(peek ? (compactVertices() ? 'labels' : 'ids') : null);
 
 // Kruskal's edges in sorted order; hovering shows each vertex's set (FIND-SET) on the canvas.
 const edgeQueueView = new EdgeQueueView(

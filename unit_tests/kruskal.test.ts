@@ -72,7 +72,7 @@ describe('DisjointSet (CLRS §19.3: union by rank, path compression)', () => {
 
 describe('Kruskal registry entry', () => {
   it('is offered after Prim; requires the undirected view and reads weights without forcing a weighting', () => {
-    expect(ALGORITHMS.map((a) => a.id)).toEqual(['bfs', 'dfs', 'prim', 'kruskal']);
+    expect(ALGORITHMS.map((a) => a.id)).toEqual(['bfs', 'dfs', 'prim', 'kruskal', 'dijkstra']);
     expect(kruskal.name).toBe("Kruskal's algorithm");
     expect(kruskal.requires).toEqual({ directed: false });
     expect(kruskal.usesWeights).toBe(true);

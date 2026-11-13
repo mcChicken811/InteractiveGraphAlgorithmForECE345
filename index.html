@@ -189,6 +189,13 @@
                   those still to check inside one tree are a darker green.
                 </li>
                 <li>
+                  Dijkstra's algorithm finds the <strong>shortest paths</strong> from the start node. It switches
+                  to <strong>Positive</strong> weights (each weight counts as its magnitude). Each vertex shows
+                  its distance d; the next vertex to extract has a white ring and the edges it will relax are
+                  white, extracted vertices are green. At the end, the white edges are the shortest-paths tree.
+                  <strong>Hover the priority queue</strong> to see the vertex numbers.
+                </li>
+                <li>
                   When DFS is done, <strong>Topological sort</strong> lines the vertices up by decreasing finish
                   time. Tree edges run along the line in white; the other edges arc above (forward) or below
                   (crossed). If DFS found a cycle there is no topological order: the backward edges, pointing
@@ -285,7 +292,7 @@
               <p id="queue-empty" class="queue-empty" hidden>The queue is empty.</p>
             </div>
           </section>
-          <!-- Shown only while an algorithm with a min-priority queue (Prim) runs: src/queue-view.ts. -->
+          <!-- Shown only while an algorithm with a min-priority queue (Prim, Dijkstra) runs: src/queue-view.ts. -->
           <section id="pq-card" class="info-card queue-card" aria-labelledby="pq-title" hidden>
             <h2 class="card-title" id="pq-title">
               <button

@@ -1318,6 +1318,7 @@ test.describe('algorithm simulation (BFS)', () => {
       'Depth-first search',
       "Prim's algorithm",
       "Kruskal's algorithm",
+      "Dijkstra's algorithm",
     ]);
     await page.keyboard.press('Escape');
     await expect(runBtn(page)).toBeVisible();
@@ -3881,6 +3882,137 @@ test.describe("algorithm simulation (Kruskal's minimum spanning tree)", () => {
       await cv.move(...S[4]);
       await expect(cv.canvas).not.toHaveClass(/peek-labels/);
     });
+  });
+});
+
+test.describe("algorithm simulation (Dijkstra's shortest paths)", () => {
+  const run = (page: Page) => page.getByRole('button', { name: 'Run', exact: true }).click();
+  const update = (page: Page) => page.getByRole('button', { name: 'Update', exact: true }).click();
+  const message = (page: Page) => page.locator('#message');
+  const radio = (page: Page, name: string) => page.getByRole('radio', { name, exact: true });
+  const pqStrip = (page: Page) => page.getByRole('list', { name: 'Priority queue, smallest key first' });
+  const WHITE = 'rgb(255, 255, 255)';
+  const GREEN = 'rgb(47, 158, 68)';
+  const strokeOf = (id: number) => cv.node(id).locator('circle').evaluate((c) => getComputedStyle(c).stroke);
+  /** Opens the ☰ panel, with How to use folded away, to show the Priority queue card. */
+  async function openPanel(page: Page): Promise<void> {
+    await page.getByRole('button', { name: 'Help and adjacency list' }).click();
+    await page.getByRole('button', { name: 'How to use' }).click();
+  }
+
+  /**
+   * Prim's graph: 0—1 (4), 0—2 (−8, read as 8), 1—2 (2), 1—3 (5), 2—3 (9), 3—4 (3).
+   * Dijkstra from 0 (undirected): d = 0, 4, 6, 9, 12; π: 1 ← 0, 2 ← 1, 3 ← 1, 4 ← 3.
+   */
+  const S: Array<[number, number]> = [
+    [150, 200],
+    [420, 150],
+    [380, 430],
+    [640, 300],
+    [780, 480],
+  ];
+  const EDGES: Array<[number, number, number]> = [
+    [0, 1, 4],
+    [0, 2, -8],
+    [1, 2, 2],
+    [1, 3, 5],
+    [2, 3, 9],
+    [3, 4, 3],
+  ];
+
+  /** Builds the graph in Weighted mode (scrolling the weights in), then picks Dijkstra. */
+  async function build(page: Page): Promise<void> {
+    for (const p of S) await cv.click(...p);
+    for (const [a, b] of EDGES) await connect(S[a], S[b]);
+    await page.locator('label[for="weights-on"]').click();
+    const height = page.viewportSize()!.height;
+    for (const [a, b, w] of EDGES) {
+      await cv.move(...mid(S[a], S[b]));
+      // 15 per page, up = more; aim a little past w (see Prim's build).
+      await page.mouse.wheel(0, -((w + 0.4 * Math.sign(w)) / 15) * height);
+      await expect(cv.edge(a, b)).toHaveAttribute('data-weight', String(w));
+    }
+    await page.getByRole('combobox', { name: 'Algorithm' }).click();
+    await page.getByRole('option', { name: "Dijkstra's algorithm" }).click();
+  }
+
+  const labels = (page: Page) =>
+    page.locator('#canvas [data-node-id]').evaluateAll((nodes) => nodes.map((g) => g.querySelector('.sim-label')!.textContent));
+  /** Edges drawn white (sim-active), as "a-b". */
+  const whiteEdges = (page: Page) =>
+    page
+      .locator('#canvas .edge.sim-active')
+      .evaluateAll((gs) => gs.map((g) => `${(g as SVGGElement).dataset.edgeA}-${(g as SVGGElement).dataset.edgeB}`).sort());
+
+  test('is offered in the picker, after Kruskal', async ({ page }) => {
+    await page.getByRole('combobox', { name: 'Algorithm' }).click();
+    const options = await page.getByRole('listbox', { name: 'Algorithm' }).getByRole('option').allTextContents();
+    expect(options.at(-1)).toBe("Dijkstra's algorithm");
+  });
+
+  test('Run forces Positive (weights read as magnitudes) and locks the switches; Stop restores', async ({ page }) => {
+    await build(page);
+    await run(page);
+    await expect(radio(page, 'Positive')).toBeChecked();
+    for (const name of ['Unweighted', 'Weighted', 'Positive', 'Undirected', 'Directed']) await expect(radio(page, name)).toBeDisabled();
+    await expect(cv.edge(0, 2).locator('.edge-weight text')).toHaveText('8'); // |−8|
+    await expect(message(page)).toHaveText('Dijkstra from 0. Every d is ∞ except 0.d = 0. Press Update to extract 0 and relax its edges.');
+    await page.getByRole('button', { name: 'Stop', exact: true }).click();
+    await expect(radio(page, 'Weighted')).toBeChecked();
+    await expect(cv.edge(0, 2).locator('.edge-weight text')).toHaveText('-8');
+  });
+
+  test('the next vertex is ringed white with the edges it relaxes; extracted ones green; the rest plain grey', async ({ page }) => {
+    await build(page);
+    await run(page);
+    await openPanel(page);
+    await expect(pqStrip(page)).toBeVisible();
+    expect(await labels(page)).toEqual(['0', '∞', '∞', '∞', '∞']);
+    await expect.poll(() => strokeOf(0)).toBe(WHITE);
+    expect(await whiteEdges(page)).toEqual(['0-1', '0-2']);
+    // Every other edge: solid, in the normal edge colour.
+    const plain = await cv.edge(3, 4).locator('.edge-line').evaluate((l) => ({
+      stroke: getComputedStyle(l).stroke,
+      dash: getComputedStyle(l).strokeDasharray,
+    }));
+    expect(plain.dash).toBe('none');
+    expect(plain.stroke).not.toBe(WHITE);
+    expect(plain.stroke).not.toBe(GREEN);
+
+    await update(page); // extract 0: 1 → 4, 2 → 8
+    await expect(message(page)).toHaveText('Extracted 0 (d = 0). Relaxed 0 — 1: d ∞ → 4, 0 — 2: d ∞ → 8. Next: extract 1 (d = 4).');
+    expect(await labels(page)).toEqual(['0', '4', '8', '∞', '∞']);
+    await expect.poll(() => strokeOf(0)).toBe(GREEN);
+    await expect.poll(() => strokeOf(1)).toBe(WHITE);
+    expect(await whiteEdges(page)).toEqual(['1-2', '1-3']); // 1 — 0 leads into S: nothing to relax
+
+    await update(page); // extract 1: 2 → 6, 3 → 9
+    expect(await labels(page)).toEqual(['0', '4', '6', '9', '∞']);
+    await expect(message(page)).toHaveText('Extracted 1 (d = 4). Relaxed 1 — 2: d 8 → 6, 1 — 3: d ∞ → 9. Next: extract 2 (d = 6).');
+  });
+
+  test('at the end the shortest-paths tree (v.π, v) is white; Finish clears it', async ({ page }) => {
+    await build(page);
+    await run(page);
+    for (let i = 0; i < 5; i++) await update(page);
+    await expect(message(page)).toContainText('Dijkstra finished: shortest paths from 0 to all 5 vertices');
+    expect(await labels(page)).toEqual(['0', '4', '6', '9', '12']);
+    expect(await whiteEdges(page)).toEqual(['0-1', '1-2', '1-3', '3-4']);
+    for (const id of [0, 1, 2, 3, 4]) await expect.poll(() => strokeOf(id)).toBe(GREEN);
+    await page.getByRole('button', { name: 'Finish', exact: true }).click();
+    expect(await whiteEdges(page)).toEqual([]);
+  });
+
+  test('hovering the priority queue shows the vertex ids, on the canvas and in the strip', async ({ page }) => {
+    await build(page);
+    await run(page);
+    await update(page);
+    await openPanel(page);
+    await pqStrip(page).hover();
+    await expect(cv.canvas).toHaveClass(/peek-ids/);
+    await expect(pqStrip(page)).toHaveClass(/peek-ids/);
+    await page.mouse.move(5, 790);
+    await expect(cv.canvas).not.toHaveClass(/peek-ids/);
   });
 });
 

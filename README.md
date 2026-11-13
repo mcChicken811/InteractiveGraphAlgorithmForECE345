@@ -1,6 +1,6 @@
 # InteractiveGraphAlgorithmForECE345
 
-An interactive graph builder for stepping through graph algorithms in the browser: breadth-first search, depth-first search, and Prim's and Kruskal's minimum spanning tree algorithms.
+An interactive graph builder for stepping through graph algorithms in the browser: breadth-first search, depth-first search, Prim's and Kruskal's minimum spanning tree algorithms, and Dijkstra's shortest-paths algorithm.
 
 ## Opening the website
 
