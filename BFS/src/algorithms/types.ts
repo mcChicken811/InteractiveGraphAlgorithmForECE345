@@ -63,6 +63,8 @@ export interface Highlight {
    * one group.
    */
   cutGroups?: NodeId[][];
+  /** Keep the white `activeEdges` dashed (Kruskal: the next edge is not in the result yet). */
+  activeDashed?: boolean;
 }
 
 export interface ExploredEdge {
@@ -83,6 +85,11 @@ export interface ExploredEdge {
    * tree edge).
    */
   within?: boolean;
+  /**
+   * Draw the edge dashed in a darker green: both ends are already in one tree of the
+   * result, but the algorithm has yet to check the edge (Kruskal: still in the sorted list).
+   */
+  waiting?: boolean;
 }
 
 /** A queue-like structure for the side panel (BFS's queue). */

@@ -14,6 +14,8 @@
   /* Shared height of the header's controls (buttons and the program picker). */
   --control-height: 36px;
   --sim-done: #2f9e44;
+  /* Edges inside a tree still waiting to be checked (Kruskal): a darker green. */
+  --sim-waiting: #1b6a2b;
   /* Started but not finished (DFS: on the recursion stack). */
   --sim-running: #f2a900;
   /* Edges crossing an algorithm's cut (Prim): solid grey. */
@@ -39,6 +41,7 @@
     --danger: #ff6b6b;
     --warn: #ffb04d;
     --sim-done: #69db7c;
+    --sim-waiting: #2f9e44;
     --sim-running: #ffd43b;
     --sim-crossing: #868e96;
     --sim-current: #ffffff;
@@ -1181,6 +1184,19 @@ button:disabled {
   opacity: 0.75;
 }
 
+/* Edges still to be checked with both ends already in one tree (Kruskal): dashed, in a
+   darker green. */
+.edge.sim-waiting:not(.sim-active) .edge-line {
+  stroke: var(--sim-waiting);
+  stroke-dasharray: 7 6;
+  stroke-width: 3;
+}
+
+/* The white next edge, kept dashed while it is not in the result (Kruskal). */
+#canvas.sim-active-dashed .edge.sim-active .edge-line {
+  stroke-dasharray: 7 6;
+}
+
 /* Kruskal's sorted edges: a pill per edge, its ends over its weight. */
 .q-edge {
   display: grid;
@@ -1308,6 +1324,15 @@ button:disabled {
 }
 
 #canvas.locked .edge.sim-unexplored:not(.sim-active):hover .edge-line {
+  stroke-dasharray: 7 6;
+}
+
+#canvas.locked .edge.sim-waiting:not(.sim-active, .sim-spine):hover .edge-line {
+  stroke: var(--sim-waiting);
+  stroke-dasharray: 7 6;
+}
+
+#canvas.sim-active-dashed.locked .edge.sim-active:hover .edge-line {
   stroke-dasharray: 7 6;
 }
 

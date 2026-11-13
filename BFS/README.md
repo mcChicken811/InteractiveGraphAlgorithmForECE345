@@ -291,8 +291,9 @@ Kruskal's algorithm follows `MST-KRUSKAL(G, w)` in *Introduction to Algorithms* 
 
 - **Undirected, either weighting:** like Prim it solves the minimum-spanning-tree problem of CLRS Chapter 21, so Run forces **Undirected**, and the weighting is kept but locked (unweighted: every edge counts as 1). A graph that is not connected gets a minimum spanning forest.
 - **Presented like Prim:** compact vertices, the same colours and the same moving border.
-  - **White:** the edge the next Update considers.
-  - **The cut:** the cut (*C*, *V* − *C*) around *u*'s tree, with its crossing edges grey. When the next edge joins two trees, it is a light edge crossing this cut, which is why it is safe to add (CLRS Corollary 21.2).
+  - **Dashed edges:** every edge not in the forest is dashed.
+  - **White:** the edge the next Update considers. It stays dashed, since it is not in the forest yet.
+  - **The cut:** when the next edge (*u*, *v*) joins two trees, it is a light edge crossing the cut (*C*, *V* − *C*) around *u*'s tree, which is why it is safe to add (CLRS Corollary 21.2). The messages name this cut. Unlike Prim's, its crossing edges are not drawn solid.
   - **The territories:** every tree of *A* with an edge is shaded green, each as a **territory of its own**. As with Prim, the sites are the vertices and the non-crossing edges.
     - **Each tree:** a tree's territory is the part of the canvas nearer to one of its vertices or edges (both ends in the tree) than to any other tree's, or to the rest's.
     - **The rest:** the vertices that are in no tree yet, and the edges between them. Their territory is not shaded, so a vertex not yet taken is never covered by a tree's green.
@@ -300,7 +301,8 @@ Kruskal's algorithm follows `MST-KRUSKAL(G, w)` in *Introduction to Algorithms* 
     - **Updates:** after each Update the territories move smoothly. A new tree's territory spreads out from its edge, and a grown tree's spreads from where it was. When an edge joins two trees, the border between them fades out.
     - **When there is none:** at the start every tree is a single vertex, so there is no border and no shading. When the trees have taken every vertex, they share the whole canvas between them.
     - **Cycle edges:** when the next edge would close a cycle, both its ends lie inside one tree's territory, so it visibly crosses nothing.
-  - **Green:** the forest's edges (solid), vertices in a tree with an edge, and edges inside one tree that are not in the forest (dashed).
+  - **Green:** the forest's edges (solid) and the vertices in a tree with an edge.
+  - **Darker green, dashed:** edges still to be checked whose ends are already in one tree. When one comes up next it turns white (still dashed), and once skipped it is plain dashed like the other edges outside the forest.
   - On the last step, if the graph is connected, the tree's territory floods the canvas and fades.
 - **Sorted edges card:** a **Sorted edges** card lists the edges still to come, lightest first: `← next  [1 — 2 · 2] [0 — 1 · 4] …`. On Update the edge taken slides out, green if it was added and faded and struck through if skipped, and the rest glide along.
 - **Set representatives:** hovering (or focusing) the sorted edges grows the vertices back and shows each one's set representative, FIND-SET(*v*), so all the vertices of a tree show the same number.
@@ -312,10 +314,12 @@ Kruskal's algorithm follows `MST-KRUSKAL(G, w)` in *Introduction to Algorithms* 
    - `labels` (vertex → text) to draw inside the vertices instead of their ids, as BFS does with distances and DFS with times; Dijkstra could do the same with tentative distances.
    - `running` (vertices drawn yellow).
    - `cut` (one side *S* of a cut): the canvas tints *S*'s Voronoi territory and draws its border with the rest, as Prim does with its tree. With `cutEdgesOnly`, only edges count as sites. With `cutGroups` (*S* split into groups, as Kruskal does with its trees), each group gets a territory of its own, all tinted, with borders between them too. A new group's territory grows out from the group itself.
-   - `exploredEdges` (`{ from, to, label?, done?, crossing?, within? }`). When present, every other edge is drawn dashed, as DFS does. The flags restyle an edge, as Prim does:
+   - `exploredEdges` (`{ from, to, label?, done?, crossing?, within?, waiting? }`). When present, every other edge is drawn dashed, as DFS does. The flags restyle an edge, as Prim does:
      - `done: true`: solid green (tree edges).
      - `crossing: true`: solid grey (edges crossing its cut).
      - `within: true`: dashed green (edges between tree vertices that are not tree edges).
+     - `waiting: true`: dashed, darker green (Kruskal: edges still to check with both ends in one tree).
+   - `activeDashed: true` keeps the white active edges dashed, as Kruskal does with its next edge.
    - Once finished, a simulation can also offer `topologicalSort()`, returning an `ArcDiagram` (`order`, `spine`, `below`, and `backward`: right-to-left edges, drawn red) or null. The Topological sort button then appears next to Finish.
    - Likewise `searchForest()` (offered for the whole run), returning a `ForestDiagram` (`places`: each vertex's column and row; `spine`: the tree edges; `aside`: the vertices not in it yet; `highlightSpine`), puts the Show as forest toggle next to Update. The runner re-sends it after every step while it is shown.
    - `searchTree()` (BFS) works the same way for the Show as tree toggle, with `highlightSpine: false`.

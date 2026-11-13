@@ -3565,26 +3565,23 @@ test.describe("algorithm simulation (Kruskal's minimum spanning tree)", () => {
     for (let i = 0; i < n; i++) await update(page);
   }
 
-  /** Edge "a-b" → 'tree' (in A), 'within' (inside one tree, not in A), 'next' (white), 'crossing' (grey) or 'dashed'. */
+  /**
+   * Edge "a-b" → 'tree' (in A), 'next' (white), 'waiting' (still to check, inside one tree)
+   * or 'plain', with ' (dashed)' when it is drawn dashed.
+   */
   const edgeLook = (page: Page) =>
     page.locator('#canvas .edge').evaluateAll((edges) =>
       Object.fromEntries(
         edges.map((e) => {
           const g = e as SVGGElement;
           const has = (c: string) => g.classList.contains(c);
-          const look = has('sim-tree')
-            ? 'tree'
-            : has('sim-active')
-              ? 'next'
-              : has('sim-crossing')
-                ? 'crossing'
-                : has('sim-within')
-                  ? 'within'
-                  : 'dashed';
-          return [`${g.dataset.edgeA}-${g.dataset.edgeB}`, look];
+          const look = has('sim-tree') ? 'tree' : has('sim-active') ? 'next' : has('sim-waiting') ? 'waiting' : 'plain';
+          const dashed = getComputedStyle(g.querySelector('.edge-line')!).strokeDasharray !== 'none';
+          return [`${g.dataset.edgeA}-${g.dataset.edgeB}`, `${look}${dashed ? ' (dashed)' : ''}`];
         }),
       ),
     );
+  const DARK_GREEN = 'rgb(27, 106, 43)';
 
   /** Sorted-edges tokens: 'next', then 'a—b:w' (+ '*' for the next one). */
   const edgeTokens = (page: Page) =>
@@ -3613,20 +3610,21 @@ test.describe("algorithm simulation (Kruskal's minimum spanning tree)", () => {
     for (const name of ['Undirected', 'Directed', 'Unweighted', 'Weighted']) await expect(radio(page, name)).toBeEnabled();
   });
 
-  test('presents like Prim: compact dots, the next edge white, grey edges crossing the cut around it', async ({ page }) => {
+  test('presents like Prim: compact dots, the next edge white; every edge not in A dashed, the next one too', async ({ page }) => {
     await build(page);
     await run(page);
     await expect(cv.canvas).toHaveClass(/sim-compact/);
     await expect(cv.canvas.locator('.node.sim-current, .node.sim-running')).toHaveCount(0);
     expect(await edgeLook(page)).toEqual({
-      '0-1': 'crossing',
-      '0-2': 'dashed',
-      '1-2': 'next',
-      '1-3': 'crossing',
-      '2-3': 'dashed',
-      '3-4': 'dashed',
+      '0-1': 'plain (dashed)',
+      '0-2': 'plain (dashed)',
+      '1-2': 'next (dashed)',
+      '1-3': 'plain (dashed)',
+      '2-3': 'plain (dashed)',
+      '3-4': 'plain (dashed)',
     });
     await expect(cv.edge(1, 2).locator('.edge-line')).toHaveCSS('stroke', WHITE);
+    await expect(cv.canvas.locator('.edge.sim-crossing')).toHaveCount(0); // no solid grey crossing edges
   });
 
   test('takes the edges lightest first: joins trees, and skips edges that would close a cycle', async ({ page }) => {
@@ -3635,19 +3633,23 @@ test.describe("algorithm simulation (Kruskal's minimum spanning tree)", () => {
     await steps(page, 3); // A = {1—2, 3—4, 0—1}; next 1—3
     expect(await edgeLook(page)).toEqual({
       '0-1': 'tree',
-      '0-2': 'within', // inside {0, 1, 2}: it would close a cycle
+      '0-2': 'waiting (dashed)', // still to check, inside {0, 1, 2}: it would close a cycle
       '1-2': 'tree',
-      '1-3': 'next',
-      '2-3': 'crossing',
+      '1-3': 'next (dashed)',
+      '2-3': 'plain (dashed)',
       '3-4': 'tree',
     });
     await expect(cv.edge(0, 1).locator('.edge-line')).toHaveCSS('stroke', GREEN);
-    await expect(cv.edge(0, 2).locator('.edge-line')).toHaveCSS('stroke', GREEN);
-    await expect(cv.edge(0, 2).locator('.edge-line')).not.toHaveCSS('stroke-dasharray', 'none');
-    await steps(page, 2); // add 1—3, skip 0—2
+    await expect(cv.edge(0, 2).locator('.edge-line')).toHaveCSS('stroke', DARK_GREEN);
+    await update(page); // adds 1—3: 0—2 is next (white, still dashed), and 2—3 waits too
+    expect(await edgeLook(page)).toMatchObject({ '0-2': 'next (dashed)', '2-3': 'waiting (dashed)', '1-3': 'tree' });
+    await expect(cv.edge(0, 2).locator('.edge-line')).toHaveCSS('stroke', WHITE);
+    await expect(cv.edge(2, 3).locator('.edge-line')).toHaveCSS('stroke', DARK_GREEN);
+    await update(page); // skips 0—2: checked, so plain dashed
     await expect(message(page)).toHaveText(
       'Skipped 0 — 2 (weight 8): both ends were already in one tree. Forest weight 14. Next: 2 — 3 (weight 9) has both ends in one tree, so it would close a cycle.',
     );
+    expect(await edgeLook(page)).toMatchObject({ '0-2': 'plain (dashed)', '2-3': 'next (dashed)' });
     await update(page);
     await expect(message(page)).toHaveText('Kruskal finished: a minimum spanning tree of 4 edges, total weight 14. Press Finish.');
     await expect(page.getByRole('button', { name: 'Finish', exact: true })).toBeVisible();

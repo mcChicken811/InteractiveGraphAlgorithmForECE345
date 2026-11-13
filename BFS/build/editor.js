@@ -221,6 +221,7 @@ export class GraphEditor {
         this.highlight = highlight;
         this.svg.classList.toggle('sim-labels', !!highlight?.labels);
         this.svg.classList.toggle('sim-compact', !!highlight?.compact);
+        this.svg.classList.toggle('sim-active-dashed', !!highlight?.activeDashed);
         if (!highlight)
             this.setPeek(null);
         this.setCut(highlight?.cut ? new Set(highlight.cut) : null, highlight?.cutGroups);
@@ -817,6 +818,7 @@ export class GraphEditor {
             g.classList.toggle('sim-tree', explored?.get(key)?.done ?? false);
             g.classList.toggle('sim-crossing', explored?.get(key)?.crossing ?? false);
             g.classList.toggle('sim-within', explored?.get(key)?.within ?? false);
+            g.classList.toggle('sim-waiting', explored?.get(key)?.waiting ?? false);
             for (const el of g.querySelectorAll('.edge-hit, .edge-line'))
                 setAttrs(el, attrs);
             const tag = explored?.get(key)?.label ?? '';

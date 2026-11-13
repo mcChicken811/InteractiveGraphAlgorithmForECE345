@@ -127,13 +127,10 @@ export class KruskalSimulation implements Simulation {
 
   highlight(): Highlight {
     const edge = this.upcoming;
-    const inForest = new Set(this.forest.map((e) => `${e.from}-${e.to}`));
-    const crossing = this.crossingEdges();
-    const crossKey = new Set(crossing.map(([a, b]) => `${Math.min(a, b)}-${Math.max(a, b)}`));
-    // Edges with both ends in one tree that are not A's (they would close a cycle).
-    const within = this.view
-      .edges()
-      .filter(([a, b]) => !inForest.has(`${a}-${b}`) && this.sets.representative(a) === this.sets.representative(b));
+    // Edges still to be checked with both ends in one tree already (they would close a cycle).
+    const waiting = this.sorted
+      .slice(this.next)
+      .filter(({ from, to }) => this.sets.representative(from) === this.sets.representative(to));
     const ids = this.view.nodeIds();
     const touched = new Set(this.forest.flatMap((e) => [e.from, e.to]));
     // The trees with an edge, each a territory of its own (a lone vertex is the rest's).
@@ -144,13 +141,13 @@ export class KruskalSimulation implements Simulation {
       done: ids.filter((v) => touched.has(v)), // in a tree with an edge
       activeEdges: edge ? [[edge.from, edge.to]] : [],
       labels: Object.fromEntries(ids.map((v) => [v, String(this.sets.representative(v))])),
+      // A's edges solid green; every other edge dashed: darker green if it is still to be
+      // checked but already inside a tree, and the next one white (still dashed).
       exploredEdges: [
         ...this.forest.map(({ from, to }): ExploredEdge => ({ from, to, done: true })),
-        ...crossing.filter(([a, b]) => !inForest.has(`${Math.min(a, b)}-${Math.max(a, b)}`)).map(
-          ([from, to]): ExploredEdge => ({ from, to, crossing: true }),
-        ),
-        ...within.filter(([a, b]) => !crossKey.has(`${a}-${b}`)).map(([from, to]): ExploredEdge => ({ from, to, within: true })),
+        ...waiting.map(({ from, to }): ExploredEdge => ({ from, to, waiting: true })),
       ],
+      activeDashed: true,
       // Every tree of A so far, green, with a border around each: between two trees as well
       // as with the rest. At the end, a spanning tree floods the canvas, as with Prim.
       // The territories come from the vertices and the non-crossing edges, as with Prim:

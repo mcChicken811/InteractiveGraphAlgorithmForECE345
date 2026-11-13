@@ -118,7 +118,7 @@ describe('KruskalSimulation (weighted, CLRS MST-KRUSKAL)', () => {
     expect(sim.treeCount).toBe(1);
   });
 
-  it('highlight: white next edge, grey edges crossing the cut around its first end, A green, cycle edges dashed green', () => {
+  it('highlight: white next edge (dashed), A green, edges still to check inside a tree darker green, the rest dashed', () => {
     expect(sim.highlight()).toMatchObject({
       current: null,
       compact: true,
@@ -127,6 +127,8 @@ describe('KruskalSimulation (weighted, CLRS MST-KRUSKAL)', () => {
       labels: { 0: '0', 1: '1', 2: '2', 3: '3', 4: '4' },
       cut: [], // no tree with an edge yet: no territory
       cutGroups: [],
+      activeDashed: true, // the next edge is not in A yet: it stays dashed
+      exploredEdges: [], // no edge is in A or inside a tree: all dashed
     });
     expect(sim.highlight().cutEdgesOnly).toBeUndefined(); // vertices are sites too
     sim.step();
@@ -140,10 +142,18 @@ describe('KruskalSimulation (weighted, CLRS MST-KRUSKAL)', () => {
       { from: 1, to: 2, done: true },
       { from: 3, to: 4, done: true },
       { from: 0, to: 1, done: true },
-      { from: 1, to: 3, crossing: true }, // the white one crosses too
-      { from: 2, to: 3, crossing: true },
-      { from: 0, to: 2, within: true }, // inside {0, 1, 2}, not in A: it would close a cycle
+      { from: 0, to: 2, waiting: true }, // still to check, inside {0, 1, 2}: it would close a cycle
+    ]); // 1—3 (next) and 2—3 join two trees: plain dashed, nothing crossing
+    sim.step(); // adds 1—3: now 0—2 is next, and 2—3 waits inside the one tree too
+    expect(sim.highlight().activeEdges).toEqual([[0, 2]]);
+    expect(sim.highlight().exploredEdges!.filter((e) => e.waiting)).toEqual([
+      { from: 0, to: 2, waiting: true }, // the next edge: white, still dashed
+      { from: 2, to: 3, waiting: true },
     ]);
+    sim.step(); // skips 0—2: checked, so plain dashed from now on
+    expect(sim.highlight().exploredEdges!.filter((e) => e.waiting)).toEqual([{ from: 2, to: 3, waiting: true }]);
+    sim.step(); // skips 2—3: nothing waits
+    expect(sim.highlight().exploredEdges!.every((e) => e.done)).toBe(true);
     // Labels are each vertex's set representative: one number per tree.
     const labels = h.labels!;
     expect(labels[0]).toBe(labels[1]);
