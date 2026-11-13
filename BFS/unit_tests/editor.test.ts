@@ -886,3 +886,174 @@ describe('GraphEditor lock and algorithm highlight', () => {
     expect(svg.querySelector('[data-edge-a="0"][data-edge-b="1"]')!.classList.contains('sim-active')).toBe(true);
   });
 });
+
+describe('GraphEditor arc diagram (topological sort)', () => {
+  let frames: FrameRequestCallback[];
+  let now: number;
+  let onAutoLayoutChange: Mock<(enabled: boolean) => void>;
+
+  beforeEach(() => {
+    frames = [];
+    now = 0;
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => frames.push(cb));
+    vi.stubGlobal('cancelAnimationFrame', () => {});
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    onAutoLayoutChange = vi.fn();
+    freshCanvas();
+    editor = new GraphEditor(svg, graph, { onChange, onMessage, onAutoLayoutChange });
+    // 0 → 1 → 2, 0 → 2, 3 → 2, drawn in a row in id order.
+    addRow(4);
+    editor.setDirected(true);
+    for (const [a, b] of [
+      [0, 1],
+      [1, 2],
+      [0, 2],
+      [3, 2],
+    ]) {
+      clickNode(a);
+      clickNode(b);
+    }
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  /** A new canvas and graph (the outer beforeEach's editor stays on the old canvas). */
+  function freshCanvas(): void {
+    document.body.innerHTML = '<svg id="canvas"></svg>';
+    svg = document.querySelector<SVGSVGElement>('#canvas')!;
+    svg.getBoundingClientRect = () =>
+      ({ x: 0, y: 0, left: 0, top: 0, width: WIDTH, height: HEIGHT, right: WIDTH, bottom: HEIGHT }) as DOMRect;
+    svg.setPointerCapture = () => {};
+    graph = new Graph();
+  }
+
+  /** As DFS from 0 finds it: order by decreasing finish time 3, 0, 1, 2. */
+  const DIAGRAM = {
+    order: [3, 0, 1, 2],
+    spine: [
+      [0, 1],
+      [1, 2],
+    ] as Array<[number, number]>,
+    below: [[3, 2]] as Array<[number, number]>,
+  };
+
+  /** Runs animation frames, 16 ms apart, until none are queued. */
+  function flush(max = 500): number {
+    let ran = 0;
+    while (frames.length && ran < max) {
+      now += 16;
+      frames.shift()!(now);
+      ran++;
+    }
+    return ran;
+  }
+
+  const xs = (ids: number[]) => ids.map((id) => graph.getNode(id)!.x);
+  /** The y coordinates along an edge's drawn path (or line). */
+  function pathYs(a: number, b: number): number[] {
+    const line = edgeEl(a, b)!.querySelector('.edge-line')!;
+    if (line.tagName === 'line') return [Number(line.getAttribute('y1')), Number(line.getAttribute('y2'))];
+    return [...line.getAttribute('d')!.matchAll(/(-?[\d.]+) (-?[\d.]+)/g)].map((m) => Number(m[2]));
+  }
+
+  it('glides the vertices into the order, left to right on one centred row', () => {
+    const start = xs([0, 1, 2, 3]);
+    editor.showArcDiagram(DIAGRAM);
+    expect(editor.arcDiagramActive).toBe(true);
+    expect(svg.classList.contains('arc-diagram')).toBe(true);
+    now += 100;
+    frames.shift()!(now);
+    const midway = xs([0, 1, 2, 3]);
+    expect(midway).not.toEqual(start); // moving…
+    flush();
+    const end = xs(DIAGRAM.order);
+    expect(midway).not.toEqual(xs([0, 1, 2, 3])); // …and it took more than one frame
+    for (let i = 1; i < end.length; i++) expect(end[i]).toBeGreaterThan(end[i - 1]);
+    expect((end[0] + end[3]) / 2).toBeCloseTo(WIDTH / 2); // centred
+    expect(new Set(DIAGRAM.order.map((id) => graph.getNode(id)!.y)).size).toBe(1); // one row
+  });
+
+  it('turns auto-layout off (and says so through the callback)', () => {
+    editor.setAutoLayout(true);
+    editor.showArcDiagram(DIAGRAM);
+    expect(editor.autoLayoutEnabled).toBe(false);
+    expect(onAutoLayoutChange.mock.calls).toEqual([[true], [false]]);
+  });
+
+  it('spine edges between neighbours lie straight and white; the rest are half circles, cross edges below', () => {
+    editor.showArcDiagram(DIAGRAM);
+    flush();
+    const rowY = graph.getNode(0)!.y;
+    // 0 → 1 and 1 → 2 join neighbours in the order: straight, on the centre line, highlighted.
+    for (const [a, b] of DIAGRAM.spine) {
+      expect(edgeEl(a, b)!.dataset.shape).toBe('line');
+      expect(edgeEl(a, b)!.classList.contains('sim-spine')).toBe(true);
+      expect(pathYs(a, b)).toEqual([rowY, rowY]);
+    }
+    // 0 → 2 (forward) arcs above the line, 3 → 2 (cross) below.
+    expect(edgeEl(0, 2)!.dataset.shape).toBe('path');
+    expect(edgeEl(0, 2)!.classList.contains('sim-spine')).toBe(false);
+    expect(Math.max(...pathYs(0, 2))).toBeLessThanOrEqual(rowY + 0.01);
+    expect(Math.min(...pathYs(0, 2))).toBeLessThan(rowY - 50);
+    expect(Math.min(...pathYs(3, 2))).toBeGreaterThanOrEqual(rowY - 0.01);
+    expect(Math.max(...pathYs(3, 2))).toBeGreaterThan(rowY + 50);
+  });
+
+  it('a spine edge that skips over a vertex arcs (still highlighted) instead of running behind it', () => {
+    editor.showArcDiagram({ ...DIAGRAM, spine: [...DIAGRAM.spine, [0, 2]] });
+    flush();
+    expect(edgeEl(0, 2)!.dataset.shape).toBe('path');
+    expect(edgeEl(0, 2)!.classList.contains('sim-spine')).toBe(true);
+    expect(Math.min(...pathYs(0, 2))).toBeLessThan(graph.getNode(0)!.y - 50);
+  });
+
+  it('turning auto-layout back on leaves the diagram: edges straighten out', () => {
+    editor.showArcDiagram(DIAGRAM);
+    flush();
+    editor.setAutoLayout(true);
+    expect(editor.arcDiagramActive).toBe(false);
+    expect(svg.classList.contains('arc-diagram')).toBe(false);
+    expect(svg.querySelectorAll('.sim-spine')).toHaveLength(0);
+    flush(2000);
+    expect([...svg.querySelectorAll<SVGGElement>('.edge')].every((g) => g.dataset.shape === 'line')).toBe(true);
+    // …and it can be shown again.
+    editor.setAutoLayout(false);
+    editor.showArcDiagram(DIAGRAM);
+    flush();
+    expect(editor.arcDiagramActive).toBe(true);
+    expect(edgeEl(3, 2)!.dataset.shape).toBe('path');
+  });
+
+  it('null leaves it with the vertices where they are', () => {
+    editor.showArcDiagram(DIAGRAM);
+    flush();
+    const placed = xs([0, 1, 2, 3]);
+    editor.showArcDiagram(null);
+    flush();
+    expect(xs([0, 1, 2, 3])).toEqual(placed);
+    expect(editor.arcDiagramActive).toBe(false);
+    expect([...svg.querySelectorAll<SVGGElement>('.edge')].every((g) => g.dataset.shape === 'line')).toBe(true);
+  });
+
+  it('keeps clear of the overlays the page reports', () => {
+    freshCanvas();
+    for (let i = 0; i < 4; i++) graph.addNode(100 + i * 150, 300);
+    const insetEditor = new GraphEditor(svg, graph, { canvasInsets: () => ({ top: 400, bottom: 100 }) });
+    insetEditor.showArcDiagram(DIAGRAM);
+    flush();
+    expect(graph.getNode(0)!.y).toBeCloseTo(400 + (HEIGHT - 400 - 100) / 2);
+  });
+
+  it('with reduced motion, jumps straight into place', () => {
+    vi.stubGlobal('matchMedia', () => ({ matches: true }));
+    editor.showArcDiagram(DIAGRAM);
+    expect(frames).toHaveLength(0);
+    const end = xs(DIAGRAM.order);
+    for (let i = 1; i < end.length; i++) expect(end[i]).toBeGreaterThan(end[i - 1]);
+    expect(edgeEl(3, 2)!.dataset.shape).toBe('path');
+    expect(Math.max(...pathYs(3, 2))).toBeGreaterThan(graph.getNode(3)!.y + 50);
+  });
+});

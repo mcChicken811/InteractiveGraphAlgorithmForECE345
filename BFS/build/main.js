@@ -71,6 +71,17 @@ function showMessage(text, tone = 'info') {
 const editor = new GraphEditor(svg, graph, {
     onChange: refreshPanels,
     onMessage: showMessage,
+    // The topological sort's line of vertices stays below the canvas toolbar (which wraps
+    // onto several rows on narrow screens) and above the status bar.
+    canvasInsets: () => ({
+        top: Math.max(0, toolbar.getBoundingClientRect().bottom - svg.getBoundingClientRect().top) + 16,
+        bottom: 96,
+    }),
+    // Also fires when the topological sort turns auto-layout off.
+    onAutoLayoutChange: (enabled) => {
+        layoutBtn.setAttribute('aria-pressed', String(enabled));
+        layoutState.textContent = enabled ? 'On' : 'Off';
+    },
 });
 clearBtn.addEventListener('click', () => editor.clear());
 // Hovering (or focusing) the queue strip shows vertex ids instead of BFS distances.
@@ -92,6 +103,7 @@ runner = new AlgorithmRunner(graph, editor, {
     run: document.querySelector('#run-btn'),
     step: document.querySelector('#step-btn'),
     stop: document.querySelector('#stop-btn'),
+    topo: document.querySelector('#topo-btn'),
     weightSwitch: document.querySelector('#weight-switch'),
     directionSwitch: document.querySelector('#direction-switch'),
     queueCard: document.querySelector('#queue-card'),
@@ -114,10 +126,12 @@ for (const input of weightInputs) {
     });
 }
 layoutBtn.addEventListener('click', () => {
-    const enabled = !editor.autoLayoutEnabled;
-    editor.setAutoLayout(enabled);
-    layoutBtn.setAttribute('aria-pressed', String(enabled));
-    layoutState.textContent = enabled ? 'On' : 'Off';
+    // Turning auto-layout on leaves the topological order (the run itself goes on).
+    const leavingSort = editor.arcDiagramActive && !editor.autoLayoutEnabled;
+    editor.setAutoLayout(!editor.autoLayoutEnabled);
+    if (leavingSort) {
+        showMessage('Auto-layout on: left the topological order. Press Topological sort to line the vertices up again.');
+    }
 });
 // Hamburger menu. The panel floats over the canvas and stays open while editing, so the
 // adjacency list can be watched as the graph changes; the button or Esc closes it.

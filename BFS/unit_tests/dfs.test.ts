@@ -85,7 +85,8 @@ describe('DfsSimulation (directed, CLRS)', () => {
       '3 → 1 is a crossed edge: 1 already finished, not a descendant of 3. Stack: 3 (top first).',
       '3 → 4 is a tree edge: discovered 4 at time 8. Stack: 4, 3 (top first).',
       'Finished 4 at time 9. Stack: 3 (top first).',
-      'DFS finished at time 10: 5 vertices in 2 trees; 3 tree, 1 backward, 1 forward, 1 crossed edges. Press Finish.',
+      'DFS finished at time 10: 5 vertices in 2 trees; 3 tree, 1 backward, 1 forward, 1 crossed edges. ' +
+        'A backward edge means a cycle, so there is no topological order. Press Finish.',
     ]);
   });
 
@@ -273,7 +274,8 @@ describe('DfsSimulation (directed, CLRS)', () => {
     expect(runToEnd(s)).toBe(6); // discover + finish each
     expect(s.trees).toEqual([1, 0, 2]);
     expect(s.describe()).toBe(
-      'DFS finished at time 6: 3 vertices in 3 trees; 0 tree, 0 backward, 0 forward, 0 crossed edges. Press Finish.',
+      'DFS finished at time 6: 3 vertices in 3 trees; 0 tree, 0 backward, 0 forward, 0 crossed edges. ' +
+        'No backward edge, so the graph is acyclic: press Topological sort, or Finish.',
     );
   });
 });
@@ -301,5 +303,81 @@ describe('DfsSimulation (undirected view)', () => {
     sim.step();
     sim.step();
     expect(sim.describe()).toBe('0 — 1 is a tree edge: discovered 1 at time 2. Stack: 1, 0 (top first).');
+  });
+});
+
+describe('topological sort (CLRS §20.4)', () => {
+  /** The fixture without its back edge 2 → 0: a DAG. */
+  function dag(): Graph {
+    g.removeEdge(2, 0);
+    return g;
+  }
+
+  it('is only offered once DFS has finished', () => {
+    const sim = new DfsSimulation(dag().directedView, 0);
+    sim.step();
+    expect(sim.topologicalSort()).toBeNull();
+    runToEnd(sim);
+    expect(sim.topologicalSort()).not.toBeNull();
+  });
+
+  it('orders the vertices by decreasing finish time, with tree edges as the spine and cross edges below', () => {
+    const sim = new DfsSimulation(dag().directedView, 0);
+    runToEnd(sim);
+    // 0 (1,6) → 1 (2,5) → 2 (3,4); 0 → 2 forward; 3 (7,10) → 4 (8,9); 3 → 1 cross.
+    expect(sim.hasCycle).toBe(false);
+    expect(sim.topologicalSort()).toEqual({
+      order: [3, 4, 0, 1, 2],
+      spine: [
+        [0, 1],
+        [1, 2],
+        [3, 4],
+      ],
+      below: [[3, 1]],
+    });
+  });
+
+  it('is not available when DFS found a back edge (a cycle)', () => {
+    const sim = new DfsSimulation(g.directedView, 0); // has 2 → 0
+    runToEnd(sim);
+    expect(sim.hasCycle).toBe(true);
+    expect(sim.topologicalSort()).toBeNull();
+  });
+
+  it('on random graphs: exists exactly when the graph is acyclic, and every edge then points forward', () => {
+    let seed = 11;
+    const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    let acyclicSeen = 0;
+    for (let trial = 0; trial < 60; trial++) {
+      const r = new Graph();
+      const n = 2 + Math.floor(rand() * 8);
+      for (let i = 0; i < n; i++) r.addNode(i * 10, 0);
+      r.directed = true;
+      for (let a = 0; a < n; a++) for (let b = 0; b < n; b++) if (a !== b && rand() < 0.22) r.addEdge(a, b);
+      const s = new DfsSimulation(r.directedView, Math.floor(rand() * n));
+      runToEnd(s);
+      // Independent acyclicity check (Kahn's algorithm).
+      const indeg = new Map(r.directedView.nodeIds().map((v) => [v, 0]));
+      for (const [, b] of r.directedView.edges()) indeg.set(b, indeg.get(b)! + 1);
+      const ready = [...indeg].filter(([, d]) => d === 0).map(([v]) => v);
+      let removed = 0;
+      while (ready.length) {
+        const v = ready.pop()!;
+        removed++;
+        for (const w of r.directedView.neighbors(v)) {
+          indeg.set(w, indeg.get(w)! - 1);
+          if (indeg.get(w) === 0) ready.push(w);
+        }
+      }
+      const acyclic = removed === n;
+      const sort = s.topologicalSort();
+      expect(sort !== null).toBe(acyclic); // Lemma 20.11
+      if (!sort) continue;
+      acyclicSeen++;
+      expect([...sort.order].sort((x, y) => x - y)).toEqual(r.directedView.nodeIds());
+      const rank = new Map(sort.order.map((v, i) => [v, i]));
+      for (const [a, b] of r.directedView.edges()) expect(rank.get(a)!).toBeLessThan(rank.get(b)!); // Theorem 20.12
+    }
+    expect(acyclicSeen).toBeGreaterThan(5);
   });
 });

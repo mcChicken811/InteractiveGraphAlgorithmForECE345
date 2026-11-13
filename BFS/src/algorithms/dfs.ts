@@ -1,6 +1,6 @@
 import type { NodeId } from '../graph.js';
 import type { GraphView } from '../graph-views.js';
-import type { AlgorithmDefinition, ExploredEdge, Highlight, Simulation, StackSnapshot } from './types.js';
+import type { AlgorithmDefinition, ArcDiagram, ExploredEdge, Highlight, Simulation, StackSnapshot } from './types.js';
 
 /**
  * Depth-first search as defined in CLRS (Introduction to Algorithms, 4th ed., §20.3):
@@ -40,6 +40,10 @@ import type { AlgorithmDefinition, ExploredEdge, Highlight, Simulation, StackSna
  * top of the stack, or the next root) and the edge it will explore. Gray vertices are
  * yellow and black ones green. Vertices are labelled "d," while running and "d,f" once
  * finished; undiscovered ones are blank.
+ *
+ * Once finished, `topologicalSort()` gives TOPOLOGICAL-SORT (CLRS §20.4): the vertices by
+ * decreasing finish time — available only when no back edge was found, which by
+ * Lemma 20.11 is exactly when the directed graph is acyclic.
  */
 
 type Color = 'white' | 'gray' | 'black';
@@ -174,6 +178,27 @@ export class DfsSimulation implements Simulation {
     };
   }
 
+  /** Whether a back edge has been found (in a directed graph: it has a cycle). */
+  get hasCycle(): boolean {
+    return this.edges.some((e) => e.kind === 'back');
+  }
+
+  /**
+   * CLRS TOPOLOGICAL-SORT: once DFS is finished and found no back edge, the vertices by
+   * decreasing finish time (each finished vertex goes to the front of the list), with
+   * the tree edges as the white spine and cross edges arcing below. Otherwise null.
+   */
+  topologicalSort(): ArcDiagram | null {
+    if (!this.finished || this.hasCycle || !this.view.directed) return null;
+    const pairs = (kind: EdgeClass) =>
+      this.edges.filter((e) => e.kind === kind).map((e): [NodeId, NodeId] => [e.from, e.to]);
+    return {
+      order: [...this.finish.keys()].sort((a, b) => this.finish.get(b)! - this.finish.get(a)!),
+      spine: pairs('tree'),
+      below: pairs('cross'),
+    };
+  }
+
   stackSnapshot(): StackSnapshot {
     const action = this.nextAction();
     let incoming: NodeId[] = [];
@@ -193,7 +218,10 @@ export class DfsSimulation implements Simulation {
       return (
         `DFS finished at time ${this.time}: ${n} ${n === 1 ? 'vertex' : 'vertices'} in ` +
         `${trees} ${trees === 1 ? 'tree' : 'trees'}; ${count('tree')} tree, ${count('back')} backward, ` +
-        `${count('forward')} forward, ${count('cross')} crossed edges. Press Finish.`
+        `${count('forward')} forward, ${count('cross')} crossed edges. ` +
+        (this.hasCycle
+          ? 'A backward edge means a cycle, so there is no topological order. Press Finish.'
+          : 'No backward edge, so the graph is acyclic: press Topological sort, or Finish.')
       );
     }
     switch (last.type) {

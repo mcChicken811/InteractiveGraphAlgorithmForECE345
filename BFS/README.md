@@ -47,8 +47,9 @@ Pass Playwright options after `--`, e.g. `npm run test:e2e -- --grep "edge"`.
 
 - `unit_tests/status-bar.test.ts`: when the status bar hides and reappears (fake timers).
 - `unit_tests/queue-view.test.ts`: the queue and stack strips' contents, order, arrows, labels, reuse of elements, empty state.
-- `unit_tests/dfs.test.ts`: the DFS simulation against CLRS: discovery and finish times, edge classes, every step's message, stack snapshots, the outer loop over all vertices, and (on random graphs) the parenthesis theorem and each class's time rules.
+- `unit_tests/dfs.test.ts`: the DFS simulation against CLRS: discovery and finish times, edge classes, every step's message, stack snapshots, the outer loop over all vertices, and (on random graphs) the parenthesis theorem and each class's time rules. Also the topological sort: decreasing finish times, and (checked against Kahn's algorithm on random graphs) offered exactly when the graph is acyclic, with every edge pointing forward.
 - `unit_tests/label-fit.test.ts`: label font shrinking.
+- `unit_tests/arc-diagram.test.ts`: the topological sort's row layout (centring, wrapping, room for arcs) and half-circle geometry.
 - `unit_tests/select-menu.test.ts`: the picker's mouse and keyboard behaviour, disabling, and outside clicks.
 - `unit_tests/bfs.test.ts`: the BFS simulation (order, steps, highlights, messages, unreachable vertices, directed vs. undirected).
 - `unit_tests/graph.test.ts`: the `Graph` model (ids, edges, neighbors, removal).
@@ -162,6 +163,19 @@ A graph with *n* vertices, *m* edges and *t* trees takes *n* + *m* + *t* Updates
 - **Animation:** a finished vertex turns green and slides out of the top.
 - **Labels:** the circles show the times, and hovering or focusing the strip shows the ids, on the canvas too.
 
+### Topological sort
+
+When DFS has finished, a **Topological sort** button appears next to **Finish**. CLRS's TOPOLOGICAL-SORT (§20.4) is DFS followed by listing the vertices by **decreasing finish time**. A directed graph has a topological order exactly when DFS finds no back edge (Lemma 20.11), so the button is greyed out when a backward edge was found, and its tooltip and the final message say why.
+
+- **Line-up:** pressing it glides the vertices into a line, left to right in that order and centred. If they don't fit across the canvas, about 88 px apart at the closest, the line continues on the next row down, like text. The line stays clear of the canvas toolbar and the status bar.
+- **Edges:** every edge now points left to right.
+  - **Tree edges** are highlighted white. Between neighbouring vertices they lie straight on the centre line. A tree edge that skips over other vertices would run behind them, so it arcs above instead (still white).
+  - **Other edges** are half circles whose diameter runs from one vertex to the other: forward edges above the line, crossed edges below. Two such arcs only overlap if they join the same two vertices, which can't happen. Arcs are flattened into half ellipses where a full half circle would leave the canvas or reach the next row.
+  - **Transitions:** edges bend smoothly from straight lines into arcs while the vertices glide into place.
+- **Auto-layout:** it is switched off, since it would move the vertices. Switching it back on leaves the line-up (the edges straighten out), but the run goes on, and pressing **Topological sort** again comes back.
+- **Ending:** the run is not over until **Finish** or **Stop**. Ending it straightens the edges and leaves the vertices where they are.
+- **Reduced motion:** with "reduce motion", everything jumps straight into place.
+
 ### Adding another algorithm
 
 1. Implement `Simulation` (in `src/algorithms/types.ts`). An algorithm with a queue can also implement `queueSnapshot()`, returning `{ items, incoming }`, to get the animated Queue card. One with a recursion stack can implement `stackSnapshot()`, returning `{ items, incoming, popping }` (top first), to get the Recursion stack card. It works on a read-only `GraphView`, takes one step per `step()`, and reports `highlight()` (current vertex, finished vertices, active edges) and `describe()` (the status message).
@@ -169,6 +183,7 @@ A graph with *n* vertices, *m* edges and *t* trees takes *n* + *m* + *t* Updates
    - `labels` (vertex → text) to draw inside the vertices instead of their ids, as BFS does with distances and DFS with times; Dijkstra could do the same with tentative distances.
    - `running` (vertices drawn yellow).
    - `exploredEdges` (`{ from, to, label? }`). When present, every other edge is drawn dashed, as DFS does.
+   - Once finished, a simulation can also offer `topologicalSort()`, returning an `ArcDiagram` (`order`, `spine`, `below`) or null. The Topological sort button then appears next to Finish.
 3. Add it to `ALGORITHMS` in `src/algorithms/index.ts`. The picker, the locks and the drawing then work without further changes.
 
 ## Directed and undirected mode
@@ -297,6 +312,7 @@ Freivalds, Dogrusoz & Kikusts study this approach in *Disconnected Graph Layout 
 - `src/algorithms/` — step-by-step algorithm simulations: `types.ts` (the `Simulation` / `AlgorithmDefinition` interfaces), `bfs.ts` (`BfsSimulation`, which also exposes `order`, `parent` and `distance`), `dfs.ts` (`DfsSimulation`, which also exposes `discovery`, `finish`, `parent`, `edges` with their classes, and `trees`), `index.ts` (the `ALGORITHMS` registry).
 - `src/select-menu.ts` — `SelectMenu`: the styled program picker. It replaces a native `<select>`, whose open list the browser draws and which can't be styled or positioned (on macOS it pops up over the box). It follows the WAI-ARIA "select-only combobox" pattern: mouse, ↑/↓/Home/End/Enter/Space/Esc/Tab, and closes on an outside click. The list drops down below the box, in the page's panel style, with the option text in line with the box's text.
 - `src/queue-view.ts` — `QueueView`: the side panel's animated queue strip (BFS), or with `kind: 'stack'` the recursion stack strip (DFS). Elements are reused by vertex id, and changes are animated with the FLIP technique (record positions, update, play from the old positions).
+- `src/arc-diagram.ts` — `rowLayout` (vertices in a centred line that wraps into rows) and `halfEllipse` (an edge as a half circle over its two ends, trimmed to the node rims), for the topological sort; pure, no DOM.
 - `src/label-fit.ts` — `fitFontSize`: shrinks a label's font so long labels (DFS's `d,f`) fit inside a vertex circle.
 - `src/status-bar.ts` — `StatusBar`: every status message goes through `show(text, tone)`.
   - **Hiding:** 5 s after the last message, with the pointer neither on the bar nor near it, the bar slides slowly down out of view.

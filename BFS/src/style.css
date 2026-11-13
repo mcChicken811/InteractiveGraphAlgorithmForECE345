@@ -96,9 +96,11 @@ button {
   cursor: pointer;
 }
 
-/* Algorithm simulation controls (header, right). */
+/* Algorithm simulation controls (header, right). On narrow screens the buttons wrap
+   under the picker rather than squeezing their labels. */
 .run-controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
@@ -107,6 +109,7 @@ button {
 .topbar button {
   height: var(--control-height);
   padding-block: 0;
+  white-space: nowrap;
 }
 
 /* Program picker (src/select-menu.ts): a box styled like the page's buttons, with a
@@ -1031,8 +1034,9 @@ button:disabled {
   filter: drop-shadow(0 0 2px var(--sim-outline));
 }
 
-/* The edges explored from the current vertex: white. */
-.edge.sim-active .edge-line {
+/* The edges explored from the current vertex, and the topological sort's tree edges: white. */
+.edge.sim-active .edge-line,
+.edge.sim-spine .edge-line {
   stroke: var(--sim-current);
   stroke-width: 4;
   stroke-dasharray: none;
@@ -1043,7 +1047,8 @@ button:disabled {
   fill: var(--sim-current);
 }
 
-#canvas.directed .edge.sim-active .edge-line {
+#canvas.directed .edge.sim-active .edge-line,
+#canvas.directed .edge.sim-spine .edge-line {
   marker-end: url(#arrow-active);
 }
 
@@ -1084,16 +1089,17 @@ button:disabled {
   cursor: default;
 }
 
-#canvas.locked .edge:not(.sim-active):hover .edge-line {
+#canvas.locked .edge:not(.sim-active, .sim-spine):hover .edge-line {
   stroke: var(--edge);
   stroke-dasharray: none;
 }
 
-#canvas.locked .edge.sim-active:hover .edge-line {
+#canvas.locked .edge.sim-active:hover .edge-line,
+#canvas.locked .edge.sim-spine:hover .edge-line {
   stroke: var(--sim-current);
 }
 
-#canvas.directed.locked .edge:not(.sim-active):hover .edge-line {
+#canvas.directed.locked .edge:not(.sim-active, .sim-spine):hover .edge-line {
   marker-end: url(#arrow);
 }
 
@@ -1101,7 +1107,8 @@ button:disabled {
   stroke-dasharray: 7 6;
 }
 
-#canvas.directed.locked .edge.sim-active:hover .edge-line {
+#canvas.directed.locked .edge.sim-active:hover .edge-line,
+#canvas.directed.locked .edge.sim-spine:hover .edge-line {
   marker-end: url(#arrow-active);
 }
 

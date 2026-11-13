@@ -1,5 +1,6 @@
 import { ForceLayout } from './layout.js';
 import { fitFontSize } from './label-fit.js';
+import { halfEllipse, rowLayout } from './arc-diagram.js';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 export const NODE_RADIUS = 20;
 /** Pointer travel (px) before a press on a node becomes a drag instead of a click. */
@@ -15,6 +16,9 @@ const LINE_HEIGHT_PX = 16;
 /** An algorithm's label inside a node: base font size and the width it may use. */
 const SIM_LABEL_FONT = 14;
 const SIM_LABEL_WIDTH = NODE_RADIUS * 2 - 8;
+/** Arc diagram: how long vertices take to glide into line, and edges to bend into / out of arcs. */
+const ARRANGE_MS = 750;
+const BEND_MS = 450;
 /**
  * Interactive SVG editor:
  *  - click empty space → add node
@@ -27,6 +31,8 @@ const SIM_LABEL_WIDTH = NODE_RADIUS * 2 - 8;
  *    mode draws one plain line per connected pair
  *  - weighted / unweighted view: weighted mode labels every edge with its weight, and
  *    scrolling over an edge changes the weight (WEIGHT_PER_PAGE per page; up = more)
+ *  - arc diagram (DFS's topological sort): vertices glide into a left-to-right line and
+ *    edges bend into half circles (see showArcDiagram)
  */
 export class GraphEditor {
     svg;
@@ -45,6 +51,13 @@ export class GraphEditor {
     layout = new ForceLayout({ padding: NODE_RADIUS + 2 });
     autoLayout = false;
     frame = null;
+    /** Arc diagram state, and the tweens that move vertices into line and bend the edges. */
+    arc = null;
+    /** 0 = edges straight, 1 = full arcs. */
+    bend = 0;
+    bendTween = null;
+    moveTween = null;
+    tweenFrame = null;
     edgeLayer;
     previewLine;
     nodeLayer;
@@ -154,7 +167,10 @@ export class GraphEditor {
         if (enabled === this.autoLayout)
             return;
         this.autoLayout = enabled;
+        this.callbacks.onAutoLayoutChange?.(enabled);
         if (enabled) {
+            // The layout takes over the positions: leave the arc diagram.
+            this.leaveArcDiagram();
             this.kickLayout();
             this.message('Auto-layout on: drag a node to nudge the layout.');
         }
@@ -166,6 +182,117 @@ export class GraphEditor {
             this.message('Auto-layout off: nodes stay where you put them.');
         }
     }
+    // ----------------------------------------------------------- arc diagram
+    /** Whether the arc diagram (DFS's topological sort) is shown. */
+    get arcDiagramActive() {
+        return this.arc !== null && !this.arc.leaving;
+    }
+    /**
+     * Shows `diagram`: the vertices glide into `order`, left to right and centred (wrapping
+     * into rows, top to bottom, when they don't fit), and the edges bend into half circles
+     * whose diameter runs between their ends — above the line, or below for `diagram.below`.
+     * `spine` edges are highlighted white, and lie straight on the centre line where they join
+     * neighbouring vertices. Auto-layout is turned off, since it would move the vertices.
+     *
+     * null leaves the diagram: edges straighten out again, and the vertices stay where they
+     * are. Turning auto-layout back on does the same.
+     */
+    showArcDiagram(diagram) {
+        if (!diagram) {
+            this.leaveArcDiagram();
+            return;
+        }
+        this.setAutoLayout(false);
+        const directed = this.graph.directed;
+        const keys = (pairs) => new Set(pairs.map(([a, b]) => this.edgeKey(a, b, directed)));
+        this.arc = {
+            diagram,
+            rank: new Map(diagram.order.map((id, i) => [id, i])),
+            spine: keys(diagram.spine),
+            below: keys(diagram.below),
+            maxBulge: 0,
+            leaving: false,
+        };
+        this.svg.classList.add('arc-diagram');
+        this.placeArcDiagram(true);
+        this.tweenBend(1);
+    }
+    leaveArcDiagram() {
+        if (!this.arc || this.arc.leaving)
+            return;
+        this.arc.leaving = true;
+        this.moveTween = null; // vertices stay where they are now
+        this.svg.classList.remove('arc-diagram');
+        this.render(); // the white spine goes at once; the arcs straighten out over the tween
+        this.tweenBend(0);
+    }
+    /** Moves the vertices to their places in the diagram (gliding there if `animate`). */
+    placeArcDiagram(animate) {
+        const arc = this.arc;
+        const rect = this.svg.getBoundingClientRect();
+        const order = arc.diagram.order.filter((id) => this.graph.getNode(id));
+        const insets = this.callbacks.canvasInsets?.();
+        const { positions, maxBulge } = rowLayout(order.length, { width: rect.width, height: rect.height }, insets ? { padTop: insets.top, padBottom: insets.bottom } : {});
+        arc.maxBulge = maxBulge;
+        const to = new Map(order.map((id, i) => [id, positions[i]]));
+        if (animate && !prefersReducedMotion()) {
+            const from = new Map(order.map((id) => [id, { ...this.graph.getNode(id) }]));
+            this.moveTween = { from, to, start: performance.now(), duration: ARRANGE_MS };
+            this.startTweens();
+        }
+        else {
+            this.moveTween = null;
+            for (const [id, p] of to)
+                this.graph.moveNode(id, p.x, p.y);
+            this.render();
+        }
+    }
+    tweenBend(target) {
+        if (prefersReducedMotion()) {
+            this.bendTween = null;
+            this.bend = target;
+            if (target === 0 && this.arc?.leaving)
+                this.arc = null;
+            this.render();
+            return;
+        }
+        // Entering waits for the vertices to arrive, so the arcs grow as they settle.
+        this.bendTween = { from: this.bend, to: target, start: performance.now(), duration: target > 0 ? ARRANGE_MS : BEND_MS };
+        this.startTweens();
+    }
+    startTweens() {
+        if (this.tweenFrame === null)
+            this.tweenFrame = requestAnimationFrame(this.tweenTick);
+    }
+    tweenTick = () => {
+        this.tweenFrame = null;
+        const now = performance.now();
+        const progress = (t) => easeInOut(Math.min(1, Math.max(0, (now - t.start) / t.duration)));
+        if (this.moveTween) {
+            const k = progress(this.moveTween);
+            const dragged = this.pending?.kind === 'node' && this.pending.dragging ? this.pending.id : null;
+            for (const [id, to] of this.moveTween.to) {
+                const from = this.moveTween.from.get(id);
+                if (id === dragged || !this.graph.getNode(id))
+                    continue; // a dragged vertex follows the pointer
+                this.graph.moveNode(id, from.x + (to.x - from.x) * k, from.y + (to.y - from.y) * k);
+            }
+            if (k >= 1)
+                this.moveTween = null;
+        }
+        if (this.bendTween) {
+            const k = progress(this.bendTween);
+            this.bend = this.bendTween.from + (this.bendTween.to - this.bendTween.from) * k;
+            if (k >= 1) {
+                this.bendTween = null;
+                if (this.bend === 0 && this.arc?.leaving)
+                    this.arc = null;
+            }
+        }
+        this.render();
+        if (this.moveTween || this.bendTween)
+            this.startTweens();
+    };
     // ---------------------------------------------------------------- events
     onPointerDown = (e) => {
         if (e.button !== 0 || this.pending)
@@ -296,6 +423,8 @@ export class GraphEditor {
     };
     onResize = () => {
         this.kickLayout();
+        if (this.arcDiagramActive)
+            this.placeArcDiagram(false); // keep the line fitted to the canvas
     };
     onPointerLeave = () => {
         if (this.pending)
@@ -413,10 +542,13 @@ export class GraphEditor {
         const explored = this.highlight?.exploredEdges
             ? new Map(this.highlight.exploredEdges.map((e) => [this.edgeKey(e.from, e.to, directed), e.label ?? '']))
             : null;
+        const arc = this.arc;
         for (const [a, b] of this.graph.getEdges()) {
             const curved = directed && this.graph.hasArc(b, a);
-            const shape = curved ? 'path' : 'line';
             const key = this.edgeKey(a, b, directed);
+            // Arc diagram: spine edges between neighbouring vertices stay straight; the rest arc.
+            const arcs = arc !== null && !(arc.spine.has(key) && Math.abs(arc.rank.get(a) - arc.rank.get(b)) === 1);
+            const shape = curved || arcs ? 'path' : 'line';
             liveEdges.add(key);
             let g = this.edgeEls.get(key);
             if (g && g.dataset.shape !== shape) {
@@ -439,8 +571,11 @@ export class GraphEditor {
                 this.edgeLayer.append(g);
                 this.edgeEls.set(key, g);
             }
-            const { attrs, mid } = this.edgeGeometry(this.graph.getNode(a), this.graph.getNode(b), directed, curved);
+            const { attrs, mid } = arcs
+                ? this.arcGeometry(this.graph.getNode(a), this.graph.getNode(b), directed, arc.below.has(key) ? -1 : 1)
+                : this.edgeGeometry(this.graph.getNode(a), this.graph.getNode(b), directed, curved);
             g.classList.toggle('sim-active', this.isActiveEdge(a, b, directed));
+            g.classList.toggle('sim-spine', arc !== null && !arc.leaving && arc.spine.has(key));
             g.classList.toggle('sim-unexplored', explored !== null && !explored.has(key));
             g.classList.toggle('sim-explored', explored?.has(key) ?? false);
             for (const el of g.querySelectorAll('.edge-hit, .edge-line'))
@@ -545,6 +680,17 @@ export class GraphEditor {
         const mid = { x: (a.x + 2 * c.x + b.x) / 4, y: (a.y + 2 * c.y + b.y) / 4 };
         return { attrs: { d: `M ${start.x} ${start.y} Q ${c.x} ${c.y} ${end.x} ${end.y}` }, mid };
     }
+    /**
+     * Arc diagram edge: a half circle from a to b (flattened to fit `maxBulge`), on the
+     * `side` left (+1, above a left-to-right edge) or right (-1) of a → b, scaled by the
+     * current bend (0 = straight).
+     */
+    arcGeometry(a, b, directed, side) {
+        const radius = distance(a, b) / 2;
+        const bulge = side * Math.min(radius, this.arc.maxBulge) * this.bend;
+        const { d, mid } = halfEllipse(a, b, bulge, NODE_RADIUS, directed ? NODE_RADIUS + 1 : NODE_RADIUS);
+        return { attrs: { d }, mid };
+    }
     /** Dashed line from the selected node to the cursor while choosing an edge target. */
     updatePreview() {
         const from = this.selected === null ? undefined : this.graph.getNode(this.selected);
@@ -622,6 +768,9 @@ function arrowDefs() {
         defs.append(marker);
     }
     return defs;
+}
+function easeInOut(t) {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 function prefersReducedMotion() {
     return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;

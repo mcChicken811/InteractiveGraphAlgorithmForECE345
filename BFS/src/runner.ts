@@ -11,6 +11,8 @@ export interface RunnerElements {
   /** "Update" while steps remain, "Finish" after the last one. */
   step: HTMLButtonElement;
   stop: HTMLButtonElement;
+  /** "Topological sort", offered next to Finish when the simulation has one (DFS). */
+  topo?: HTMLButtonElement;
   /** The Unweighted / Weighted switch (locked when an algorithm requires a weighting). */
   weightSwitch: HTMLFieldSetElement;
   /** The Undirected / Directed switch (locked while running: changing it would change the graph). */
@@ -31,6 +33,9 @@ const LOCKED_TITLE = 'Locked while the algorithm runs. Press Stop to change it.'
  *            forces the reading the algorithm requires (BFS: "Unweighted"; DFS:
  *            "Unweighted" and "Directed"), then starts the simulation;
  *   Update → advances one step; after the last step it turns into Finish;
+ *   Topological sort → (DFS, once finished) lines the vertices up in topological order
+ *            as an arc diagram; greyed out when the graph has a cycle. The run goes on
+ *            until Finish or Stop;
  *   Stop / Finish → ends the run, clears the highlighting and releases every lock
  *            (restoring the weighting and direction that were selected before).
  */
@@ -55,6 +60,7 @@ export class AlgorithmRunner {
     el.run.addEventListener('click', () => this.run());
     el.step.addEventListener('click', () => this.step());
     el.stop.addEventListener('click', () => this.stop('Stopped.'));
+    el.topo?.addEventListener('click', () => this.topologicalSort());
     this.updateControls();
   }
 
@@ -104,10 +110,25 @@ export class AlgorithmRunner {
     this.show(true);
   }
 
+  /**
+   * Lines the vertices up in the simulation's topological order (DFS on an acyclic graph),
+   * left to right by decreasing finish time. The run is not over: Finish or Stop ends it.
+   */
+  topologicalSort(): void {
+    const diagram = this.simulation?.topologicalSort?.() ?? null;
+    if (!diagram) return;
+    this.editor.showArcDiagram(diagram);
+    this.hooks.message(
+      `Topological order (decreasing finish time): ${diagram.order.join(', ')}. Every edge points left to right: ` +
+        'tree edges in white, forward edges arc above, crossed edges below. Press Finish or Stop to end.',
+    );
+  }
+
   /** Ends the run and releases every lock. */
   stop(message = 'Stopped.'): void {
     if (!this.simulation) return;
     this.simulation = null;
+    this.editor.showArcDiagram(null); // vertices stay where they are
     this.editor.setHighlight(null);
     this.editor.setLocked(false);
     if (this.savedWeighted !== null) {
@@ -155,6 +176,19 @@ export class AlgorithmRunner {
     this.el.stop.hidden = !running;
     this.el.step.textContent = this.simulation?.finished ? 'Finish' : 'Update';
     this.el.select.disabled = running;
+
+    // Topological sort: next to Finish once the simulation offers one; greyed out (with
+    // the reason) when there is none.
+    const topo = this.el.topo;
+    if (topo) {
+      const simulation = this.simulation;
+      const offered = !!simulation?.finished && typeof simulation.topologicalSort === 'function';
+      const available = offered && simulation!.topologicalSort!() !== null;
+      topo.hidden = !offered;
+      topo.disabled = offered && !available;
+      if (offered && !available) topo.title = 'No topological order: a backward edge means the graph has a cycle.';
+      else topo.removeAttribute('title');
+    }
   }
 
   /** Re-checks Run's availability (e.g. after nodes were added or removed). */

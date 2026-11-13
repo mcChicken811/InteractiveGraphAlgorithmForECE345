@@ -38,6 +38,8 @@
           <ul id="algorithm-list" class="select-list" role="listbox" aria-label="Algorithm" hidden></ul>
         </span>
         <button id="run-btn" class="primary" type="button">Run</button>
+        <!-- DFS, after the last Update: lines the vertices up in topological order (greyed out if there is a cycle). -->
+        <button id="topo-btn" type="button" hidden>Topological sort</button>
         <button id="step-btn" class="primary" type="button" hidden>Update</button>
         <button id="stop-btn" type="button" hidden>Stop</button>
       </div>
@@ -138,6 +140,12 @@
                   (yellow: running, green: finished). Edges stay dashed until explored, then are labelled
                   <em>forward</em>, <em>backward</em> or <em>crossed</em> (tree edges are plain).
                   <strong>Hover the stack</strong> to see the vertex numbers.
+                </li>
+                <li>
+                  When DFS is done and found no backward edge (no cycle), <strong>Topological sort</strong> lines
+                  the vertices up by decreasing finish time. Tree edges run along the line in white; the other
+                  edges arc above (forward) or below (crossed). Auto-layout leaves this view; press the button
+                  again to come back.
                 </li>
                 <li>
                   Messages appear at the bottom and slide away after 5&nbsp;s; move the mouse to the bottom

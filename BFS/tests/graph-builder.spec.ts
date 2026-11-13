@@ -1731,10 +1731,10 @@ test.describe('algorithm simulation (DFS)', () => {
   ];
 
   /** Builds the graph (in directed mode), then leaves the switches as given. */
-  async function build(page: Page, { directed = false, weighted = false } = {}): Promise<void> {
-    for (const p of S) await cv.click(...p);
+  async function build(page: Page, { directed = false, weighted = false, arcs = ARCS, spots = S } = {}): Promise<void> {
+    for (const p of spots) await cv.click(...p);
     await page.locator('label[for="mode-directed"]').click();
-    for (const [a, b] of ARCS) await connect(S[a], S[b]);
+    for (const [a, b] of arcs) await connect(spots[a], spots[b]);
     if (!directed) await page.locator('label[for="mode-undirected"]').click();
     if (weighted) await page.locator('label[for="weights-on"]').click();
     await page.getByRole('combobox', { name: 'Algorithm' }).click();
@@ -1894,7 +1894,8 @@ test.describe('algorithm simulation (DFS)', () => {
     // Edges are drawn in arc order: 0 → 2 (forward) before 2 → 0 (backward).
     await expect(cv.canvas.locator('.edge-tag:visible')).toHaveText(['forward', 'backward', 'crossed']);
     await expect(message(page)).toHaveText(
-      'DFS finished at time 10: 5 vertices in 2 trees; 3 tree, 1 backward, 1 forward, 1 crossed edges. Press Finish.',
+      'DFS finished at time 10: 5 vertices in 2 trees; 3 tree, 1 backward, 1 forward, 1 crossed edges. ' +
+        'A backward edge means a cycle, so there is no topological order. Press Finish.',
     );
   });
 
@@ -1926,6 +1927,213 @@ test.describe('algorithm simulation (DFS)', () => {
     await update(page);
     expect(Object.values(await edgeLook(page)).every((e) => !e.dashed)).toBe(true);
     await expect(radio(page, 'Undirected')).toBeChecked(); // BFS keeps the chosen direction
+  });
+
+  test.describe('topological sort', () => {
+    /** The graph above without its back edge 2 → 0: acyclic. Finishes 0 (1,6) 1 (2,5) 2 (3,4) 3 (7,10) 4 (8,9). */
+    const DAG = ARCS.filter(([a, b]) => !(a === 2 && b === 0));
+    const DAG_STEPS = 2 + 5 + 5; // roots + edges + finishes
+    const topoBtn = (page: Page) => page.getByRole('button', { name: 'Topological sort' });
+    const finishBtn = (page: Page) => page.getByRole('button', { name: 'Finish', exact: true });
+    const centre = (id: number) =>
+      cv.node(id).evaluate((g) => {
+        const r = g.querySelector('circle')!.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      });
+    /** Waits until no vertex is moving any more, then returns their centres. */
+    async function settled(ids: number[]) {
+      let last = '';
+      await expect
+        .poll(async () => {
+          const now = JSON.stringify(await Promise.all(ids.map(centre)));
+          const same = now === last;
+          last = now;
+          return same;
+        })
+        .toBe(true);
+      return Promise.all(ids.map(centre));
+    }
+    const edgeShape = (a: number, b: number) =>
+      cv.edge(a, b).evaluate((g) => {
+        const line = g.querySelector('.edge-line') as SVGGraphicsElement;
+        const box = line.getBBox();
+        return {
+          tag: line.tagName,
+          spine: g.classList.contains('sim-spine'),
+          stroke: getComputedStyle(line).stroke,
+          top: box.y,
+          bottom: box.y + box.height,
+        };
+      });
+
+    async function runToEnd(page: Page, arcs = DAG, n = DAG_STEPS): Promise<void> {
+      await build(page, { arcs });
+      await run(page);
+      await steps(page, n);
+    }
+
+    test('appears next to Finish after the last Update', async ({ page }) => {
+      await build(page, { arcs: DAG });
+      await run(page);
+      await steps(page, DAG_STEPS - 1);
+      await expect(topoBtn(page)).toBeHidden();
+      await update(page); // the last step
+      await expect(finishBtn(page)).toBeVisible();
+      await expect(topoBtn(page)).toBeVisible();
+      await expect(topoBtn(page)).toBeEnabled();
+      const [t, f] = await Promise.all([topoBtn(page).boundingBox(), finishBtn(page).boundingBox()]);
+      expect(t!.x + t!.width).toBeLessThanOrEqual(f!.x); // right before Finish…
+      expect(Math.abs(t!.y - f!.y)).toBeLessThan(1); // …on the same line
+      await expect(message(page)).toContainText('No backward edge, so the graph is acyclic: press Topological sort, or Finish.');
+    });
+
+    test('is greyed out when DFS found a backward edge (a cycle)', async ({ page }) => {
+      await runToEnd(page, ARCS, 13);
+      await expect(topoBtn(page)).toBeVisible();
+      await expect(topoBtn(page)).toBeDisabled();
+      await expect(topoBtn(page)).toHaveAttribute('title', /cycle/);
+      expect(Number(await topoBtn(page).evaluate((el) => getComputedStyle(el).opacity))).toBeLessThan(0.7);
+    });
+
+    test('glides the vertices into a line by decreasing finish time and turns auto-layout off', async ({ page }) => {
+      await build(page, { arcs: DAG });
+      await page.getByRole('button', { name: /Auto-layout/ }).click(); // on (after building, so the clicks hit)
+      await run(page);
+      await steps(page, DAG_STEPS);
+      const before = await settled([0, 1, 2, 3, 4]);
+      await topoBtn(page).click();
+      await expect(page.getByRole('button', { name: /Auto-layout/ })).toHaveAttribute('aria-pressed', 'false');
+      await expect(cv.canvas).toHaveClass(/arc-diagram/);
+      await page.waitForTimeout(200);
+      const during = await Promise.all([0, 1, 2, 3, 4].map(centre));
+      const after = await settled([3, 4, 0, 1, 2]); // the order
+      // Smooth: part-way there after 200 ms, not jumped.
+      const moved = (i: number) => Math.hypot(during[i].x - before[i].x, during[i].y - before[i].y);
+      const total = (i: number) => {
+        const order = [3, 4, 0, 1, 2];
+        const end = after[order.indexOf(i)];
+        return Math.hypot(end.x - before[i].x, end.y - before[i].y);
+      };
+      const far = [0, 1, 2, 3, 4].sort((a, b) => total(b) - total(a))[0];
+      expect(moved(far)).toBeGreaterThan(1);
+      expect(moved(far)).toBeLessThan(total(far) - 1);
+      // Left to right, on one line.
+      for (let i = 1; i < after.length; i++) {
+        expect(after[i].x).toBeGreaterThan(after[i - 1].x + 40);
+        expect(after[i].y).toBeCloseTo(after[0].y, 0);
+      }
+      await expect(message(page)).toHaveText(
+        'Topological order (decreasing finish time): 3, 4, 0, 1, 2. Every edge points left to right: ' +
+          'tree edges in white, forward edges arc above, crossed edges below. Press Finish or Stop to end.',
+      );
+    });
+
+    test('tree edges lie white on the line; the others are half circles, forward above and crossed below', async ({ page }) => {
+      await runToEnd(page);
+      await topoBtn(page).click();
+      const [, , c0, c1, c2] = await settled([3, 4, 0, 1, 2]);
+      const rowY = (await centre(0)).y - (await cv.canvas.boundingBox())!.y;
+      for (const [a, b] of [
+        [3, 4],
+        [0, 1],
+        [1, 2],
+      ]) {
+        const e = await edgeShape(a, b);
+        expect(e).toMatchObject({ tag: 'line', spine: true, stroke: WHITE });
+        expect(e.top).toBeCloseTo(rowY, 0);
+        expect(e.bottom).toBeCloseTo(rowY, 0);
+      }
+      // 0 → 2 skips over 1: a half circle above, its height half the distance between them.
+      const forward = await edgeShape(0, 2);
+      expect(forward).toMatchObject({ tag: 'path', spine: false });
+      expect(forward.stroke).not.toBe(WHITE);
+      expect(forward.bottom).toBeLessThanOrEqual(rowY + 1);
+      expect(rowY - forward.top).toBeCloseTo((c2.x - c0.x) / 2, -1);
+      await expect(cv.edge(0, 2).locator('.edge-tag')).toHaveText('forward');
+      // 3 → 1 (crossed) arcs below.
+      const crossed = await edgeShape(3, 1);
+      expect(crossed.tag).toBe('path');
+      expect(crossed.top).toBeGreaterThanOrEqual(rowY - 1);
+      expect(crossed.bottom).toBeGreaterThan(rowY + 50);
+      expect(c1.x).toBeGreaterThan(c0.x);
+    });
+
+    test('the run goes on: Finish (or Stop) ends it, edges straighten and the vertices stay', async ({ page }) => {
+      await runToEnd(page);
+      await topoBtn(page).click();
+      const placed = await settled([0, 1, 2, 3, 4]);
+      await expect(finishBtn(page)).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeHidden();
+      await finishBtn(page).click();
+      await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeVisible();
+      await expect(topoBtn(page)).toBeHidden();
+      await expect(cv.canvas).not.toHaveClass(/arc-diagram/);
+      await expect.poll(() => cv.canvas.locator('.edge path.edge-line').count()).toBe(0);
+      await expect(cv.canvas.locator('.sim-spine')).toHaveCount(0);
+      expect(await Promise.all([0, 1, 2, 3, 4].map(centre))).toEqual(placed);
+    });
+
+    test('turning auto-layout on leaves the line; Topological sort brings it back', async ({ page }) => {
+      await runToEnd(page);
+      await topoBtn(page).click();
+      await settled([0, 1, 2, 3, 4]);
+      await page.getByRole('button', { name: /Auto-layout/ }).click();
+      await expect(cv.canvas).not.toHaveClass(/arc-diagram/);
+      await expect(cv.canvas.locator('.sim-spine')).toHaveCount(0);
+      await expect(message(page)).toHaveText(
+        'Auto-layout on: left the topological order. Press Topological sort to line the vertices up again.',
+      );
+      await expect.poll(() => cv.canvas.locator('.edge path.edge-line').count()).toBe(0); // straight again
+      await expect(finishBtn(page)).toBeVisible(); // still running
+      await expect(topoBtn(page)).toBeEnabled();
+
+      await topoBtn(page).click();
+      await expect(cv.canvas).toHaveClass(/arc-diagram/);
+      await expect(page.getByRole('button', { name: /Auto-layout/ })).toHaveAttribute('aria-pressed', 'false');
+      const again = await settled([3, 4, 0, 1, 2]);
+      for (let i = 1; i < again.length; i++) expect(again[i].x).toBeGreaterThan(again[i - 1].x);
+    });
+
+    test.describe('with reduced motion', () => {
+      test.use({ reducedMotion: 'reduce' });
+
+      test('jumps straight into the line', async ({ page }) => {
+        await runToEnd(page);
+        await topoBtn(page).click();
+        const now = await Promise.all([3, 4, 0, 1, 2].map(centre));
+        for (let i = 1; i < now.length; i++) expect(now[i].x).toBeGreaterThan(now[i - 1].x);
+        await expect(cv.edge(0, 2).locator('path.edge-line')).toHaveCount(1);
+      });
+    });
+
+    test.describe('on a phone-sized screen', () => {
+      test.use({ viewport: { width: 390, height: 800 } });
+
+      test('a line that does not fit wraps into rows, left to right then top to bottom', async ({ page }) => {
+        // A chain 0 → 1 → … → 7: DFS from 0 finishes them in reverse, so the order is 0 … 7.
+        const spots: Array<[number, number]> = [];
+        for (let i = 0; i < 8; i++) spots.push([60 + (i % 4) * 90, 260 + Math.floor(i / 4) * 170]);
+        const chain = Array.from({ length: 7 }, (_, i): [number, number] => [i, i + 1]);
+        await build(page, { arcs: chain, spots });
+        await run(page);
+        await steps(page, 1 + 7 + 8);
+        await topoBtn(page).click();
+        const pos = await settled([0, 1, 2, 3, 4, 5, 6, 7]);
+        const rows = [...new Set(pos.map((p) => Math.round(p.y)))];
+        expect(rows.length).toBeGreaterThan(1);
+        for (let i = 1; i < pos.length; i++) {
+          const sameRow = Math.abs(pos[i].y - pos[i - 1].y) < 1;
+          if (sameRow) expect(pos[i].x).toBeGreaterThan(pos[i - 1].x);
+          else expect(pos[i].y).toBeGreaterThan(pos[i - 1].y); // continues on the next row down
+        }
+        // Clear of the canvas toolbar, and nothing scrolls sideways (the header wraps instead).
+        const toolbarBottom = (await page.locator('.canvas-toolbar').boundingBox())!;
+        expect(Math.min(...pos.map((p) => p.y)) - 20).toBeGreaterThan(toolbarBottom.y + toolbarBottom.height);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+        await expect(finishBtn(page)).toBeInViewport();
+      });
+    });
   });
 
   test.describe('recursion stack card', () => {

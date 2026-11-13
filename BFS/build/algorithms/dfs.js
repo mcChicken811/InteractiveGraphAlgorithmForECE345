@@ -97,6 +97,25 @@ export class DfsSimulation {
             exploredEdges: this.edges.map(({ from, to, kind }) => ({ from, to, label: EDGE_CLASS_LABELS[kind] })),
         };
     }
+    /** Whether a back edge has been found (in a directed graph: it has a cycle). */
+    get hasCycle() {
+        return this.edges.some((e) => e.kind === 'back');
+    }
+    /**
+     * CLRS TOPOLOGICAL-SORT: once DFS is finished and found no back edge, the vertices by
+     * decreasing finish time (each finished vertex goes to the front of the list), with
+     * the tree edges as the white spine and cross edges arcing below. Otherwise null.
+     */
+    topologicalSort() {
+        if (!this.finished || this.hasCycle || !this.view.directed)
+            return null;
+        const pairs = (kind) => this.edges.filter((e) => e.kind === kind).map((e) => [e.from, e.to]);
+        return {
+            order: [...this.finish.keys()].sort((a, b) => this.finish.get(b) - this.finish.get(a)),
+            spine: pairs('tree'),
+            below: pairs('cross'),
+        };
+    }
     stackSnapshot() {
         const action = this.nextAction();
         let incoming = [];
@@ -117,7 +136,10 @@ export class DfsSimulation {
             const trees = this.trees.length;
             return (`DFS finished at time ${this.time}: ${n} ${n === 1 ? 'vertex' : 'vertices'} in ` +
                 `${trees} ${trees === 1 ? 'tree' : 'trees'}; ${count('tree')} tree, ${count('back')} backward, ` +
-                `${count('forward')} forward, ${count('cross')} crossed edges. Press Finish.`);
+                `${count('forward')} forward, ${count('cross')} crossed edges. ` +
+                (this.hasCycle
+                    ? 'A backward edge means a cycle, so there is no topological order. Press Finish.'
+                    : 'No backward edge, so the graph is acyclic: press Topological sort, or Finish.'));
         }
         switch (last.type) {
             case 'root': {

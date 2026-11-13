@@ -62,6 +62,22 @@ export interface StackSnapshot {
   popping: boolean;
 }
 
+/**
+ * A left-to-right arrangement of the vertices with its edges drawn as an arc diagram
+ * (DFS's topological sort). Edges are expected to run left to right.
+ */
+export interface ArcDiagram {
+  /** The vertices, left to right (wrapping into rows when they don't fit). */
+  order: NodeId[];
+  /**
+   * Edges highlighted white (DFS: tree edges). Between neighbouring vertices they lie
+   * on the centre line; longer ones arc like the others.
+   */
+  spine: Array<[NodeId, NodeId]>;
+  /** Edges that arc below the line (DFS: cross edges); all other edges arc above. */
+  below: Array<[NodeId, NodeId]>;
+}
+
 export interface Simulation {
   /** True once the last step has been taken; `step()` then does nothing. */
   readonly finished: boolean;
@@ -75,6 +91,12 @@ export interface Simulation {
   queueSnapshot?(): QueueSnapshot;
   /** The algorithm's recursion stack, if it has one; shown in the side panel while running. */
   stackSnapshot?(): StackSnapshot;
+  /**
+   * Offered once finished (DFS): the vertices in topological order, as an arc diagram,
+   * or null when there is none (the graph has a cycle). Algorithms without a
+   * topological sort leave it out, and the button stays hidden.
+   */
+  topologicalSort?(): ArcDiagram | null;
 }
 
 /** An entry in the algorithm picker. */
