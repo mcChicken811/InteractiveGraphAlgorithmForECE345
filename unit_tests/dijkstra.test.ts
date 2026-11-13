@@ -135,6 +135,56 @@ describe('DijkstraSimulation on CLRS Figure 22.6', () => {
   });
 });
 
+describe('search tree (for "Show as tree")', () => {
+  /** Each placed vertex's [column, row], and the vertices aside. */
+  const layout = (sim: DijkstraSimulation) => {
+    const tree = sim.searchTree();
+    return { at: Object.fromEntries(tree.places.map((p) => [p.id, [p.column, p.row]])), aside: tree.aside };
+  };
+
+  it('starts as the source alone, the rest (d = ∞) aside', () => {
+    const sim = new DijkstraSimulation(positive(g), s);
+    expect(sim.searchTree()).toMatchObject({ places: [{ id: s, column: 0, row: 0 }], spine: [], aside: [t, x, y, z], highlightSpine: false });
+    expect(sim.searchTree().intro).toContain('Shortest-paths tree so far');
+  });
+
+  it('is the predecessor tree G_π, and rearranges when a relaxation gives a vertex a new predecessor', () => {
+    const sim = new DijkstraSimulation(positive(g), s);
+    sim.step(); // s: t.π = s, y.π = s
+    expect(layout(sim)).toEqual({ at: { [s]: [1, 0], [t]: [0, 1], [y]: [2, 1] }, aside: [x, z] });
+    sim.step(); // y: t moves under y (10 → 8); x and z join under y
+    expect(layout(sim)).toEqual({ at: { [s]: [2, 0], [y]: [2, 1], [t]: [0, 2], [x]: [2, 2], [z]: [4, 2] }, aside: [] });
+    expect(new Set(sim.searchTree().spine.map(([a, b]) => `${a}>${b}`))).toEqual(new Set(['3>1', '3>2', '0>3', '3>4']));
+    sim.step(); // z: x moves under z (14 → 13)
+    sim.step(); // t: x moves under t (13 → 9)
+    sim.step(); // x
+    // The book's tree: s → y → {t → x, z}.
+    expect(layout(sim).at).toEqual({ [s]: [1, 0], [y]: [1, 1], [t]: [0, 2], [x]: [0, 3], [z]: [2, 2] });
+  });
+
+  it('on random graphs: one row below its predecessor, rows never share a column, and every vertex placed or aside', () => {
+    let seed = 3;
+    const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let trial = 0; trial < 30; trial++) {
+      const r = new Graph();
+      for (let i = 0; i < 9; i++) r.addNode(0, 0);
+      r.directed = true;
+      for (let a = 0; a < 9; a++) for (let b = 0; b < 9; b++) if (a !== b && rand() < 0.2) r.addEdge(a, b, Math.floor(rand() * 20));
+      const sim = new DijkstraSimulation(positive(r), 0);
+      do {
+        const tree = sim.searchTree();
+        const at = new Map(tree.places.map((p) => [p.id, p]));
+        for (const [u, v] of tree.spine) expect(at.get(v)!.row).toBe(at.get(u)!.row + 1);
+        const rows = new Map<number, number[]>();
+        for (const p of tree.places) rows.set(p.row, [...(rows.get(p.row) ?? []), p.column]);
+        for (const cols of rows.values()) expect(new Set(cols).size).toBe(cols.length);
+        expect(tree.places.length + tree.aside!.length).toBe(9);
+        for (const p of tree.places) expect(Number.isFinite(sim.distance.get(p.id)!)).toBe(true);
+      } while (sim.step());
+    }
+  });
+});
+
 describe('DijkstraSimulation on other graphs', () => {
   it('reads every weight as its magnitude (the positive view)', () => {
     g.directed = true;

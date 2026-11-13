@@ -1,6 +1,7 @@
 import type { NodeId } from '../graph.js';
 import type { GraphView } from '../graph-views.js';
 import type { AlgorithmDefinition, ForestDiagram, Highlight, QueueSnapshot, Simulation } from './types.js';
+import { tidyTree } from './tidy-tree.js';
 
 /**
  * Breadth-first search from a single source, one queue pop per step.
@@ -113,32 +114,17 @@ export class BfsSimulation implements Simulation {
    * is the next step's), but are straight; every other edge curves.
    */
   searchTree(): ForestDiagram {
-    const children = new Map<NodeId, NodeId[]>();
-    for (const [v, u] of this.parent) {
-      if (u === null) continue;
-      children.set(u, [...(children.get(u) ?? []), v]);
-    }
-    const places: ForestDiagram['places'] = [];
-    let slot = 0;
-    const place = (v: NodeId): number => {
-      const kids = children.get(v) ?? [];
-      let column: number;
-      if (kids.length === 0) column = 2 * slot++;
-      else {
-        const cols = kids.map(place);
-        column = (cols[0] + cols[cols.length - 1]) / 2;
-      }
-      places.push({ id: v, column, row: this.distance.get(v)! });
-      return column;
-    };
-    place(this.source);
     return {
-      places,
+      // A vertex's depth in G_π is its distance from the source.
+      places: tidyTree(this.source, this.parent),
       spine: [...this.parent]
         .filter((entry): entry is [NodeId, NodeId] => entry[1] !== null)
         .map(([v, u]): [NodeId, NodeId] => [u, v]),
       aside: this.view.nodeIds().filter((id) => !this.discovered.has(id)),
       highlightSpine: false,
+      intro:
+        'Breadth-first tree so far: each row is a distance from the start, which is on top; each vertex hangs ' +
+        'from the vertex it was discovered from.',
     };
   }
 

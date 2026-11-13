@@ -4003,6 +4003,61 @@ test.describe("algorithm simulation (Dijkstra's shortest paths)", () => {
     expect(await whiteEdges(page)).toEqual([]);
   });
 
+  test('Show as tree: the predecessor tree from the start, rearranging itself as relaxations change v.π', async ({ page }) => {
+    const treeBtn = page.getByRole('button', { name: 'Show as tree' });
+    const centre = (id: number) =>
+      cv.node(id).evaluate((g) => {
+        const r = g.querySelector('circle')!.getBoundingClientRect();
+        return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+      });
+    /** Waits until no vertex moves, then returns every centre. */
+    async function settled() {
+      let last = '';
+      await expect
+        .poll(async () => {
+          const now = JSON.stringify(await Promise.all([0, 1, 2, 3, 4].map(centre)));
+          const same = now === last;
+          last = now;
+          return same;
+        })
+        .toBe(true);
+      return Promise.all([0, 1, 2, 3, 4].map(centre));
+    }
+    await build(page);
+    await expect(treeBtn).toBeHidden();
+    await page.getByRole('button', { name: /Auto-layout/ }).click(); // on
+    await run(page);
+    await expect(treeBtn).toBeVisible();
+    await treeBtn.click();
+    await expect(treeBtn).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('button', { name: /Auto-layout/ })).toHaveAttribute('aria-pressed', 'false');
+    await expect(message(page)).toHaveText(
+      'Shortest-paths tree so far: the start is on top, and each vertex hangs from its predecessor v.π, one row below it; ' +
+        'each Update may move vertices under a new predecessor. The 4 not reached yet wait on the right; each Update brings the new ones into the tree.',
+    );
+    let c = await settled();
+    for (const id of [1, 2, 3, 4]) expect(c[id].x).toBeGreaterThan(c[0].x); // waiting on the right
+
+    await update(page); // 0: 1.π = 0, 2.π = 0 — both one row below 0
+    c = await settled();
+    expect(c[1].y).toBeGreaterThan(c[0].y + 20);
+    expect(c[2].y).toBe(c[1].y);
+    await expect(cv.canvas.locator('.edge.sim-spine')).toHaveCount(0); // not white while running
+
+    await update(page); // 1: 2 moves under 1 (d 8 → 6), and 3 joins under 1
+    c = await settled();
+    expect(c[2].y).toBeGreaterThan(c[1].y + 20);
+    expect(c[3].y).toBe(c[2].y);
+    expect(c[1].y).toBeGreaterThan(c[0].y + 20);
+
+    for (let i = 0; i < 3; i++) await update(page);
+    c = await settled();
+    expect(c[4].y).toBeGreaterThan(c[3].y + 20); // 4 under 3: 0 → 1 → 3 → 4
+    await treeBtn.click(); // leaves it: vertices stay
+    await expect(treeBtn).toHaveAttribute('aria-pressed', 'false');
+    expect(await settled()).toEqual(c);
+  });
+
   test('hovering the priority queue shows the vertex ids, on the canvas and in the strip', async ({ page }) => {
     await build(page);
     await run(page);

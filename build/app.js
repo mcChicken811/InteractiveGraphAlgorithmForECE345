@@ -2818,6 +2818,40 @@
 			onChange?.();
 		});
 	}
+	// src/algorithms/tidy-tree.ts
+	/**
+	* Places a tree, given by each vertex's parent (the root's is null), as a tidy tree for
+	* "Show as tree": rows by depth (the root on row 0); leaves two column units apart, in the
+	* order a depth-first walk meets them (children in the order they appear in `parent`);
+	* each parent centred over its first and last child. Vertices not connected to `root`
+	* through `parent` are left out. Pure.
+	*/
+	function tidyTree(root, parent) {
+		const children = /* @__PURE__ */ new Map();
+		for (const [v, u] of parent) {
+			if (u === null) continue;
+			children.set(u, [...children.get(u) ?? [], v]);
+		}
+		const places = [];
+		let slot = 0;
+		const place = (v, row) => {
+			const kids = children.get(v) ?? [];
+			let column;
+			if (kids.length === 0) column = 2 * slot++;
+			else {
+				const cols = kids.map((kid) => place(kid, row + 1));
+				column = (cols[0] + cols[cols.length - 1]) / 2;
+			}
+			places.push({
+				id: v,
+				column,
+				row
+			});
+			return column;
+		};
+		place(root, 0);
+		return places;
+	}
 	// src/algorithms/bfs.ts
 	/**
 	* Breadth-first search from a single source, one queue pop per step.
@@ -2921,34 +2955,12 @@
 		* is the next step's), but are straight; every other edge curves.
 		*/
 		searchTree() {
-			const children = /* @__PURE__ */ new Map();
-			for (const [v, u] of this.parent) {
-				if (u === null) continue;
-				children.set(u, [...children.get(u) ?? [], v]);
-			}
-			const places = [];
-			let slot = 0;
-			const place = (v) => {
-				const kids = children.get(v) ?? [];
-				let column;
-				if (kids.length === 0) column = 2 * slot++;
-				else {
-					const cols = kids.map(place);
-					column = (cols[0] + cols[cols.length - 1]) / 2;
-				}
-				places.push({
-					id: v,
-					column,
-					row: this.distance.get(v)
-				});
-				return column;
-			};
-			place(this.source);
 			return {
-				places,
+				places: tidyTree(this.source, this.parent),
 				spine: [...this.parent].filter((entry) => entry[1] !== null).map(([v, u]) => [u, v]),
 				aside: this.view.nodeIds().filter((id) => !this.discovered.has(id)),
-				highlightSpine: false
+				highlightSpine: false,
+				intro: "Breadth-first tree so far: each row is a distance from the start, which is on top; each vertex hangs from the vertex it was discovered from."
 			};
 		}
 		queueSnapshot() {
@@ -3688,6 +3700,21 @@
 			for (const [v, p] of this.parent) if (p !== null) edges.push([p, v]);
 			return edges;
 		}
+		/**
+		* The predecessor tree G_π so far (CLRS §22.1) as a tidy tree: the source on top, each
+		* vertex one row below v.π (rows count edges, not d), children in id order. Vertices
+		* with d = ∞ (not reached yet) go `aside`. Tree edges are not highlighted white while
+		* running (white is the next step's); at the end they are, as the shortest-paths tree.
+		*/
+		searchTree() {
+			return {
+				places: this.distance.has(this.source) ? tidyTree(this.source, this.parent) : [],
+				spine: this.predecessorEdges(),
+				aside: this.view.nodeIds().filter((id) => !Number.isFinite(this.distance.get(id))),
+				highlightSpine: false,
+				intro: "Shortest-paths tree so far: the start is on top, and each vertex hangs from its predecessor v.π, one row below it; each Update may move vertices under a new predecessor."
+			};
+		}
 		step() {
 			const u = this.next;
 			if (u === null) return false;
@@ -3903,8 +3930,8 @@
 			else this.hooks.message(`Depth-first forest so far: ${trees}. As on the timestamp chart, each row is a depth and each vertex sits above the middle of its [d, f] interval ([d, now] while it runs), its descendants below it. ` + (waiting ? `The ${waiting} not discovered yet wait on the right; each Update brings the new ones in.` : "Every vertex is discovered."));
 		}
 		/**
-		* Shows the simulation's search tree so far (BFS), or leaves it when it is shown. The
-		* run goes on either way.
+		* Shows the simulation's search tree so far (BFS: the breadth-first tree; Dijkstra: the
+		* shortest-paths tree), or leaves it when it is shown. The run goes on either way.
 		*/
 		toggleTree() {
 			const simulation = this.simulation;
@@ -3919,7 +3946,7 @@
 			this.editor.showForest(tree, "tree");
 			this.updateControls();
 			const waiting = tree.aside?.length ?? 0;
-			this.hooks.message("Breadth-first tree so far: each row is a distance from the start, which is on top; each vertex hangs from the vertex it was discovered from. " + (waiting ? `The ${waiting} not reached yet wait on the right; each Update brings the new ones into the tree.` : "Every vertex is in it."));
+			this.hooks.message(`${tree.intro ?? "The search tree so far."} ` + (waiting ? `The ${waiting} not reached yet wait on the right; each Update brings the new ones into the tree.` : "Every vertex is in it."));
 		}
 		/** Ends the run and releases every lock. */
 		stop(message = "Stopped.") {

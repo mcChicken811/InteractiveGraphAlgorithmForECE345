@@ -150,6 +150,8 @@ export interface ForestDiagram {
   aside?: NodeId[];
   /** Whether the tree edges are highlighted white (default true; BFS keeps white for the next step). */
   highlightSpine?: boolean;
+  /** What the arrangement shows, said when it is first shown (Show as tree). */
+  intro?: string;
 }
 
 /** One vertex's [discovery, finish] interval on a timestamp chart (DFS). */
@@ -226,9 +228,10 @@ export interface Simulation {
    */
   searchForest?(): ForestDiagram;
   /**
-   * Offered while running (BFS): the search tree so far, as a ForestDiagram (rows by
-   * distance), with the vertices not reached yet `aside`. Algorithms without one leave it
-   * out, and the Show as tree button stays hidden.
+   * Offered while running (BFS, Dijkstra): the search tree so far, as a ForestDiagram
+   * (the source on top, rows by depth in the tree), with the vertices not reached yet
+   * `aside`. Algorithms without one leave it out, and the Show as tree button stays hidden.
+   * The runner re-sends it after every step while it is shown.
    */
   searchTree?(): ForestDiagram;
 }

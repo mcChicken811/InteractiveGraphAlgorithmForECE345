@@ -193,7 +193,7 @@ describe('search tree (for "Show as tree")', () => {
   it('lays G_π out as a tidy tree: rows by distance, leaves 2 apart, parents centred over their children', () => {
     const sim = new BfsSimulation(g.undirectedView, 0);
     // Only the source so far; everything else waits aside.
-    expect(sim.searchTree()).toEqual({
+    expect(sim.searchTree()).toMatchObject({
       places: [{ id: 0, column: 0, row: 0 }],
       spine: [],
       aside: [1, 2, 3, 4],

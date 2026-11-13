@@ -211,8 +211,8 @@ export class AlgorithmRunner {
   }
 
   /**
-   * Shows the simulation's search tree so far (BFS), or leaves it when it is shown. The
-   * run goes on either way.
+   * Shows the simulation's search tree so far (BFS: the breadth-first tree; Dijkstra: the
+   * shortest-paths tree), or leaves it when it is shown. The run goes on either way.
    */
   toggleTree(): void {
     const simulation = this.simulation;
@@ -228,8 +228,7 @@ export class AlgorithmRunner {
     this.updateControls();
     const waiting = tree.aside?.length ?? 0;
     this.hooks.message(
-      'Breadth-first tree so far: each row is a distance from the start, which is on top; each vertex hangs ' +
-        'from the vertex it was discovered from. ' +
+      `${tree.intro ?? 'The search tree so far.'} ` +
         (waiting ? `The ${waiting} not reached yet wait on the right; each Update brings the new ones into the tree.` : 'Every vertex is in it.'),
     );
   }

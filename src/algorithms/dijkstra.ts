@@ -1,6 +1,7 @@
 import type { NodeId } from '../graph.js';
 import type { GraphView } from '../graph-views.js';
-import type { AlgorithmDefinition, Highlight, QueueSnapshot, Simulation } from './types.js';
+import type { AlgorithmDefinition, ForestDiagram, Highlight, QueueSnapshot, Simulation } from './types.js';
+import { tidyTree } from './tidy-tree.js';
 
 /**
  * Dijkstra's single-source shortest-paths algorithm as defined in CLRS (Introduction to
@@ -38,6 +39,11 @@ import type { AlgorithmDefinition, Highlight, QueueSnapshot, Simulation } from '
  * ring, and the edges it will relax are white. Vertices in S are green; every other edge
  * stays solid grey. Each vertex shows its d (∞ until an edge reaches it). At the end, the
  * edges (v.π, v) — the shortest-paths tree — are white.
+ *
+ * `searchTree()` gives the predecessor tree G_π so far (the edges (v.π, v)), for "Show as
+ * tree": the source on top, each vertex one row below its predecessor, as a tidy tree, and
+ * the vertices still at d = ∞ set aside. A relaxation that lowers v.d also moves v under
+ * its new predecessor, so the tree rearranges itself as the run goes on.
  */
 interface LastStep {
   u: NodeId;
@@ -101,6 +107,24 @@ export class DijkstraSimulation implements Simulation {
     const edges: Array<[NodeId, NodeId]> = [];
     for (const [v, p] of this.parent) if (p !== null) edges.push([p, v]);
     return edges;
+  }
+
+  /**
+   * The predecessor tree G_π so far (CLRS §22.1) as a tidy tree: the source on top, each
+   * vertex one row below v.π (rows count edges, not d), children in id order. Vertices
+   * with d = ∞ (not reached yet) go `aside`. Tree edges are not highlighted white while
+   * running (white is the next step's); at the end they are, as the shortest-paths tree.
+   */
+  searchTree(): ForestDiagram {
+    return {
+      places: this.distance.has(this.source) ? tidyTree(this.source, this.parent) : [],
+      spine: this.predecessorEdges(),
+      aside: this.view.nodeIds().filter((id) => !Number.isFinite(this.distance.get(id)!)),
+      highlightSpine: false,
+      intro:
+        'Shortest-paths tree so far: the start is on top, and each vertex hangs from its predecessor v.π, ' +
+        'one row below it; each Update may move vertices under a new predecessor.',
+    };
   }
 
   step(): boolean {
