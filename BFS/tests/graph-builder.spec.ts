@@ -3655,7 +3655,7 @@ test.describe("algorithm simulation (Kruskal's minimum spanning tree)", () => {
     await expect(cv.canvas).not.toHaveClass(/has-cut/);
   });
 
-  test('every tree is a territory of its own, all green, with borders between trees as well as with the rest', async ({ page }) => {
+  test('every tree is a territory of its own (its vertices and edges), all green, with borders between trees and with the rest', async ({ page }) => {
     const region = cv.canvas.locator('.cut-region');
     const border = cv.canvas.locator('.cut-border');
     const seam = cv.canvas.locator('.cut-seam').last();
@@ -3680,25 +3680,27 @@ test.describe("algorithm simulation (Kruskal's minimum spanning tree)", () => {
 
     await build(page);
     await run(page);
-    // Every tree is a single vertex: no edges of its own, so no territory and no border.
+    // Every tree is a single vertex: no tree with an edge, so no territory and no border.
     await cutSettled(page);
     await expect(border).toHaveAttribute('d', '');
     await expect(region).toHaveAttribute('d', '');
 
-    await update(page); // adds 1—2: its tree's territory, against the rest's edge 3—4
+    await update(page); // adds 1—2: its tree's territory, against the rest's vertices 0, 3, 4 and edge 3—4
     await expect(cv.canvas).toHaveClass(/cut-moving/);
     await cutSettled(page);
     await expect(border).not.toHaveAttribute('d', '');
     expect(await inTerritory(...mid(1, 2))).toBe(true);
     expect(await inTerritory(...mid(3, 4))).toBe(false);
+    for (const v of [0, 3, 4]) expect(await inTerritory(...S[v])).toBe(false); // not in a tree: never shaded
     await expect(seam).toHaveAttribute('d', ''); // one tree: nothing to separate
 
-    await update(page); // adds 3—4: two trees, both green, and no edge left among the rest
+    await update(page); // adds 3—4: two trees, both green; 0 is still on its own
     await cutSettled(page);
     expect(await inTerritory(...mid(1, 2))).toBe(true);
     expect(await inTerritory(...mid(3, 4))).toBe(true);
-    await expect(border).toHaveAttribute('d', '');
-    // The border between them: everywhere as near to 1—2 as to 3—4.
+    expect(await inTerritory(...S[0])).toBe(false);
+    await expect(border).not.toHaveAttribute('d', ''); // around 0's territory
+    // The border between the trees: as near to 1—2 as to 3—4, where 0 is not nearer.
     const between = await seamPoints();
     expect(between.length).toBeGreaterThan(5);
     for (const p of between) expect(Math.abs(toSegment(p, S[1], S[2]) - toSegment(p, S[3], S[4]))).toBeLessThan(3);

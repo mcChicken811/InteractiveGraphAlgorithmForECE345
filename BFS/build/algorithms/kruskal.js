@@ -126,7 +126,7 @@ export class KruskalSimulation {
             .filter(([a, b]) => !inForest.has(`${a}-${b}`) && this.sets.representative(a) === this.sets.representative(b));
         const ids = this.view.nodeIds();
         const touched = new Set(this.forest.flatMap((e) => [e.from, e.to]));
-        // The trees with an edge, each a territory of its own (a lone vertex has none).
+        // The trees with an edge, each a territory of its own (a lone vertex is the rest's).
         const trees = this.trees().filter((tree) => tree.length > 1);
         return {
             current: null,
@@ -141,11 +141,10 @@ export class KruskalSimulation {
             ],
             // Every tree of A so far, green, with a border around each: between two trees as well
             // as with the rest. At the end, a spanning tree floods the canvas, as with Prim.
+            // The territories come from the vertices and the non-crossing edges, as with Prim:
+            // each tree's own, and the rest's (the vertices in no tree yet, and edges among them).
             cut: trees.flat(),
             cutGroups: trees,
-            // Only the edges within a tree (or among the vertices in none) shape the borders:
-            // none at first, when every tree is a single vertex.
-            cutEdgesOnly: true,
         };
     }
     edgeQueueSnapshot() {

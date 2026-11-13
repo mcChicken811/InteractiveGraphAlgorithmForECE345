@@ -293,12 +293,12 @@ Kruskal's algorithm follows `MST-KRUSKAL(G, w)` in *Introduction to Algorithms* 
 - **Presented like Prim:** compact vertices, the same colours and the same moving border.
   - **White:** the edge the next Update considers.
   - **The cut:** the cut (*C*, *V* − *C*) around *u*'s tree, with its crossing edges grey. When the next edge joins two trees, it is a light edge crossing this cut, which is why it is safe to add (CLRS Corollary 21.2).
-  - **The territories:** every tree of *A* with an edge is shaded green, each as a **territory of its own**. Unlike Prim's, the borders are drawn from the **non-crossing edges alone**, leaving out the vertices.
-    - **Each tree:** a tree's territory is the part of the canvas nearer to one of its edges (both ends in the tree) than to any other tree's edges, or to the rest's.
-    - **The rest:** the edges between vertices that are in no tree yet. Their territory is not shaded.
+  - **The territories:** every tree of *A* with an edge is shaded green, each as a **territory of its own**. As with Prim, the sites are the vertices and the non-crossing edges.
+    - **Each tree:** a tree's territory is the part of the canvas nearer to one of its vertices or edges (both ends in the tree) than to any other tree's, or to the rest's.
+    - **The rest:** the vertices that are in no tree yet, and the edges between them. Their territory is not shaded, so a vertex not yet taken is never covered by a tree's green.
     - **Borders:** a dashed green border runs between the trees as well as between the trees and the rest. When two trees are not yet joined, each has its own green interior, with a border between them. An edge joining two trees crosses that border.
     - **Updates:** after each Update the territories move smoothly. A new tree's territory spreads out from its edge, and a grown tree's spreads from where it was. When an edge joins two trees, the border between them fades out.
-    - **When there is none:** a border needs two territories to meet. At the start every tree is a single vertex, so there is no border and no shading. The same holds when there is one tree and no rest. When the trees have used up the rest, they share the whole canvas between them.
+    - **When there is none:** at the start every tree is a single vertex, so there is no border and no shading. When the trees have taken every vertex, they share the whole canvas between them.
     - **Cycle edges:** when the next edge would close a cycle, both its ends lie inside one tree's territory, so it visibly crosses nothing.
   - **Green:** the forest's edges (solid), vertices in a tree with an edge, and edges inside one tree that are not in the forest (dashed).
   - On the last step, if the graph is connected, the tree's territory floods the canvas and fades.
@@ -311,7 +311,7 @@ Kruskal's algorithm follows `MST-KRUSKAL(G, w)` in *Introduction to Algorithms* 
 2. Export an `AlgorithmDefinition` from its own file: `id`, `name`, `requires` (e.g. `{ weighted: true }` for Dijkstra; DFS uses `{ weighted: false, directed: true }`; Prim uses `{ directed: false }`), and `create(view, start)`. An algorithm that reads weights but accepts either weighting sets `usesWeights: true`, which locks the weight switch at the user's choice without forcing it. By convention `highlight()` previews the *next* step: `current` is what it will process and `activeEdges` what it will travel. It may also return:
    - `labels` (vertex → text) to draw inside the vertices instead of their ids, as BFS does with distances and DFS with times; Dijkstra could do the same with tentative distances.
    - `running` (vertices drawn yellow).
-   - `cut` (one side *S* of a cut): the canvas tints *S*'s Voronoi territory and draws its border with the rest, as Prim does with its tree. With `cutEdgesOnly`, only edges count as sites. With `cutGroups` (*S* split into groups, as Kruskal does with its trees), each group gets a territory of its own, all tinted, with borders between them too.
+   - `cut` (one side *S* of a cut): the canvas tints *S*'s Voronoi territory and draws its border with the rest, as Prim does with its tree. With `cutEdgesOnly`, only edges count as sites. With `cutGroups` (*S* split into groups, as Kruskal does with its trees), each group gets a territory of its own, all tinted, with borders between them too. A new group's territory grows out from the group itself.
    - `exploredEdges` (`{ from, to, label?, done?, crossing?, within? }`). When present, every other edge is drawn dashed, as DFS does. The flags restyle an edge, as Prim does:
      - `done: true`: solid green (tree edges).
      - `crossing: true`: solid grey (edges crossing its cut).

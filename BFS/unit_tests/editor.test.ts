@@ -1587,6 +1587,45 @@ describe('GraphEditor cut transitions', () => {
     expect(svg.classList.contains('has-cut')).toBe(false);
   });
 
+  it('cutGroups with vertices as sites: a vertex in no group is never shaded, and a new group grows from itself', () => {
+    // 0 — 1 — 2 along the row; 4 — 5 below (ids 3 and 4 here), at y = 500.
+    clickBackground(100, 500);
+    clickBackground(400, 500);
+    clickNode(3);
+    clickNode(4);
+    const points = (d: string) => [...d.matchAll(/(-?[\d.]+) (-?[\d.]+)/g)].map((m) => ({ x: Number(m[1]), y: Number(m[2]) }));
+    const shaded = (p: { x: number; y: number }) => {
+      let inside = false;
+      for (const loop of (svg.querySelector('.cut-region')!.getAttribute('d') ?? '').split('Z').filter((part) => part.trim())) {
+        const ps = points(loop);
+        for (let i = 0, j = ps.length - 1; i < ps.length; j = i++) {
+          const [a, b] = [ps[i], ps[j]];
+          if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+        }
+      }
+      return inside;
+    };
+    const settle = () => {
+      for (let i = 0; i < 80 && frames.length; i++) frame(16);
+    };
+    // The tree {0, 1}; 2 is in none, with no edge of its own (1 — 2 crosses): still a site,
+    // so the border runs between 1 and 2 instead of the tree's green covering 2.
+    editor.setHighlight({ current: null, done: [], activeEdges: [], cut: [0, 1], cutGroups: [[0, 1]] });
+    settle();
+    expect(shaded({ x: 175, y: 300 })).toBe(true);
+    expect(shaded({ x: 400, y: 300 })).toBe(false);
+    expect(borderX()).toBeLessThan(400);
+    // A new tree {3, 4} below: its territory grows out from its own edge, not from {0, 1}.
+    editor.setHighlight({ current: null, done: [], activeEdges: [], cut: [0, 1, 3, 4], cutGroups: [[0, 1], [3, 4]] });
+    frame(16);
+    frame(40);
+    expect(shaded({ x: 250, y: 500 })).toBe(true); // on its edge: already green
+    expect(shaded({ x: 250, y: 410 })).toBe(false); // nearer {0, 1} than the front has gone
+    settle();
+    expect(shaded({ x: 250, y: 410 })).toBe(true);
+    expect(shaded({ x: 400, y: 300 })).toBe(false); // 2 is still in none
+  });
+
   it('cutGroups: when two groups merge, the seam between them fades out', () => {
     clickBackground(550, 300);
     clickNode(2);

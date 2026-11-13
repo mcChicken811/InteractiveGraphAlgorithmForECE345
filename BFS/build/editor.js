@@ -918,17 +918,23 @@ export class GraphEditor {
         const nodes = this.graph.getNodes();
         const edgesOnly = !!this.highlight?.cutEdgesOnly;
         const sideIn = (set, id) => (set.has(id) ? 'in' : 'out');
+        /** The group of a vertex of S (one group, 0, when S is not split). */
+        const groupOfVertex = (groups, id) => (groups ? (groups.get(id) ?? id) : 0);
         /** The group of an edge with both ends in one group of S (null otherwise). */
         const groupOf = (set, groups, a, b) => {
             if (!set.has(a) || !set.has(b))
                 return null;
-            const [ga, gb] = groups ? [groups.get(a) ?? a, groups.get(b) ?? b] : [0, 0];
-            return ga === gb ? ga : null;
+            const ga = groupOfVertex(groups, a);
+            return ga === groupOfVertex(groups, b) ? ga : null;
         };
         // Crossing edges, and edges between two groups, belong to neither side.
         const edgeSide = (set, groups, a, b) => !set.has(a) && !set.has(b) ? 'out' : groupOf(set, groups, a, b) !== null ? 'in' : null;
-        // A vertex joining S with no edge to the old S (the first one, or a new tree's root)
-        // grows a territory of its own; the rest of the new territory spreads from the old S.
+        // Where the new territory comes from. Split into groups: a group with no vertex in the
+        // old S (a new tree) grows a territory of its own, from its vertices and edges. Otherwise
+        // a vertex joining S with no edge to the old S (the first one, or a new tree's root) does.
+        // The rest of the new territory spreads from the old S.
+        const oldGroups = new Set([...from].filter((id) => to.has(id)).map((id) => groupOfVertex(toGroups, id)));
+        const newGroup = (id) => toGroups !== null && !oldGroups.has(groupOfVertex(toGroups, id));
         const touchesFrom = new Set();
         for (const [a, b] of this.graph.getEdges()) {
             if (from.has(a))
@@ -936,29 +942,36 @@ export class GraphEditor {
             if (from.has(b))
                 touchesFrom.add(a);
         }
-        // Kruskal draws the border from the non-crossing edges alone (cutEdgesOnly).
-        const features = edgesOnly
-            ? []
-            : nodes.map((node) => ({
-                a: node,
-                from: sideIn(from, node.id),
-                to: sideIn(to, node.id),
-                seed: !from.has(node.id) && to.has(node.id) && !touchesFrom.has(node.id),
-            }));
-        /** Each edge feature's group before and after (null: not in S). */
+        const features = [];
+        /** Each feature's group before and after (null: not in S). */
         const featureGroups = [];
+        // The vertices are sites too, unless the border comes from the non-crossing edges alone (cutEdgesOnly).
+        if (!edgesOnly) {
+            for (const node of nodes) {
+                const joins = !from.has(node.id) && to.has(node.id);
+                features.push({
+                    a: node,
+                    from: sideIn(from, node.id),
+                    to: sideIn(to, node.id),
+                    seed: joins && (toGroups ? newGroup(node.id) : !touchesFrom.has(node.id)),
+                });
+                featureGroups.push({
+                    from: from.has(node.id) ? groupOfVertex(fromGroups, node.id) : null,
+                    to: to.has(node.id) ? groupOfVertex(toGroups, node.id) : null,
+                });
+            }
+        }
         for (const [a, b] of this.graph.getEdges()) {
             const f = edgeSide(from, fromGroups, a, b);
             const g = edgeSide(to, toGroups, a, b);
             if (!f && !g)
                 continue;
-            // Edges only: an edge joining S with neither end in the old S (a new tree) grows a
-            // territory of its own.
-            const seed = edgesOnly && f !== 'in' && g === 'in' && !from.has(a) && !from.has(b);
+            // An edge of a new group (or, edges only, joining S with neither end in the old S)
+            // grows a territory of its own.
+            const seed = f !== 'in' && g === 'in' && (toGroups ? newGroup(a) : edgesOnly && !from.has(a) && !from.has(b));
             features.push({ a: this.graph.getNode(a), b: this.graph.getNode(b), from: f, to: g, seed });
             featureGroups.push({ from: groupOf(from, fromGroups, a, b), to: groupOf(to, toGroups, a, b) });
         }
-        const edgeFeatures = features.slice(features.length - featureGroups.length); // after the vertices, if any
         const modeOf = (set, which) => {
             const inside = nodes.filter((n) => set.has(n.id)).length;
             if (inside === nodes.length)
@@ -970,7 +983,7 @@ export class GraphEditor {
             const groups = new Set(featureGroups.map((g) => g[which]).filter((g) => g !== null));
             if (groups.size === 0)
                 return 'empty';
-            if (!edgeFeatures.some((f) => f[which] === 'out'))
+            if (!features.some((f) => f[which] === 'out'))
                 return groups.size > 1 ? 'all' : 'empty';
             return 'split';
         };
@@ -981,12 +994,11 @@ export class GraphEditor {
         const where = features.map((f) => `${f.a.x},${f.a.y},${f.b?.x},${f.b?.y}`);
         // The seams: where the nearest group changes (the rest left out), each traced once.
         // Traced again only when something moved.
-        const seamsOf = (which) => polylinesPath(groupSeams(edgeFeatures.flatMap((f, k) => {
+        const seamsOf = (which) => polylinesPath(groupSeams(features.flatMap((f, k) => {
             const group = featureGroups[k][which];
             return group === null ? [] : [{ a: f.a, b: f.b, group }];
         }), bounds));
-        const firstEdge = features.length - featureGroups.length;
-        const seamKey = [rect.width, rect.height, ...featureGroups.map((g, k) => `${where[firstEdge + k]},${g.from},${g.to}`)].join('|');
+        const seamKey = [rect.width, rect.height, ...featureGroups.map((g, k) => `${where[k]},${g.from},${g.to}`)].join('|');
         let seamsTo = this.cutSeamsTo.getAttribute('d') ?? '';
         if (seamKey !== this.seamKey) {
             this.seamKey = seamKey;

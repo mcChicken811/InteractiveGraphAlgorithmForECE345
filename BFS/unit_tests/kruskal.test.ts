@@ -127,8 +127,8 @@ describe('KruskalSimulation (weighted, CLRS MST-KRUSKAL)', () => {
       labels: { 0: '0', 1: '1', 2: '2', 3: '3', 4: '4' },
       cut: [], // no tree with an edge yet: no territory
       cutGroups: [],
-      cutEdgesOnly: true, // only non-crossing edges shape the borders: none around a lone vertex
     });
+    expect(sim.highlight().cutEdgesOnly).toBeUndefined(); // vertices are sites too
     sim.step();
     sim.step();
     sim.step(); // A = {1—2, 3—4, 0—1}; next 1—3
