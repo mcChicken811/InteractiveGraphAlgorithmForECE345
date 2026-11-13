@@ -1074,6 +1074,25 @@ button:disabled {
   marker-end: url(#arrow-done);
 }
 
+/* An algorithm's cut (Prim: the tree and the rest), under the graph: the tree side's
+   territory (its vertices' Voronoi cells) faintly green, and the border with the rest. */
+.cut {
+  pointer-events: none;
+}
+
+.cut-region {
+  fill: color-mix(in srgb, var(--sim-done) 9%, transparent);
+}
+
+.cut-border {
+  fill: none;
+  stroke: var(--sim-done);
+  stroke-width: 2;
+  stroke-dasharray: 8 6;
+  stroke-linecap: round;
+  opacity: 0.75;
+}
+
 /* Edges crossing the algorithm's cut (Prim: tree to queue): solid grey, full strength.
    The lightest one is the white active edge, which keeps its own style. */
 .edge.sim-crossing:not(.sim-active) .edge-line {

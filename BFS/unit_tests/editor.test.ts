@@ -878,6 +878,32 @@ describe('GraphEditor lock and algorithm highlight', () => {
     expect(svg.querySelectorAll('.sim-tree')).toHaveLength(0);
   });
 
+  it('draws a cut as one side’s Voronoi territory and its border', () => {
+    // The fixture: 0, 1, 2 in a row at x = 100, 250, 400 (y = 300); the canvas is 800 × 600.
+    const region = svg.querySelector('.cut-region')!;
+    const border = svg.querySelector('.cut-border')!;
+    editor.setHighlight({ current: 1, done: [0], activeEdges: [], cut: [0] });
+    expect(svg.classList.contains('has-cut')).toBe(true);
+    // 0's cell is everything left of the bisector with 1, x = 175.
+    expect(region.getAttribute('d')).toBe('M 0 0 L 175 0 L 175 600 L 0 600 Z');
+    expect(border.getAttribute('d')).toBe('M 175 0 L 175 600');
+
+    editor.setHighlight({ current: 2, done: [0, 1], activeEdges: [], cut: [0, 1] });
+    expect(border.getAttribute('d')).toBe('M 325 0 L 325 600'); // between 1 and 2 now
+
+    // The border follows a dragged vertex.
+    pointer(nodeEl(2).querySelector('circle')!, 'pointerdown', 400, 300);
+    pointer(svg, 'pointermove', 500, 300);
+    pointer(svg, 'pointerup', 500, 300);
+    expect(border.getAttribute('d')).toBe('M 375 0 L 375 600');
+
+    editor.setHighlight({ current: null, done: [0, 1, 2], activeEdges: [], cut: [0, 1, 2] }); // one side empty
+    expect(svg.classList.contains('has-cut')).toBe(false);
+    expect(border.hasAttribute('d')).toBe(false);
+    editor.setHighlight(null);
+    expect(region.hasAttribute('d')).toBe(false);
+  });
+
   it('crossing edges (e.g. Prim’s cut) are marked so they draw solid grey', () => {
     const edge = (a: number, b: number) => svg.querySelector<SVGGElement>(`[data-edge-a="${a}"][data-edge-b="${b}"]`)!;
     editor.setHighlight({

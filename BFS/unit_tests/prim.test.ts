@@ -135,6 +135,16 @@ describe('PrimSimulation (weighted, CLRS MST-PRIM)', () => {
     expect(sim.highlight().exploredEdges!.every((e) => e.done)).toBe(true);
   });
 
+  it('reports the cut (the tree’s vertices) while both sides have vertices', () => {
+    expect(sim.highlight().cut).toBeUndefined(); // the tree is empty
+    sim.step();
+    expect(sim.highlight().cut).toEqual([0]);
+    sim.step();
+    expect(sim.highlight().cut).toEqual([0, 1]);
+    runToEnd(sim);
+    expect(sim.highlight().cut).toBeUndefined(); // everything is in the tree
+  });
+
   it('crossing edges are exactly those with one end in the tree; none before the first step', () => {
     expect(sim.crossingEdges()).toEqual([]); // S is empty
     sim.step();

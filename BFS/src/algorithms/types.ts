@@ -35,6 +35,13 @@ export interface Highlight {
    * drawn dashed. Same orientation rules as `activeEdges`.
    */
   exploredEdges?: ExploredEdge[];
+  /**
+   * One side S of a cut (S, V − S) (Prim: the tree's vertices). The canvas shades S's
+   * territory — the part of the canvas nearer to a vertex of S than to any other vertex
+   * (its Voronoi cells) — and draws the border with V − S's territory, which exists even
+   * when no edge crosses the cut. Left out (or with either side empty), nothing is drawn.
+   */
+  cut?: NodeId[];
 }
 
 export interface ExploredEdge {

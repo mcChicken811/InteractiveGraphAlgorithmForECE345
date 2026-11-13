@@ -2621,6 +2621,78 @@ test.describe("algorithm simulation (Prim's minimum spanning tree)", () => {
     await expect(cv.edge(2, 3).locator('.edge-line')).not.toHaveCSS('stroke-dasharray', 'none');
   });
 
+  /** For each vertex: is its centre inside the shaded territory (the tree's side of the cut)? */
+  const inTerritory = (page: Page) =>
+    page.evaluate(() => {
+      const region = document.querySelector<SVGPathElement>('#canvas .cut-region')!;
+      return [...document.querySelectorAll<SVGGElement>('#canvas .node')].map((g) => {
+        const m = g.transform.baseVal.consolidate()!.matrix;
+        return region.isPointInFill(new DOMPoint(m.e, m.f));
+      });
+    });
+
+  test('the cut is drawn as a border: the tree’s territory is shaded, the rest is not', async ({ page }) => {
+    await build(page);
+    await run(page);
+    await expect(cv.canvas).not.toHaveClass(/has-cut/); // the tree is empty: no cut yet
+    await steps(page, 2); // tree {0, 1}
+    await expect(cv.canvas).toHaveClass(/has-cut/);
+    expect(await inTerritory(page)).toEqual([true, true, false, false, false]);
+    const border = cv.canvas.locator('.cut-border');
+    await expect(border).toHaveAttribute('d', /^M /);
+    await expect(border).toHaveCSS('stroke', GREEN);
+    // Each crossing edge, and the white light edge, passes over the border.
+    const crossings = await page.evaluate(() => {
+      const region = document.querySelector<SVGPathElement>('#canvas .cut-region')!;
+      return [...document.querySelectorAll<SVGGElement>('#canvas .edge.sim-crossing')].map((g) => {
+        const line = g.querySelector<SVGLineElement>('.edge-line')!;
+        const [a, b] = [new DOMPoint(line.x1.baseVal.value, line.y1.baseVal.value), new DOMPoint(line.x2.baseVal.value, line.y2.baseVal.value)];
+        return region.isPointInFill(a) !== region.isPointInFill(b);
+      });
+    });
+    expect(crossings).toEqual([true, true, true]);
+    await steps(page, 1); // tree {0, 1, 2}
+    expect(await inTerritory(page)).toEqual([true, true, true, false, false]);
+  });
+
+  test('the border is there even when no edge crosses the cut', async ({ page }) => {
+    const spots: Array<[number, number]> = [...S, [200, 520]];
+    await build(page, { spots }); // vertex 5 has no edges
+    await run(page);
+    await steps(page, 5); // the first tree is complete; nothing crosses to 5
+    await expect(cv.canvas.locator('.edge.sim-crossing, .edge.sim-active')).toHaveCount(0);
+    await expect(message(page)).toContainText('No edge crosses the cut, so 5 will start a new tree.');
+    await expect(cv.canvas.locator('.cut-border')).toHaveAttribute('d', /^M /);
+    expect(await inTerritory(page)).toEqual([true, true, true, true, true, false]);
+  });
+
+  test('the border goes away when the tree has every vertex, and on Stop', async ({ page }) => {
+    await build(page);
+    await run(page);
+    await steps(page, 4);
+    await expect(cv.canvas).toHaveClass(/has-cut/);
+    await update(page); // the last vertex joins
+    await expect(cv.canvas).not.toHaveClass(/has-cut/);
+    await expect(cv.canvas.locator('.cut-border')).not.toHaveAttribute('d', /./);
+    await page.getByRole('button', { name: 'Finish', exact: true }).click();
+    await run(page);
+    await steps(page, 2);
+    await expect(cv.canvas).toHaveClass(/has-cut/);
+    await page.getByRole('button', { name: 'Stop', exact: true }).click();
+    await expect(cv.canvas).not.toHaveClass(/has-cut/);
+  });
+
+  test('the border follows a vertex as it is dragged', async ({ page }) => {
+    await build(page);
+    await run(page);
+    await steps(page, 2);
+    const border = cv.canvas.locator('.cut-border');
+    const before = await border.getAttribute('d');
+    await cv.drag(S[2], [S[2][0] + 160, S[2][1] + 40]);
+    await expect(border).not.toHaveAttribute('d', before!);
+    expect(await inTerritory(page)).toEqual([true, true, false, false, false]); // still the same split
+  });
+
   test('finishes with the minimum spanning tree and its total weight', async ({ page }) => {
     await build(page);
     await run(page);

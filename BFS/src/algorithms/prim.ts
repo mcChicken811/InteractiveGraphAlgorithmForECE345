@@ -41,7 +41,10 @@ import type { AlgorithmDefinition, ExploredEdge, Highlight, QueueSnapshot, Simul
  * edge (v.π, v) a light edge.
  *
  * The display shows what the next step will do: white is the vertex it will extract and
- * its joining edge — the light edge. The other crossing edges are solid grey. Vertices in
+ * its joining edge — the light edge. The other crossing edges are solid grey. The cut
+ * itself is drawn as a border on the canvas: the tree's territory (the canvas nearer to a
+ * tree vertex than to any queued vertex) is shaded, so the border shows even when no edge
+ * crosses the cut (a graph that is not connected). Vertices in
  * the tree are green, as are the tree's edges; every other edge is dashed. Vertices still
  * in the queue with a finite key (they touch the tree) are yellow. Each vertex is labelled
  * with its key.
@@ -157,6 +160,8 @@ export class PrimSimulation implements Simulation {
         ...this.treeEdges.map(({ from, to }): ExploredEdge => ({ from, to, done: true })),
         ...this.crossingEdges().map(([from, to]): ExploredEdge => ({ from, to, crossing: true })),
       ],
+      // The cut (S, V − S), while both sides have vertices.
+      cut: this.order.length > 0 && !this.finished ? [...this.order] : undefined,
     };
   }
 

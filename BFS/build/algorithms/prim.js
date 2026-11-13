@@ -94,6 +94,8 @@ export class PrimSimulation {
                 ...this.treeEdges.map(({ from, to }) => ({ from, to, done: true })),
                 ...this.crossingEdges().map(([from, to]) => ({ from, to, crossing: true })),
             ],
+            // The cut (S, V − S), while both sides have vertices.
+            cut: this.order.length > 0 && !this.finished ? [...this.order] : undefined,
         };
     }
     priorityQueueSnapshot() {

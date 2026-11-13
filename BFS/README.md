@@ -49,6 +49,7 @@ Pass Playwright options after `--`, e.g. `npm run test:e2e -- --grep "edge"`.
 - `unit_tests/queue-view.test.ts`: the queue and stack strips' contents, order, arrows, labels, reuse of elements, empty state.
 - `unit_tests/dfs.test.ts`: the DFS simulation against CLRS: discovery and finish times, edge classes, every step's message, stack snapshots, the outer loop over all vertices, and (on random graphs) the parenthesis theorem and each class's time rules. Also the topological sort: decreasing finish times, and (checked against Kahn's algorithm on random graphs) offered exactly when the graph is acyclic, with every edge pointing forward.
 - `unit_tests/prim.test.ts`: Prim's algorithm against CLRS: keys, every step's message, the tree, tie-breaking, negative weights, the unweighted view, graphs that are not connected. On random graphs it checks the crossing edges against brute force, that the white edge is always a light edge, and that the total weight matches an independent Kruskal implementation.
+- `unit_tests/voronoi.test.ts`: Voronoi cells tile the canvas exactly and hold their nearest points, edges are labelled with the right neighbours, and territory borders lie halfway between the two groups.
 - `unit_tests/label-fit.test.ts`: label font shrinking.
 - `unit_tests/timeline-view.test.ts`: the timestamp chart's bars, rows, axis and now line, and expanding into the dialog and back (button, Esc, backdrop click).
 - `unit_tests/arc-diagram.test.ts`: the topological sort's row layout (centring, wrapping, room for arcs) and half-circle geometry.
@@ -229,6 +230,12 @@ A graph with *n* vertices takes exactly *n* Updates.
   - **Green:** vertices in the tree, and the tree's edges.
   - **Yellow:** vertices still in the queue with a finite key (an edge joins them to the tree).
   - **Dashed:** edges with both ends outside the tree, or both inside it but not in the tree.
+- **The border:** the cut is also drawn on the canvas.
+  - **How:** the tree's *territory* — every point of the canvas nearer to a tree vertex than to any queued vertex, i.e. the union of the tree vertices' Voronoi cells — is tinted green, and a dashed green line marks the border with the rest.
+  - **Without crossing edges:** because it depends only on where the vertices are, the border is there even when no edge crosses the cut (a graph that is not connected, between trees).
+  - **Live:** it follows vertices as they are dragged or moved by auto-layout.
+  - **Source:** this is the Voronoi view of a vertex partition that GMap starts from (Gansner, Hu & Kobourov, *GMap: Visualizing Graphs and Clusters as Maps*, IEEE PacificVis 2010).
+  - **Computation:** the cells are exact: the canvas rectangle clipped by the perpendicular bisector with every other vertex, so every crossing edge passes over the border exactly once.
 - **Keys:** each vertex shows its key, ∞ until some edge reaches it from the tree. Unlike BFS and DFS, unreached vertices are not blank: every vertex is in the queue from the start, and ∞ is the value that orders it.
 - **Priority queue card:** a **Priority queue** card appears at the bottom of the ☰ panel, listing the queue as `← min  (smallest key) … (largest key)`. The front vertex has the white ring, and vertices with a finite key the yellow one. On Update the extracted vertex turns green and slides out, and vertices whose keys dropped glide to their new places. Hovering or focusing the strip shows the vertex numbers, on the canvas too.
 - **Graphs that are not connected:** CLRS assumes a connected graph, but the pseudocode still terminates. When only keys of ∞ are left, the extracted vertex has no joining edge and starts a new tree, so the result is a minimum spanning forest, one tree per connected part. The final message says so.
@@ -239,6 +246,7 @@ A graph with *n* vertices takes exactly *n* Updates.
 2. Export an `AlgorithmDefinition` from its own file: `id`, `name`, `requires` (e.g. `{ weighted: true }` for Dijkstra; DFS uses `{ weighted: false, directed: true }`; Prim uses `{ directed: false }`), and `create(view, start)`. An algorithm that reads weights but accepts either weighting sets `usesWeights: true`, which locks the weight switch at the user's choice without forcing it. By convention `highlight()` previews the *next* step: `current` is what it will process and `activeEdges` what it will travel. It may also return:
    - `labels` (vertex → text) to draw inside the vertices instead of their ids, as BFS does with distances and DFS with times; Dijkstra could do the same with tentative distances.
    - `running` (vertices drawn yellow).
+   - `cut` (one side *S* of a cut): the canvas tints *S*'s Voronoi territory and draws its border with the rest, as Prim does with its tree.
    - `exploredEdges` (`{ from, to, label?, done?, crossing? }`). When present, every other edge is drawn dashed, as DFS does. `done: true` draws the edge green, as Prim does for tree edges, and `crossing: true` draws it solid grey, as Prim does for edges crossing its cut.
    - Once finished, a simulation can also offer `topologicalSort()`, returning an `ArcDiagram` (`order`, `spine`, `below`) or null. The Topological sort button then appears next to Finish.
 3. Add it to `ALGORITHMS` in `src/algorithms/index.ts`. The picker, the locks and the drawing then work without further changes.
@@ -371,6 +379,7 @@ Freivalds, Dogrusoz & Kikusts study this approach in *Disconnected Graph Layout 
 - `src/queue-view.ts` — `QueueView`: the side panel's animated queue strip (BFS), or with `kind: 'priority'` the min-priority queue strip (Prim), or with `kind: 'stack'` the recursion stack strip (DFS). Elements are reused by vertex id, and changes are animated with the FLIP technique (record positions, update, play from the old positions).
 - `src/arc-diagram.ts` — `rowLayout` (vertices in a centred line that wraps into rows) and `halfEllipse` (an edge as a half circle over its two ends, trimmed to the node rims), for the topological sort; pure, no DOM.
 - `src/timeline-view.ts` — `TimelineView`: the Timestamps card's chart (bars positioned with CSS custom properties, so they animate and rescale) and its expand / shrink into a centred modal dialog (animated between the two positions).
+- `src/voronoi.ts` — `voronoiCells` (exact Voronoi cells within the canvas, each edge labelled with the neighbour it borders) and `territory` (one group's cells and their border with the rest), for drawing Prim's cut; pure, no DOM.
 - `src/label-fit.ts` — `fitFontSize`: shrinks a label's font so long labels (DFS's `d,f`) fit inside a vertex circle.
 - `src/status-bar.ts` — `StatusBar`: every status message goes through `show(text, tone)`.
   - **Hiding:** 5 s after the last message, with the pointer neither on the bar nor near it, the bar slides slowly down out of view.

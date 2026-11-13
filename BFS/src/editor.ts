@@ -3,6 +3,7 @@ import { ForceLayout } from './layout.js';
 import type { ArcDiagram, Highlight } from './algorithms/types.js';
 import { fitFontSize } from './label-fit.js';
 import { halfEllipse, rowLayout } from './arc-diagram.js';
+import { polygonsPath, segmentsPath, territory } from './voronoi.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 export const NODE_RADIUS = 20;
@@ -107,6 +108,10 @@ export class GraphEditor {
   private moveTween: Tween<Map<NodeId, Point>> | null = null;
   private tweenFrame: number | null = null;
 
+  /** An algorithm's cut, drawn under everything: one side's territory and the border. */
+  private readonly cutLayer: SVGGElement;
+  private readonly cutRegion: SVGPathElement;
+  private readonly cutBorder: SVGPathElement;
   private readonly edgeLayer: SVGGElement;
   private readonly previewLine: SVGLineElement;
   private readonly nodeLayer: SVGGElement;
@@ -118,10 +123,14 @@ export class GraphEditor {
     private readonly graph: Graph,
     private readonly callbacks: EditorCallbacks = {},
   ) {
+    this.cutLayer = svgEl('g', { class: 'cut', 'aria-hidden': 'true' });
+    this.cutRegion = svgEl('path', { class: 'cut-region' });
+    this.cutBorder = svgEl('path', { class: 'cut-border' });
+    this.cutLayer.append(this.cutRegion, this.cutBorder);
     this.edgeLayer = svgEl('g', { class: 'edges' });
     this.previewLine = svgEl('line', { class: 'preview-line' });
     this.nodeLayer = svgEl('g', { class: 'nodes' });
-    svg.append(arrowDefs(), this.edgeLayer, this.previewLine, this.nodeLayer);
+    svg.append(arrowDefs(), this.cutLayer, this.edgeLayer, this.previewLine, this.nodeLayer);
 
     svg.addEventListener('pointerdown', this.onPointerDown);
     svg.addEventListener('pointermove', this.onPointerMove);
@@ -733,6 +742,33 @@ export class GraphEditor {
 
     this.svg.classList.toggle('has-selection', this.selected !== null);
     this.updatePreview();
+    this.renderCut();
+  }
+
+  /**
+   * Draws the highlight's cut (S, V − S), if any: S's territory — the canvas nearer to a
+   * vertex of S than to any other vertex (its Voronoi cells) — shaded, and the border with
+   * the rest. It follows the vertices as they move.
+   */
+  private renderCut(): void {
+    const cut = this.highlight?.cut;
+    const nodes = this.graph.getNodes();
+    const inside = new Set<number>();
+    if (cut) {
+      const side = new Set(cut);
+      nodes.forEach((node, i) => side.has(node.id) && inside.add(i));
+    }
+    const drawn = inside.size > 0 && inside.size < nodes.length;
+    this.svg.classList.toggle('has-cut', drawn);
+    if (!drawn) {
+      this.cutRegion.removeAttribute('d');
+      this.cutBorder.removeAttribute('d');
+      return;
+    }
+    const rect = this.svg.getBoundingClientRect();
+    const { region, border } = territory(nodes, inside, { width: rect.width, height: rect.height });
+    this.cutRegion.setAttribute('d', polygonsPath(region));
+    this.cutBorder.setAttribute('d', segmentsPath(border));
   }
 
   /** The key of the drawn edge a → b (undirected: between a and b), as used in edgeEls. */

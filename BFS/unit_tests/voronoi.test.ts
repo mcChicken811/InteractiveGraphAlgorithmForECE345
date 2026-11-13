@@ -1,0 +1,151 @@
+import { describe, expect, it } from 'vitest';
+import { polygonsPath, segmentsPath, territory, voronoiCells, type Point } from '../src/voronoi.js';
+
+const BOUNDS = { width: 800, height: 600 };
+
+function randomSites(n: number, seed: number): Point[] {
+  const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  return Array.from({ length: n }, () => ({ x: 20 + rand() * 760, y: 20 + rand() * 560 }));
+}
+
+/** Shoelace area of a polygon. */
+const area = (ps: Point[]) => Math.abs(ps.reduce((s, p, i) => s + p.x * ps[(i + 1) % ps.length].y - ps[(i + 1) % ps.length].x * p.y, 0)) / 2;
+
+/** Is p inside the convex polygon (either winding)? */
+function inside(ps: Point[], p: Point): boolean {
+  let sign = 0;
+  for (let i = 0; i < ps.length; i++) {
+    const a = ps[i];
+    const b = ps[(i + 1) % ps.length];
+    const cross = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+    if (Math.abs(cross) < 1e-9) continue;
+    if (sign === 0) sign = Math.sign(cross);
+    else if (Math.sign(cross) !== sign) return false;
+  }
+  return true;
+}
+
+const dist = (p: Point, q: Point) => Math.hypot(p.x - q.x, p.y - q.y);
+
+describe('voronoiCells', () => {
+  it('two sites split the rectangle along their perpendicular bisector', () => {
+    const [left, right] = voronoiCells(
+      [
+        { x: 200, y: 300 },
+        { x: 600, y: 300 },
+      ],
+      BOUNDS,
+    );
+    expect(area(left.points)).toBeCloseTo(400 * 600);
+    expect(area(right.points)).toBeCloseTo(400 * 600);
+    expect(left.points.every((p) => p.x <= 400 + 1e-9)).toBe(true);
+    // The edge along x = 400 is labelled with the other site; the rest with the rectangle.
+    const bisectorEdges = left.edge.filter((e) => e === 1);
+    expect(bisectorEdges).toHaveLength(1);
+  });
+
+  it('cells tile the rectangle exactly, and each holds its own site', () => {
+    for (let seed = 1; seed <= 10; seed++) {
+      const sites = randomSites(3 + seed, seed);
+      const cells = voronoiCells(sites, BOUNDS);
+      expect(cells.reduce((sum, c) => sum + area(c.points), 0)).toBeCloseTo(800 * 600, 3);
+      cells.forEach((c, i) => expect(inside(c.points, sites[i])).toBe(true));
+    }
+  });
+
+  it('every point lies in the cell of its nearest site', () => {
+    const sites = randomSites(12, 42);
+    const cells = voronoiCells(sites, BOUNDS);
+    for (const p of randomSites(300, 7)) {
+      const nearest = sites.reduce((best, s, i) => (dist(p, s) < dist(p, sites[best]) ? i : best), 0);
+      expect(inside(cells[nearest].points, p)).toBe(true);
+    }
+  });
+
+  it('each edge is labelled with the neighbour it borders (equidistant), or −1 for the rectangle', () => {
+    const sites = randomSites(10, 3);
+    voronoiCells(sites, BOUNDS).forEach((cell, i) => {
+      cell.points.forEach((p, k) => {
+        const q = cell.points[(k + 1) % cell.points.length];
+        const m = { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 };
+        const origin = cell.edge[k];
+        if (origin === -1) {
+          const onRect = [m.x, m.y, 800 - m.x, 600 - m.y].some((d) => Math.abs(d) < 1e-6);
+          expect(onRect).toBe(true);
+        } else {
+          expect(dist(m, sites[i])).toBeCloseTo(dist(m, sites[origin]), 6);
+        }
+      });
+    });
+  });
+
+  it('copes with sites at the same position', () => {
+    const cells = voronoiCells(
+      [
+        { x: 100, y: 100 },
+        { x: 100, y: 100 },
+        { x: 500, y: 400 },
+      ],
+      BOUNDS,
+    );
+    expect(cells[0].points.length).toBeGreaterThanOrEqual(3);
+    expect(area(cells[0].points)).toBeCloseTo(area(cells[1].points));
+  });
+});
+
+describe('territory', () => {
+  it('the border lies exactly halfway between the nearest inside and outside sites', () => {
+    for (let seed = 1; seed <= 8; seed++) {
+      const sites = randomSites(10, seed * 13);
+      const side = new Set([0, 1, 2, 3].filter((i) => i % 2 === seed % 2).concat([seed % 10]));
+      const { border, region } = territory(sites, side, BOUNDS);
+      expect(border.length).toBeGreaterThan(0);
+      for (const [p, q] of border) {
+        for (const t of [0.25, 0.5, 0.75]) {
+          const m = { x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t };
+          const dIn = Math.min(...sites.filter((_, i) => side.has(i)).map((s) => dist(m, s)));
+          const dOut = Math.min(...sites.filter((_, i) => !side.has(i)).map((s) => dist(m, s)));
+          expect(dIn).toBeCloseTo(dOut, 5);
+        }
+      }
+      // The region is the inside sites' cells, which hold exactly the inside sites.
+      expect(region).toHaveLength(side.size);
+      sites.forEach((s, i) => expect(region.some((poly) => inside(poly, s))).toBe(side.has(i)));
+    }
+  });
+
+  it('exists whatever the edges: it only depends on where the vertices are', () => {
+    // Two far-apart groups: the border runs between them.
+    const sites = [
+      { x: 100, y: 100 },
+      { x: 150, y: 140 },
+      { x: 650, y: 450 },
+      { x: 700, y: 500 },
+    ];
+    const { border } = territory(sites, new Set([0, 1]), BOUNDS);
+    expect(border.length).toBeGreaterThan(0);
+  });
+
+  it('has no border when either side is empty', () => {
+    const sites = randomSites(5, 9);
+    expect(territory(sites, new Set(), BOUNDS)).toEqual({ region: [], border: [] });
+    const all = territory(sites, new Set([0, 1, 2, 3, 4]), BOUNDS);
+    expect(all.border).toEqual([]);
+    expect(all.region.reduce((s, p) => s + area(p), 0)).toBeCloseTo(800 * 600, 3);
+  });
+});
+
+describe('path helpers', () => {
+  it('formats closed polygons and loose segments', () => {
+    expect(
+      polygonsPath([
+        [
+          { x: 0, y: 0 },
+          { x: 1.234567, y: 0 },
+          { x: 1, y: 1 },
+        ],
+      ]),
+    ).toBe('M 0 0 L 1.23 0 L 1 1 Z');
+    expect(segmentsPath([[{ x: 0, y: 0 }, { x: 2, y: 3 }]])).toBe('M 0 0 L 2 3');
+  });
+});
