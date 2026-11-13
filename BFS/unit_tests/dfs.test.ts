@@ -36,7 +36,7 @@ function runToEnd(sim: DfsSimulation): number {
 
 describe('DFS registry entry', () => {
   it('is offered after BFS, and requires the unweighted, directed view', () => {
-    expect(ALGORITHMS.map((a) => a.id)).toEqual(['bfs', 'dfs', 'prim']);
+    expect(ALGORITHMS.map((a) => a.id)).toEqual(['bfs', 'dfs', 'prim', 'kruskal']);
     expect(dfs.name).toBe('Depth-first search');
     expect(dfs.requires).toEqual({ weighted: false, directed: true });
     expect(dfs.create(g.directedView, 0)).toBeInstanceOf(DfsSimulation);

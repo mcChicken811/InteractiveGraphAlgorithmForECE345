@@ -1123,6 +1123,7 @@ test.describe('algorithm simulation (BFS)', () => {
       'Breadth-first search',
       'Depth-first search',
       "Prim's algorithm",
+      "Kruskal's algorithm",
     ]);
     await page.keyboard.press('Escape');
     await expect(runBtn(page)).toBeVisible();
@@ -3017,6 +3018,247 @@ test.describe("algorithm simulation (Prim's minimum spanning tree)", () => {
       await page.getByRole('tab', { name: 'Adjacency matrix' }).click();
       await page.locator('#adjacency-matrix').hover();
       await expect(cv.canvas).toHaveClass(/peek-ids/);
+    });
+  });
+});
+
+test.describe("algorithm simulation (Kruskal's minimum spanning tree)", () => {
+  const run = (page: Page) => page.getByRole('button', { name: 'Run', exact: true }).click();
+  const update = (page: Page) => page.getByRole('button', { name: 'Update', exact: true }).click();
+  const message = (page: Page) => page.locator('#message');
+  const radio = (page: Page, name: string) => page.getByRole('radio', { name, exact: true });
+  const edgesCard = (page: Page) => page.getByRole('region', { name: 'Sorted edges' });
+  const edgesStrip = (page: Page) => page.getByRole('list', { name: 'Sorted edges, lightest first' });
+  const settle = (page: Page) =>
+    page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => {}))));
+  const cutSettled = (_page: Page) => expect(cv.canvas).not.toHaveClass(/cut-moving/);
+  const GREEN = 'rgb(47, 158, 68)';
+  const WHITE = 'rgb(255, 255, 255)';
+
+  /**
+   * The Prim tests' graph: 0—1 (4), 0—2 (8), 1—2 (2), 1—3 (5), 2—3 (9), 3—4 (3).
+   * Sorted: 1—2, 3—4, 0—1, 1—3, 0—2, 2—3; Kruskal adds the first four (weight 14).
+   */
+  const S: Array<[number, number]> = [
+    [150, 200],
+    [420, 150],
+    [380, 430],
+    [640, 300],
+    [780, 480],
+  ];
+  const EDGES: Array<[number, number, number]> = [
+    [0, 1, 4],
+    [0, 2, 8],
+    [1, 2, 2],
+    [1, 3, 5],
+    [2, 3, 9],
+    [3, 4, 3],
+  ];
+
+  async function build(page: Page, { directed = false, weighted = true, spots = S, edges = EDGES } = {}): Promise<void> {
+    for (const p of spots) await cv.click(...p);
+    for (const [a, b] of edges) await connect(spots[a], spots[b]);
+    await page.locator('label[for="weights-on"]').click();
+    const height = page.viewportSize()!.height;
+    for (const [a, b, w] of edges) {
+      await cv.move(...mid(spots[a], spots[b]));
+      await page.mouse.wheel(0, -((w + 0.4) / 15) * height);
+      await expect(cv.edge(a, b)).toHaveAttribute('data-weight', String(w));
+    }
+    if (!weighted) await page.locator('label[for="weights-off"]').click();
+    if (directed) await page.locator('label[for="mode-directed"]').click();
+    await page.getByRole('combobox', { name: 'Algorithm' }).click();
+    await page.getByRole('option', { name: "Kruskal's algorithm" }).click();
+  }
+
+  async function steps(page: Page, n: number): Promise<void> {
+    for (let i = 0; i < n; i++) await update(page);
+  }
+
+  /** Edge "a-b" → 'tree' (in A), 'within' (inside one tree, not in A), 'next' (white), 'crossing' (grey) or 'dashed'. */
+  const edgeLook = (page: Page) =>
+    page.locator('#canvas .edge').evaluateAll((edges) =>
+      Object.fromEntries(
+        edges.map((e) => {
+          const g = e as SVGGElement;
+          const has = (c: string) => g.classList.contains(c);
+          const look = has('sim-tree')
+            ? 'tree'
+            : has('sim-active')
+              ? 'next'
+              : has('sim-crossing')
+                ? 'crossing'
+                : has('sim-within')
+                  ? 'within'
+                  : 'dashed';
+          return [`${g.dataset.edgeA}-${g.dataset.edgeB}`, look];
+        }),
+      ),
+    );
+
+  /** Sorted-edges tokens: 'next', then 'a—b:w' (+ '*' for the next one). */
+  const edgeTokens = (page: Page) =>
+    page.locator('#edges-strip > [data-key]:not(.exiting)').evaluateAll((els) =>
+      els.map((el) => {
+        if ((el as HTMLElement).dataset.key === 'next') return 'next';
+        const ends = el.querySelector('.q-edge-ends')!.textContent!.replace(/ — /, '—');
+        return `${ends}:${el.querySelector('.q-edge-weight')!.textContent}${el.classList.contains('front') ? '*' : ''}`;
+      }),
+    );
+
+  const labels = (page: Page) =>
+    page.locator('#canvas [data-node-id]').evaluateAll((nodes) => nodes.map((g) => g.querySelector('.sim-label')!.textContent));
+
+  test('Run forces Undirected and locks both switches, but keeps the chosen weighting; Stop restores', async ({ page }) => {
+    await build(page, { directed: true });
+    await run(page);
+    await expect(message(page)).toHaveText(
+      "Kruskal: every vertex is a set of its own; 6 edges sorted by weight. Next: 1 — 2 (weight 2) joins two trees: a light edge crossing the cut around 1's tree.",
+    );
+    await expect(radio(page, 'Undirected')).toBeChecked();
+    await expect(radio(page, 'Weighted')).toBeChecked();
+    for (const name of ['Undirected', 'Directed', 'Unweighted', 'Weighted']) await expect(radio(page, name)).toBeDisabled();
+    await page.getByRole('button', { name: 'Stop', exact: true }).click();
+    await expect(radio(page, 'Directed')).toBeChecked();
+    for (const name of ['Undirected', 'Directed', 'Unweighted', 'Weighted']) await expect(radio(page, name)).toBeEnabled();
+  });
+
+  test('presents like Prim: compact dots, the next edge white, the cut around it drawn with grey crossing edges', async ({ page }) => {
+    await build(page);
+    await run(page);
+    await expect(cv.canvas).toHaveClass(/sim-compact/);
+    await expect(cv.canvas.locator('.node.sim-current, .node.sim-running')).toHaveCount(0);
+    await expect(cv.canvas).toHaveClass(/has-cut/); // around 1, the next edge's first end
+    expect(await edgeLook(page)).toEqual({
+      '0-1': 'crossing',
+      '0-2': 'dashed',
+      '1-2': 'next',
+      '1-3': 'crossing',
+      '2-3': 'dashed',
+      '3-4': 'dashed',
+    });
+    await expect(cv.edge(1, 2).locator('.edge-line')).toHaveCSS('stroke', WHITE);
+  });
+
+  test('takes the edges lightest first: joins trees, and skips edges that would close a cycle', async ({ page }) => {
+    await build(page);
+    await run(page);
+    await steps(page, 3); // A = {1—2, 3—4, 0—1}; next 1—3
+    expect(await edgeLook(page)).toEqual({
+      '0-1': 'tree',
+      '0-2': 'within', // inside {0, 1, 2}: it would close a cycle
+      '1-2': 'tree',
+      '1-3': 'next',
+      '2-3': 'crossing',
+      '3-4': 'tree',
+    });
+    await expect(cv.edge(0, 1).locator('.edge-line')).toHaveCSS('stroke', GREEN);
+    await expect(cv.edge(0, 2).locator('.edge-line')).toHaveCSS('stroke', GREEN);
+    await expect(cv.edge(0, 2).locator('.edge-line')).not.toHaveCSS('stroke-dasharray', 'none');
+    await steps(page, 2); // add 1—3, skip 0—2
+    await expect(message(page)).toHaveText(
+      'Skipped 0 — 2 (weight 8): both ends were already in one tree. Forest weight 14. Next: 2 — 3 (weight 9) has both ends in one tree, so it would close a cycle.',
+    );
+    await update(page);
+    await expect(message(page)).toHaveText('Kruskal finished: a minimum spanning tree of 4 edges, total weight 14. Press Finish.');
+    await expect(page.getByRole('button', { name: 'Finish', exact: true })).toBeVisible();
+    // The tree's territory floods the canvas, then fades.
+    await expect(cv.canvas).not.toHaveClass(/has-cut/);
+  });
+
+  test('the border moves to the next edge’s tree after each Update', async ({ page }) => {
+    await build(page);
+    await run(page);
+    await cutSettled(page);
+    const before = await cv.canvas.locator('.cut-border').getAttribute('d');
+    await update(page);
+    await expect(cv.canvas).toHaveClass(/cut-moving/);
+    await cutSettled(page);
+    await expect(cv.canvas.locator('.cut-border')).not.toHaveAttribute('d', before!);
+  });
+
+  test('unweighted: counts every edge as 1', async ({ page }) => {
+    await build(page, { weighted: false });
+    await run(page);
+    await expect(radio(page, 'Unweighted')).toBeChecked();
+    await steps(page, 6);
+    await expect(message(page)).toHaveText(
+      'Kruskal finished: a minimum spanning tree of 4 edges, total weight 4 (every edge counts as 1). Press Finish.',
+    );
+  });
+
+  test('a graph that is not connected gives a minimum spanning forest', async ({ page }) => {
+    await build(page, { spots: [...S, [200, 520]] }); // vertex 5 has no edges
+    await run(page);
+    await steps(page, 6);
+    await expect(message(page)).toHaveText(
+      'Kruskal finished: the graph is not connected, so this is a minimum spanning forest of 2 trees, 4 edges, total weight 14. Press Finish.',
+    );
+  });
+
+  test.describe('sorted edges card', () => {
+    test.beforeEach(async ({ page }) => {
+      await page.getByRole('button', { name: 'Help and adjacency list' }).click();
+      await page.getByRole('button', { name: 'How to use' }).click(); // make room
+    });
+
+    test('appears only while Kruskal runs, listing the edges lightest first', async ({ page }) => {
+      await build(page);
+      await expect(edgesCard(page)).toBeHidden();
+      await run(page);
+      await expect(edgesCard(page)).toBeVisible();
+      await expect(page.getByRole('region', { name: 'Priority queue' })).toBeHidden();
+      expect(await edgeTokens(page)).toEqual(['next', '1—2:2*', '3—4:3', '0—1:4', '1—3:5', '0—2:8', '2—3:9']);
+      await expect(edgesStrip(page).getByRole('listitem').first()).toHaveAttribute('aria-label', 'Edge 1 — 2, weight 2, next');
+      await page.getByRole('button', { name: 'Stop', exact: true }).click();
+      await expect(edgesCard(page)).toBeHidden();
+    });
+
+    test('the edge taken slides out: green if added, struck through if skipped', async ({ page }) => {
+      await build(page);
+      await run(page);
+      await update(page); // 1—2 added
+      // The leaving pill only lives for its 0.34 s slide: check its class while it is there…
+      const leaving = page.locator('#edges-strip > .exiting');
+      await expect(leaving).toHaveClass(/added/);
+      await expect(leaving).toHaveCount(0, { timeout: 2000 });
+      expect(await edgeTokens(page)).toEqual(['next', '3—4:3*', '0—1:4', '1—3:5', '0—2:8', '2—3:9']);
+      await steps(page, 3);
+      await settle(page);
+      await update(page); // 0—2 skipped
+      await expect(page.locator('#edges-strip > .exiting')).toHaveClass(/skipped/);
+      // … and what those classes look like on a probe pill (no transition to wait for).
+      const look = await page.evaluate(() => {
+        const probe = (cls: string) => {
+          const el = document.createElement('div');
+          el.className = `q-edge ${cls}`;
+          document.querySelector('#edges-strip')!.append(el);
+          const cs = getComputedStyle(el);
+          const result = { border: cs.borderTopColor, decoration: cs.textDecorationLine, opacity: Number(cs.opacity) };
+          el.remove();
+          return result;
+        };
+        return { added: probe('added'), skipped: probe('skipped') };
+      });
+      expect(look.added.border).toBe(GREEN);
+      expect(look.skipped.decoration).toBe('line-through');
+      expect(look.skipped.opacity).toBeLessThan(0.6);
+    });
+
+    test('hovering it grows the vertices back and shows each one’s set: one number per tree', async ({ page }) => {
+      await build(page);
+      await run(page);
+      await steps(page, 2); // trees {1, 2}, {3, 4}, {0}
+      await settle(page);
+      await edgesStrip(page).hover();
+      await expect(cv.canvas).toHaveClass(/peek-labels/);
+      const [l0, l1, l2, l3, l4] = await labels(page);
+      expect(l1).toBe(l2);
+      expect(l3).toBe(l4);
+      expect(new Set([l0, l1, l3]).size).toBe(3);
+      await expect(cv.node(1).locator('.sim-label')).toHaveCSS('opacity', '1');
+      await cv.move(...S[4]);
+      await expect(cv.canvas).not.toHaveClass(/peek-labels/);
     });
   });
 });

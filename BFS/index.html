@@ -152,6 +152,12 @@
                   in unweighted mode.
                 </li>
                 <li>
+                  Kruskal's algorithm also builds a <strong>minimum spanning tree</strong>, but edge by edge:
+                  it takes the edges lightest first (the <strong>Sorted edges</strong> card) and keeps each one
+                  that joins two separate trees. The white edge is the next one; <strong>hover the sorted
+                  edges</strong> to see which set (tree) each vertex belongs to.
+                </li>
+                <li>
                   When DFS is done and found no backward edge (no cycle), <strong>Topological sort</strong> lines
                   the vertices up by decreasing finish time. Tree edges run along the line in white; the other
                   edges arc above (forward) or below (crossed). Auto-layout leaves this view; press the button
@@ -266,6 +272,34 @@
                 tabindex="0"
               ></div>
               <p id="pq-empty" class="queue-empty" hidden>The priority queue is empty.</p>
+            </div>
+          </section>
+          <!-- Shown only while an algorithm with an edge list (Kruskal) runs: src/edge-queue-view.ts. -->
+          <section id="edges-card" class="info-card queue-card" aria-labelledby="edges-title" hidden>
+            <h2 class="card-title" id="edges-title">
+              <button
+                class="card-toggle"
+                type="button"
+                aria-expanded="true"
+                aria-controls="edges-body"
+                data-collapse-key="sorted-edges"
+              >
+                <span>Sorted edges</span>
+                <svg class="chevron" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
+            </h2>
+            <div id="edges-body" class="card-body">
+              <!-- Focusable so keyboard users can scroll it; hovering or focusing it shows each vertex's set. -->
+              <div
+                id="edges-strip"
+                class="queue-strip"
+                role="list"
+                aria-label="Sorted edges, lightest first"
+                tabindex="0"
+              ></div>
+              <p id="edges-empty" class="queue-empty" hidden>Every edge has been considered.</p>
             </div>
           </section>
           <!-- Shown only while an algorithm with a recursion stack (DFS) runs: src/queue-view.ts. -->

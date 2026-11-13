@@ -4,6 +4,7 @@ import type { Graph } from './graph.js';
 import type { QueueView } from './queue-view.js';
 import type { SelectMenu } from './select-menu.js';
 import type { TimelineView } from './timeline-view.js';
+import type { EdgeQueueView } from './edge-queue-view.js';
 
 export interface RunnerElements {
   /** Algorithm picker. */
@@ -24,6 +25,9 @@ export interface RunnerElements {
   /** Side-panel card showing the algorithm's min-priority queue while it runs (if it has one). */
   priorityQueueCard?: HTMLElement;
   priorityQueueView?: QueueView;
+  /** Side-panel card listing the algorithm's edges in processing order while it runs (Kruskal). */
+  edgeQueueCard?: HTMLElement;
+  edgeQueueView?: EdgeQueueView;
   /** Side-panel card showing the algorithm's recursion stack while it runs (if it has one). */
   stackCard?: HTMLElement;
   stackView?: QueueView;
@@ -38,8 +42,8 @@ const LOCKED_TITLE = 'Locked while the algorithm runs. Press Stop to change it.'
  * Runs the selected algorithm step by step:
  *   Run    → locks the graph (editing, the direction switch, and the weighting) and
  *            forces the reading the algorithm requires (BFS: "Unweighted"; DFS:
- *            "Unweighted" and "Directed"; Prim: "Undirected", with the weighting left
- *            as chosen but locked), then starts the simulation;
+ *            "Unweighted" and "Directed"; Prim and Kruskal: "Undirected", with the
+ *            weighting left as chosen but locked), then starts the simulation;
  *   Update → advances one step; after the last step it turns into Finish;
  *   Topological sort → (DFS, once finished) lines the vertices up in topological order
  *            as an arc diagram; greyed out when the graph has a cycle. The run goes on
@@ -157,6 +161,8 @@ export class AlgorithmRunner {
     if (this.el.queueCard) this.el.queueCard.hidden = true;
     this.el.priorityQueueView?.update(null, false);
     if (this.el.priorityQueueCard) this.el.priorityQueueCard.hidden = true;
+    this.el.edgeQueueView?.update(null, false);
+    if (this.el.edgeQueueCard) this.el.edgeQueueCard.hidden = true;
     this.el.stackView?.update(null, false);
     if (this.el.stackCard) this.el.stackCard.hidden = true;
     this.el.timelineView?.collapse(false);
@@ -178,6 +184,9 @@ export class AlgorithmRunner {
     const priorityQueue = simulation.priorityQueueSnapshot?.() ?? null;
     if (this.el.priorityQueueCard) this.el.priorityQueueCard.hidden = priorityQueue === null;
     this.el.priorityQueueView?.update(priorityQueue, animate, highlight.labels);
+    const edgeQueue = simulation.edgeQueueSnapshot?.() ?? null;
+    if (this.el.edgeQueueCard) this.el.edgeQueueCard.hidden = edgeQueue === null;
+    this.el.edgeQueueView?.update(edgeQueue, animate);
     const stack = simulation.stackSnapshot?.() ?? null;
     if (this.el.stackCard) this.el.stackCard.hidden = stack === null;
     this.el.stackView?.update(stack, animate, highlight.labels);

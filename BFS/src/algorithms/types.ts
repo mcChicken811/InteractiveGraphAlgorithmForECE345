@@ -2,8 +2,8 @@ import type { NodeId } from '../graph.js';
 import type { GraphView } from '../graph-views.js';
 
 /**
- * Shared shape of every step-by-step algorithm simulation (BFS, DFS, Prim; Dijkstra, …
- * later). A simulation is pure: it reads the graph only through a read-only GraphView and
+ * Shared shape of every step-by-step algorithm simulation (BFS, DFS, Prim, Kruskal;
+ * Dijkstra, … later). A simulation is pure: it reads the graph only through a read-only GraphView and
  * keeps its own state, so it can be unit-tested without any DOM.
  */
 
@@ -129,6 +129,21 @@ export interface TimestampSnapshot {
   current: NodeId | null;
 }
 
+/** An undirected edge with its weight, as [smaller id, larger id]. */
+export interface WeightedPair {
+  from: NodeId;
+  to: NodeId;
+  weight: number;
+}
+
+/** A list of edges waiting their turn, for the side panel (Kruskal's sorted edges). */
+export interface EdgeQueueSnapshot {
+  /** The edges still to come, the next one first. */
+  items: WeightedPair[];
+  /** The edge the latest step took off the front, and whether it was added (kept) or skipped. */
+  last: (WeightedPair & { added: boolean }) | null;
+}
+
 export interface Simulation {
   /** True once the last step has been taken; `step()` then does nothing. */
   readonly finished: boolean;
@@ -145,6 +160,8 @@ export interface Simulation {
    * smallest key first; shown in the side panel while running.
    */
   priorityQueueSnapshot?(): QueueSnapshot;
+  /** The algorithm's list of edges in processing order, if it has one (Kruskal). */
+  edgeQueueSnapshot?(): EdgeQueueSnapshot;
   /** The algorithm's recursion stack, if it has one; shown in the side panel while running. */
   stackSnapshot?(): StackSnapshot;
   /** The algorithm's timestamps, if it keeps them; shown as a chart in the side panel while running. */

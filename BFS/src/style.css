@@ -1145,6 +1145,51 @@ button:disabled {
   opacity: 0.75;
 }
 
+/* Kruskal's sorted edges: a pill per edge, its ends over its weight. */
+.q-edge {
+  display: grid;
+  flex: none;
+  justify-items: center;
+  min-width: 46px;
+  padding: 2px 9px 3px;
+  border: 2px solid var(--edge);
+  border-radius: 999px;
+  background: var(--node-fill);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+  white-space: nowrap;
+  transition:
+    border-color 0.3s,
+    color 0.3s,
+    opacity 0.3s;
+}
+
+.q-edge-weight {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Just taken: green if it was added to the forest, faded and struck through if skipped. */
+.q-edge.added {
+  border-color: var(--sim-done);
+  color: var(--sim-done);
+}
+
+.q-edge.skipped {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .q-edge {
+    transition: none;
+  }
+}
+
 /* Prim's priority queue: no white ring on the front (it is marked by its place at the min end). */
 .strip-priority .q-node.front:not(.popped) {
   border-color: var(--accent);

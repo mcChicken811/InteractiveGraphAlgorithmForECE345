@@ -10,6 +10,7 @@ import { SelectMenu } from './select-menu.js';
 import { QueueView } from './queue-view.js';
 import { StatusBar } from './status-bar.js';
 import { TimelineView } from './timeline-view.js';
+import { EdgeQueueView } from './edge-queue-view.js';
 followColorScheme();
 const svg = document.querySelector('#canvas');
 const stats = document.querySelector('#stats');
@@ -92,6 +93,9 @@ queueView.onPeek = (peek) => editor.setPeek(peek ? 'ids' : null);
 const priorityQueueView = new QueueView(document.querySelector('#pq-strip'), document.querySelector('#pq-empty'), { kind: 'priority' });
 // Hovering it shows the keys on the canvas (Prim's vertices are compact dots otherwise).
 priorityQueueView.onPeek = (peek) => editor.setPeek(peek ? 'labels' : null);
+// Kruskal's edges in sorted order; hovering shows each vertex's set (FIND-SET) on the canvas.
+const edgeQueueView = new EdgeQueueView(document.querySelector('#edges-strip'), document.querySelector('#edges-empty'));
+edgeQueueView.onPeek = (peek) => editor.setPeek(peek ? 'labels' : null);
 // DFS's recursion stack works the same way; its vertices show "discovery,finish" times.
 const stackView = new QueueView(document.querySelector('#stack-strip'), document.querySelector('#stack-empty'), {
     kind: 'stack',
@@ -128,6 +132,8 @@ runner = new AlgorithmRunner(graph, editor, {
     queueView,
     priorityQueueCard: document.querySelector('#pq-card'),
     priorityQueueView,
+    edgeQueueCard: document.querySelector('#edges-card'),
+    edgeQueueView,
     stackCard: document.querySelector('#stack-card'),
     stackView,
     timestampsCard: document.querySelector('#timestamps-card'),

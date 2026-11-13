@@ -4,8 +4,8 @@ const LOCKED_TITLE = 'Locked while the algorithm runs. Press Stop to change it.'
  * Runs the selected algorithm step by step:
  *   Run    → locks the graph (editing, the direction switch, and the weighting) and
  *            forces the reading the algorithm requires (BFS: "Unweighted"; DFS:
- *            "Unweighted" and "Directed"; Prim: "Undirected", with the weighting left
- *            as chosen but locked), then starts the simulation;
+ *            "Unweighted" and "Directed"; Prim and Kruskal: "Undirected", with the
+ *            weighting left as chosen but locked), then starts the simulation;
  *   Update → advances one step; after the last step it turns into Finish;
  *   Topological sort → (DFS, once finished) lines the vertices up in topological order
  *            as an arc diagram; greyed out when the graph has a cycle. The run goes on
@@ -116,6 +116,9 @@ export class AlgorithmRunner {
         this.el.priorityQueueView?.update(null, false);
         if (this.el.priorityQueueCard)
             this.el.priorityQueueCard.hidden = true;
+        this.el.edgeQueueView?.update(null, false);
+        if (this.el.edgeQueueCard)
+            this.el.edgeQueueCard.hidden = true;
         this.el.stackView?.update(null, false);
         if (this.el.stackCard)
             this.el.stackCard.hidden = true;
@@ -140,6 +143,10 @@ export class AlgorithmRunner {
         if (this.el.priorityQueueCard)
             this.el.priorityQueueCard.hidden = priorityQueue === null;
         this.el.priorityQueueView?.update(priorityQueue, animate, highlight.labels);
+        const edgeQueue = simulation.edgeQueueSnapshot?.() ?? null;
+        if (this.el.edgeQueueCard)
+            this.el.edgeQueueCard.hidden = edgeQueue === null;
+        this.el.edgeQueueView?.update(edgeQueue, animate);
         const stack = simulation.stackSnapshot?.() ?? null;
         if (this.el.stackCard)
             this.el.stackCard.hidden = stack === null;
