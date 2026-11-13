@@ -2,8 +2,8 @@
   // Type-checks everything (app, tests, configs). `npm run typecheck`
   "compilerOptions": {
     "target": "ES2022",
-    // NodeNext enforces explicit ".js" import extensions, which the browser needs
-    // because build/ output is loaded directly without a bundler.
+    // NodeNext enforces explicit ".js" import extensions (rolldown.config.mjs resolves
+    // them to the .ts files when it bundles src/ into build/app.js).
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],

@@ -12,26 +12,26 @@ npm install
 
 ## Compile
 
-The browser can't run TypeScript, so `src/*.ts` is compiled to plain ES modules in `build/*.js` (with source maps). `index.html` loads `./build/main.js`.
+The browser can't run TypeScript, so `src/*.ts` is type-checked, then bundled into one classic (non-module) script, `build/app.js`, with a source map back to `src/`. `index.html` loads `./build/app.js`. A single classic script also runs when `index.html` is opened straight from disk (`file://`), where browsers refuse ES modules.
 
 | Command | What it runs | Use it to |
 | --- | --- | --- |
-| `npm run build` | `tsc -p tsconfig.build.json` | Compile once |
-| `npm run dev` | `tsc -p tsconfig.build.json --watch` | Recompile on every save while editing |
+| `npm run build` | `tsc -p tsconfig.build.json`, then `rolldown -c rolldown.config.mjs` | Type-check `src/` and bundle it once |
+| `npm run dev` | both in watch mode, side by side | Re-check and rebundle on every save while editing |
 | `npm run typecheck` | `tsc` | Type-check `src/`, the tests and the config files without writing output |
 
-- `tsconfig.build.json` holds the compile settings (`src/` → `build/`) and extends `tsconfig.json`, which holds the shared type-check settings.
-- Recompile after changing anything in `src/`, or the page keeps running the old code. If the page shows "The app script didn't load", `build/` is missing: run `npm run build`.
+- `tsconfig.build.json` type-checks `src/` only, and extends `tsconfig.json`, which holds the shared type-check settings. Neither writes any output.
+- `rolldown.config.mjs` bundles `src/main.ts` and everything it imports into `build/app.js`, an IIFE. Rolldown strips the types itself, so a type error stops `npm run build` at the `tsc` step, before bundling. In `npm run dev` the two run side by side, so a type error is reported but the bundle is still rebuilt.
+- Rebuild after changing anything in `src/`, or the page keeps running the old code. If the page shows "The app script didn't load", `build/` is missing: run `npm run build`.
 - Run `npm run build` before committing changes to `src/`, because `build/` is committed.
 
 ## Run
 
-Any static file server works, because `index.html` loads everything by relative path:
+`index.html` loads everything by relative path, so it works without any setup:
 
+- **Straight from disk:** open `index.html` in a browser (double-click it). `build/` is committed, so this works from a fresh clone without `npm install`.
 - **VS Code Live Server:** keep `npm run dev` running and open `index.html` with Live Server. It reloads the page whenever `build/` changes.
 - **No editor server:** run `npm run serve` and open http://127.0.0.1:5199/.
-
-Opening the file directly (`file://`) does not work, because browsers block ES modules there.
 
 ## Tests
 
@@ -65,7 +65,7 @@ Pass Playwright options after `--`, e.g. `npm run test:e2e -- --grep "edge"`.
   - grids unfold, and isolated or coincident nodes spread out
   - nodes stay in bounds and pinned nodes stay put
   - the layout settles and gives the same result every run
-- `tests/graph-builder.spec.ts`: end-to-end tests that click, drag, right-click, type and tap in a real browser. Playwright runs `npm run build`, then starts `scripts/static-server.mjs` on port 5199. That server serves files as-is from the repository root, the way Live Server does, so a page that only works through a dev server fails the tests.
+- `tests/graph-builder.spec.ts`: end-to-end tests that click, drag, right-click, type and tap in a real browser. Playwright runs `npm run build`, then starts `scripts/static-server.mjs` on port 5199. That server serves files as-is from the repository root, the way Live Server does, so a page that only works through a dev server fails the tests. One test also opens `index.html` from disk (`file://`), with no server.
 
 ### Isolated browser-test environment (Docker)
 
@@ -473,4 +473,5 @@ Freivalds, Dogrusoz & Kikusts study this approach in *Disconnected Graph Layout 
 - `src/collapsible.ts` — collapsible cards: a title button (`aria-expanded` / `aria-controls`) shows or hides its card body, and the state is remembered in `localStorage`.
 - `src/favicon.ts` — points the favicon links at the light or dark icon to match the page's colour scheme (`prefers-color-scheme`), and updates them when it changes.
 - `icons/` — the favicon: a graph node without its number, in the page's light and dark palettes (`favicon-{light,dark}.svg`), plus 64×64 PNG fallbacks for browsers without SVG favicons (e.g. Safari). After editing an SVG, run `npm run icons` (`scripts/render-favicons.mjs`, uses the installed Chrome) to re-render the PNGs.
-- `build/` — compiled JavaScript loaded by the page. It is committed so the page works from a fresh clone, so rebuild it before committing changes to `src/`. Imports in `src/` use `.js` extensions because the browser loads them unbundled.
+- `build/` — `app.js`, the bundled JavaScript loaded by the page, and its source map. It is committed so the page works from a fresh clone, so rebuild it before committing changes to `src/`. Imports in `src/` use `.js` extensions, as NodeNext module resolution requires; the bundler resolves them to the `.ts` files.
+- `rolldown.config.mjs` — bundles `src/main.ts` into `build/app.js` (one classic script, so the page also runs from `file://`).

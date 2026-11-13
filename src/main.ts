@@ -1,5 +1,6 @@
-// Compiled by `npm run build` to build/main.js, which index.html loads directly.
-// Imports use .js extensions because browsers resolve them verbatim (no bundler).
+// Bundled by `npm run build` with everything it imports into build/app.js, the classic
+// script index.html loads (so the page also runs when opened from file://).
+// Imports use .js extensions, as NodeNext module resolution requires.
 import { Graph } from './graph.js';
 import { GraphEditor } from './editor.js';
 import { renderAdjacencyList, renderAdjacencyMatrix, setupTabs } from './representations.js';

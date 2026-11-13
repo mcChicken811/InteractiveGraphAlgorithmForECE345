@@ -1,12 +1,9 @@
 {
-  // Compiles src/*.ts to build/*.js for the browser. `npm run build` / `npm run dev`
+  // Type-checks the app (src/) before rolldown.config.mjs bundles it into build/app.js.
+  // `npm run build` / `npm run dev`
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "noEmit": false,
-    "rootDir": "src",
-    "outDir": "build",
-    "types": [],
-    "sourceMap": true
+    "types": []
   },
   "include": ["src"]
 }

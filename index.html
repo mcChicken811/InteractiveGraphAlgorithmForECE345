@@ -10,9 +10,12 @@
     <link rel="icon" type="image/svg+xml" href="./icons/favicon-light.svg" data-favicon="svg" />
     <link rel="icon" type="image/png" sizes="64x64" href="./icons/favicon-light.png" data-favicon="png" />
     <!-- Relative paths so the page works from any static server (VS Code Live Server,
-         GitHub Pages, …) no matter which folder is the server root. -->
+         GitHub Pages, …) no matter which folder is the server root, and when the file is
+         opened straight from disk. build/app.js is a classic script (one bundle, not ES
+         modules), since browsers refuse module scripts on file://; defer runs it once the
+         page is parsed, as a module script would. -->
     <link rel="stylesheet" href="./src/style.css" />
-    <script type="module" src="./build/main.js"></script>
+    <script defer src="./build/app.js"></script>
   </head>
   <body>
     <header class="topbar">
@@ -406,7 +409,7 @@
         <svg id="canvas" role="img" aria-label="Graph editor canvas"></svg>
         <!-- The Timestamps card moves in here while expanded (modal, over a darkened, blurred page). -->
         <dialog id="timestamps-dialog" class="tl-dialog" aria-labelledby="timestamps-title"></dialog>
-        <!-- Replaced by build/main.js on startup; stays visible only if the script failed to load. -->
+        <!-- Replaced by build/app.js on startup; stays visible only if the script failed to load. -->
         <p id="message" class="message" data-tone="warn" aria-live="polite">
           The app script didn't load. Run <code>npm run build</code> in the project folder and reload.
         </p>

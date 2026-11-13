@@ -119,6 +119,23 @@ test('loads every resource from a plain static server without errors', async ({ 
   expect(failures).toEqual([]);
 });
 
+test('also works opened straight from disk (file://), with no server', async ({ page }) => {
+  // Browsers refuse ES module scripts on file://, so index.html loads one classic bundle.
+  const errors: string[] = [];
+  page.on('console', (m) => {
+    if (m.type() === 'error') errors.push(`console: ${m.text()}`);
+  });
+  page.on('pageerror', (err) => errors.push(`pageerror: ${err.message}`));
+  await page.goto(new URL('../index.html', import.meta.url).href);
+  expect(page.url()).toMatch(/^file:/);
+  await expect(page.locator('#message')).not.toContainText("didn't load");
+  await cv.click(...P.a);
+  await cv.click(...P.b);
+  await expect(cv.nodes).toHaveCount(2);
+  await expect(page.locator('#stats')).toContainText('2 nodes');
+  expect(errors).toEqual([]);
+});
+
 /** Builds nodes 0, 1, 2 at P.a, P.b, P.c. */
 async function addTriangleNodes(): Promise<void> {
   await cv.click(...P.a);
