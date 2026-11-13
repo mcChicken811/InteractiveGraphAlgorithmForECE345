@@ -96,13 +96,42 @@ Edges are always **stored as directed arcs**: clicking A, then B, records A → 
 | Click A, then B, when B → A exists | adds A → B | refused: already connected |
 | Click an edge to delete it | removes that one arc | removes the arcs in both directions |
 
-`Graph.directed` holds the mode. `hasEdge`, `neighbors`, `getEdges`, `edgeCount`, `addEdge`, `removeEdge` and the two representations all follow it, while `hasArc`, `getArcs` and `undirectedNeighbors` always see the raw arcs. Auto-layout and `connectedComponents()` always ignore direction (for a directed graph, the components are its weakly connected components), so switching modes never moves nodes.
+`Graph.directed` holds the UI's mode. The mode-dependent methods on `Graph` (`hasEdge`, `neighbors`, `getEdges`, `edgeCount`, `addEdge`, `removeEdge`, `adjacencyList`, `adjacencyMatrix`) follow it. Code that needs a particular reading should use the views below instead. Auto-layout and `connectedComponents()` always ignore direction (for a directed graph, the components are its weakly connected components), so switching modes never moves nodes.
+
+### Reading the graph in code: directed and undirected views
+
+`src/graph-views.ts` adds a read-only layer over the stored arcs. Both readings of the same graph are always available, regardless of the UI's mode:
+
+```ts
+// Stored arcs: 0 → 1, 1 → 0, 1 → 2, 3 → 2
+const d = graph.directedView;    // or graph.view('directed')
+const u = graph.undirectedView;  // or graph.view('undirected')
+const v = graph.currentView;     // whichever the Undirected/Directed switch selects
+
+u.neighbors(2);          // [1, 3]       neighbours either way, sorted
+d.neighbors(2);          // []           out-neighbours
+d.inNeighbors(2);        // [1, 3]       plus outDegree / inDegree
+u.hasEdge(2, 3);         // true         d.hasEdge(2, 3) → false
+u.edges();               // [[0,1],[1,2],[2,3]]   pairs once, as [min, max]
+d.edges();               // [[0,1],[1,0],[1,2],[3,2]]   every arc
+u.adjacencyList();       // [{ id: 0, neighbors: [1] }, …]
+d.adjacencyMatrix();     // { ids: [0,1,2,3], matrix: [[0,1,0,0], …] }
+u.connectedComponents(); // BFS components, ignoring direction
+```
+
+Both views implement `GraphView`: `orientation`, `directed`, `nodeIds`, `neighbors`, `degree`, `hasEdge`, `edges`, `edgeCount`, `adjacencyList` and `adjacencyMatrix`.
+
+- **Pure:** reading never changes the graph, and each call returns fresh arrays, so callers can keep or modify the results without affecting the graph.
+- **Live:** each call reflects the graph's current state.
+- **Sorted:** ids are always in ascending order, which gives algorithms such as BFS a deterministic visiting order.
+
+The panel's renderers take a `GraphView`, so they can draw either reading.
 
 ## Auto-layout
 
 The **Auto-layout** toggle runs a force-directed layout ([src/layout.ts](src/layout.ts)) that spaces the graph out. Each step does the following:
 
-1. **Split into connected components** using breadth-first search (`Graph.connectedComponents()`).
+1. **Split into connected components** using breadth-first search (`graph.undirectedView.connectedComponents()`).
 2. **Run Fruchterman–Reingold (1991) inside each component.** This is a refinement of Eades' spring embedder (1984):
    - every pair of nodes repels with force k²/d
    - every edge pulls its endpoints together with force d²/k
@@ -138,7 +167,8 @@ Freivalds, Dogrusoz & Kikusts study this approach in *Disconnected Graph Layout 
 
 ## Code layout
 
-- `src/graph.ts` — `Graph` model: arcs stored as out/in adjacency `Set`s, interpreted as directed or undirected via `graph.directed`, plus node positions and BFS-based `connectedComponents()`. `neighbors(id)` returns ids in sorted order, giving BFS a deterministic visiting order.
+- `src/graph.ts` — `Graph` model: stores nodes (with positions) and arcs as out/in adjacency `Set`s, handles all edits, and exposes the two views. Its mode-dependent readers follow `graph.directed`.
+- `src/graph-views.ts` — the read-only `GraphView` layer: `DirectedView` (with in/out neighbours and degrees) and `UndirectedView` (with BFS-based `connectedComponents()`). `neighbors(id)` returns ids in sorted order, giving BFS a deterministic visiting order.
 - `src/editor.ts` — `GraphEditor`: SVG rendering, pointer/keyboard interaction, and driving the auto-layout animation.
 - `src/layout.ts` — `ForceLayout` (per-component force-directed layout, fitting and packing) and `packRows`; pure, no DOM.
 - `src/main.ts` — wires the editor to the stats, status message, Auto-layout toggle and the ☰ help/adjacency-list panel.

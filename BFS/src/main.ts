@@ -26,8 +26,9 @@ function refreshPanels(): void {
   stats.textContent = `${n} node${n === 1 ? '' : 's'} · ${m} edge${m === 1 ? '' : 's'}`;
   clearBtn.disabled = n === 0;
 
-  renderAdjacencyList(adjacencyEl, graph);
-  renderAdjacencyMatrix(matrixEl, graph);
+  // The panel shows whichever reading of the graph the Undirected/Directed switch selects.
+  renderAdjacencyList(adjacencyEl, graph.currentView);
+  renderAdjacencyMatrix(matrixEl, graph.currentView);
   listNote.textContent = graph.directed
     ? 'Each node followed by the nodes its edges point to.'
     : 'Each node followed by its neighbours.';

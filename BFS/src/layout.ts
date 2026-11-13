@@ -382,7 +382,7 @@ export class ForceLayout {
     // arcs both ways attracts like one edge and switching directed/undirected mode
     // never changes the layout.
     for (const a of ids) {
-      for (const b of graph.undirectedNeighbors(a)) {
+      for (const b of graph.undirectedView.neighbors(a)) {
         if (b < a) continue; // each pair once
         const p = pos.get(a)!;
         const q = pos.get(b)!;

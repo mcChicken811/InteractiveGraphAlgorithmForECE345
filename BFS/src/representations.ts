@@ -1,8 +1,10 @@
-import type { Graph } from './graph.js';
+import type { GraphView } from './graph-views.js';
 
 /**
- * Views of the two standard graph representations shown in the ☰ panel:
- * the adjacency list and the adjacency matrix, with a left/right switch between them.
+ * Renders the two standard graph representations shown in the ☰ panel: the adjacency
+ * list and the adjacency matrix, with a left/right switch between them. The renderers
+ * take a read-only GraphView, so they can show either the directed or the undirected
+ * reading of the graph.
  */
 
 const EMPTY = 'No nodes yet.';
@@ -12,8 +14,8 @@ const EMPTY = 'No nodes yet.';
  * a gap, each vertex's neighbours as boxes joined left to right (like an array).
  * Built from nested lists so screen readers announce "Neighbours of 0, 2 items" etc.
  */
-export function renderAdjacencyList(target: HTMLElement, graph: Graph): void {
-  const rows = graph.adjacencyList();
+export function renderAdjacencyList(target: HTMLElement, view: GraphView): void {
+  const rows = view.adjacencyList();
   if (rows.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'adj-empty';
@@ -39,7 +41,7 @@ export function renderAdjacencyList(target: HTMLElement, graph: Graph): void {
 
     const chain = document.createElement('ul');
     chain.className = 'adj-neighbors';
-    chain.setAttribute('aria-label', `${graph.directed ? 'Out-neighbours' : 'Neighbours'} of ${id}`);
+    chain.setAttribute('aria-label', `${view.directed ? 'Out-neighbours' : 'Neighbours'} of ${id}`);
     for (const n of neighbors) {
       const box = document.createElement('li');
       box.className = 'adj-box';
@@ -61,8 +63,8 @@ export function renderAdjacencyList(target: HTMLElement, graph: Graph): void {
 }
 
 /** Renders the adjacency matrix as a table with node ids as row and column headers. */
-export function renderAdjacencyMatrix(target: HTMLElement, graph: Graph): void {
-  const { ids, matrix } = graph.adjacencyMatrix();
+export function renderAdjacencyMatrix(target: HTMLElement, view: GraphView): void {
+  const { ids, matrix } = view.adjacencyMatrix();
   if (ids.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'matrix-empty';

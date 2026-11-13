@@ -1,3 +1,13 @@
+import {
+  type AdjacencyList,
+  type AdjacencyMatrix,
+  type ArcReader,
+  DirectedView,
+  type GraphView,
+  type Orientation,
+  UndirectedView,
+} from './graph-views.js';
+
 export type NodeId = number;
 
 export interface GraphNode {
@@ -8,30 +18,59 @@ export interface GraphNode {
 
 /**
  * Unweighted graph. Edges are always *stored* as directed arcs (from → to), in an
- * out-adjacency list plus an in-adjacency list for fast removal. The `directed` flag
- * only chooses how that data is *interpreted*:
+ * out-adjacency list plus an in-adjacency list for fast removal.
  *
- *  - directed:   every arc is its own edge (u → v and v → u are two edges).
- *  - undirected: u and v are adjacent if there is an arc either way, so u → v,
- *                v → u, or both all count as the single edge {u, v}.
+ * Reading: the arcs can be interpreted as a directed or an undirected graph. Both
+ * interpretations are always available as pure, read-only views (see graph-views.ts):
  *
- * Node positions live here too so the editor can render them.
+ *   graph.directedView     every arc is its own edge
+ *   graph.undirectedView   an arc either way (or both) is one edge
+ *   graph.view(o)          either of the above, by name
+ *   graph.currentView      the one selected by `graph.directed` (the UI's mode)
+ *
+ * The convenience readers on Graph itself (`neighbors`, `hasEdge`, `getEdges`,
+ * `edgeCount`, `adjacencyList`, `adjacencyMatrix`) delegate to `currentView`.
+ *
+ * Writing: `addEdge` / `removeEdge` also follow `directed` (see their docs). Node
+ * positions live here too so the editor can render them.
  */
 export class Graph {
-  /** How edges are interpreted. Switching it never changes the stored arcs. */
+  /** Which view the mode-dependent methods use. Switching it never changes the stored arcs. */
   directed = false;
 
   private readonly nodes = new Map<NodeId, GraphNode>();
   private readonly out = new Map<NodeId, Set<NodeId>>();
   private readonly in = new Map<NodeId, Set<NodeId>>();
 
-  get nodeCount(): number {
-    return this.nodes.size;
+  /** Read-only access to the stored arcs, shared by the views. */
+  private readonly reader: ArcReader = {
+    nodeIds: () => [...this.nodes.keys()].sort((a, b) => a - b),
+    out: (id) => this.out.get(id),
+    in: (id) => this.in.get(id),
+  };
+
+  /** The arcs read as a directed graph. */
+  readonly directedView = new DirectedView(this.reader);
+  /** The arcs read as an undirected graph. */
+  readonly undirectedView = new UndirectedView(this.reader);
+
+  /** The view for the given orientation. */
+  view(orientation: 'directed'): DirectedView;
+  view(orientation: 'undirected'): UndirectedView;
+  view(orientation: Orientation): GraphView;
+  view(orientation: Orientation): GraphView {
+    return orientation === 'directed' ? this.directedView : this.undirectedView;
   }
 
-  /** Number of edges under the current interpretation. */
-  get edgeCount(): number {
-    return this.getEdges().length;
+  /** The view selected by `directed`. */
+  get currentView(): GraphView {
+    return this.directed ? this.directedView : this.undirectedView;
+  }
+
+  // ------------------------------------------------------------------ nodes
+
+  get nodeCount(): number {
+    return this.nodes.size;
   }
 
   /** Adds a node using the smallest unused id, so labels stay compact. */
@@ -75,57 +114,20 @@ export class Graph {
 
   // ------------------------------------------------------------ stored arcs
 
-  /** True if the arc from → to is stored (ignores the interpretation). */
+  /** True if the arc from → to is stored (ignores `directed`). */
   hasArc(from: NodeId, to: NodeId): boolean {
-    return this.out.get(from)?.has(to) ?? false;
+    return this.directedView.hasEdge(from, to);
   }
 
-  /** Every stored arc as [from, to], sorted. */
+  /** Every stored arc as [from, to], sorted (ignores `directed`). */
   getArcs(): Array<[NodeId, NodeId]> {
-    const arcs: Array<[NodeId, NodeId]> = [];
-    for (const [from, set] of this.out) for (const to of set) arcs.push([from, to]);
-    return arcs.sort((p, q) => p[0] - q[0] || p[1] - q[1]);
-  }
-
-  /** Neighbours ignoring direction (arcs either way), sorted. Used by the layout. */
-  undirectedNeighbors(id: NodeId): NodeId[] {
-    const set = new Set([...(this.out.get(id) ?? []), ...(this.in.get(id) ?? [])]);
-    return [...set].sort((a, b) => a - b);
-  }
-
-  // ------------------------------------------- edges, per the interpretation
-
-  /**
-   * Edges under the current interpretation, sorted:
-   * directed → each arc as [from, to]; undirected → each adjacent pair once as [min, max].
-   */
-  getEdges(): Array<[NodeId, NodeId]> {
-    if (this.directed) return this.getArcs();
-    const edges: Array<[NodeId, NodeId]> = [];
-    for (const { id: a } of this.getNodes()) {
-      for (const b of this.undirectedNeighbors(a)) if (a < b) edges.push([a, b]);
-    }
-    return edges;
-  }
-
-  /**
-   * Neighbours of a node, sorted by id (a stable order for BFS):
-   * directed → out-neighbours (nodes its arcs point to); undirected → arcs either way.
-   */
-  neighbors(id: NodeId): NodeId[] {
-    if (this.directed) return [...(this.out.get(id) ?? [])].sort((a, b) => a - b);
-    return this.undirectedNeighbors(id);
-  }
-
-  /** Directed: is there an arc a → b? Undirected: is there an arc either way? */
-  hasEdge(a: NodeId, b: NodeId): boolean {
-    return this.directed ? this.hasArc(a, b) : this.hasArc(a, b) || this.hasArc(b, a);
+    return this.directedView.edges();
   }
 
   /**
    * Adds an edge from a to b, always stored as the arc a → b.
-   * Returns false for self-loops, unknown nodes, or an edge that already exists under
-   * the current interpretation (undirected: a and b already adjacent either way).
+   * Returns false for self-loops, unknown nodes, or an edge that already exists in the
+   * current view (undirected: a and b already adjacent either way).
    */
   addEdge(a: NodeId, b: NodeId): boolean {
     if (a === b || !this.nodes.has(a) || !this.nodes.has(b) || this.hasEdge(a, b)) return false;
@@ -135,7 +137,7 @@ export class Graph {
   }
 
   /**
-   * Removes the edge between a and b under the current interpretation:
+   * Removes the edge between a and b in the current view:
    * directed → only the arc a → b; undirected → the arcs in both directions.
    */
   removeEdge(a: NodeId, b: NodeId): boolean {
@@ -150,58 +152,44 @@ export class Graph {
     return true;
   }
 
-  // -------------------------------------------------------- representations
-
-  /** Adjacency-list representation: every node (by id) with its sorted neighbours. */
-  adjacencyList(): Array<{ id: NodeId; neighbors: NodeId[] }> {
-    return this.getNodes().map(({ id }) => ({ id, neighbors: this.neighbors(id) }));
-  }
-
-  /**
-   * Adjacency-matrix representation. `ids` (ascending) label the rows and columns;
-   * `matrix[i][j]` is 1 when there is an edge from ids[i] to ids[j]. Undirected, the
-   * matrix is symmetric; directed, row i lists the arcs leaving ids[i]. The diagonal is
-   * 0 because self-loops are not allowed.
-   */
-  adjacencyMatrix(): { ids: NodeId[]; matrix: Array<Array<0 | 1>> } {
-    const ids = this.getNodes().map((n) => n.id);
-    const matrix = ids.map((a) => ids.map((b) => (this.hasEdge(a, b) ? 1 : 0) as 0 | 1));
-    return { ids, matrix };
-  }
-
-  /**
-   * Connected components, found by breadth-first search with edge directions ignored
-   * (for a directed graph these are its *weakly* connected components).
-   * Ordered largest first (ties: smallest node id first); each component lists its
-   * node ids in BFS order from its smallest id.
-   */
-  connectedComponents(): NodeId[][] {
-    const seen = new Set<NodeId>();
-    const components: NodeId[][] = [];
-    for (const { id: start } of this.getNodes()) {
-      if (seen.has(start)) continue;
-      const component: NodeId[] = [];
-      const queue: NodeId[] = [start];
-      seen.add(start);
-      for (let head = 0; head < queue.length; head++) {
-        const v = queue[head];
-        component.push(v);
-        for (const w of this.undirectedNeighbors(v)) {
-          if (!seen.has(w)) {
-            seen.add(w);
-            queue.push(w);
-          }
-        }
-      }
-      components.push(component);
-    }
-    // Stable sort: equal sizes keep discovery order, i.e. by smallest id.
-    return components.sort((a, b) => b.length - a.length);
-  }
-
   clear(): void {
     this.nodes.clear();
     this.out.clear();
     this.in.clear();
+  }
+
+  // ------------------------------- readers for the current view (by `directed`)
+
+  /** Number of edges in the current view. */
+  get edgeCount(): number {
+    return this.currentView.edgeCount;
+  }
+
+  /** Edges in the current view (see GraphView.edges). */
+  getEdges(): Array<[NodeId, NodeId]> {
+    return this.currentView.edges();
+  }
+
+  /** Neighbours in the current view, sorted by id (a stable order for BFS). */
+  neighbors(id: NodeId): NodeId[] {
+    return this.currentView.neighbors(id);
+  }
+
+  /** Is there an edge a → b (directed) / between a and b (undirected) in the current view? */
+  hasEdge(a: NodeId, b: NodeId): boolean {
+    return this.currentView.hasEdge(a, b);
+  }
+
+  adjacencyList(): AdjacencyList {
+    return this.currentView.adjacencyList();
+  }
+
+  adjacencyMatrix(): AdjacencyMatrix {
+    return this.currentView.adjacencyMatrix();
+  }
+
+  /** Connected components ignoring direction (see UndirectedView.connectedComponents). */
+  connectedComponents(): NodeId[][] {
+    return this.undirectedView.connectedComponents();
   }
 }
