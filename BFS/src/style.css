@@ -385,6 +385,11 @@ button:disabled {
   color: var(--muted);
   font-size: 14px;
   text-align: center;
+  /* While its size animates (src/status-bar.ts), the bar clips the text and keeps it centred. */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
   /* Shown/hidden by src/status-bar.ts. Revealing is quick… */
   translate: 0 0;
   transition: translate 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -394,6 +399,12 @@ button:disabled {
 .message.is-hidden {
   translate: 0 calc(100% + 24px);
   transition: translate 0.9s cubic-bezier(0.45, 0, 0.55, 1);
+}
+
+/* The text keeps its own width while the bar resizes around it. */
+.message-text {
+  flex: none;
+  max-width: 100%;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -117,6 +117,23 @@ describe('StatusBar', () => {
     expect(hidden()).toBe(false);
   });
 
+  it('keeps the text in its own element (so it can fade and hold its width while the bar resizes)', () => {
+    status.show('Hello');
+    const text = bar.querySelector('.message-text');
+    expect(text?.textContent).toBe('Hello');
+    expect(bar.children).toHaveLength(1);
+    status.show('A much longer message');
+    expect(bar.querySelector('.message-text')).toBe(text); // reused, not replaced
+    expect(text!.textContent).toBe('A much longer message');
+  });
+
+  it('keeps any initial text (e.g. the no-script fallback) inside the text element', () => {
+    document.body.innerHTML = '<div id="a2"><p id="b2">  Loading…  </p></div>';
+    const b2 = document.querySelector<HTMLElement>('#b2')!;
+    new StatusBar(b2, document.querySelector('#a2')!);
+    expect(b2.querySelector('.message-text')!.textContent).toBe('Loading…');
+  });
+
   it('respects a custom delay', () => {
     const quick = new StatusBar(bar, area, { hideAfterMs: 1000 });
     quick.show('Hi');

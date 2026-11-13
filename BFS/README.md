@@ -259,7 +259,8 @@ Freivalds, Dogrusoz & Kikusts study this approach in *Disconnected Graph Layout 
   - **Hiding:** 5 s after the last message, with the pointer neither on the bar nor near it, the bar slides slowly down out of view.
   - **Revealing:** a new message, or the pointer coming near the bottom edge where the bar hides (or a tap there), slides it quickly back.
   - **Staying up:** it stays up while hovered or approached.
-  - **Reduced motion:** with "reduce motion" on, it hides and shows instantly.
+  - **Resizing:** a new message never snaps the bar to its new size. Its width and height animate (0.26 s, ease-out) while the new text fades in, and from the first frame the text is laid out exactly as it will end up (same width, same line breaks). While the bar is still smaller, it clips whatever doesn't fit yet. A message arriving mid-resize continues from the current size.
+  - **Reduced motion:** with "reduce motion" on, it hides, shows and resizes instantly.
 - `src/runner.ts` — `AlgorithmRunner`: the header's picker and Run / Update / Finish / Stop buttons, the locks, and passing each step's highlight to the editor.
 - `src/collapsible.ts` — collapsible cards: a title button (`aria-expanded` / `aria-controls`) shows or hides its card body, and the state is remembered in `localStorage`.
 - `src/favicon.ts` — points the favicon links at the light or dark icon to match the page's colour scheme (`prefers-color-scheme`), and updates them when it changes.

@@ -1786,6 +1786,156 @@ test.describe('status bar (auto-hiding message box)', () => {
     await expect(bar(page)).not.toHaveClass(/is-hidden/);
   });
 
+  /**
+   * Shows a new message (by pressing Run: a much longer message than the start-up one) in
+   * the same tick as it starts sampling, then records the bar's width every frame.
+   */
+  async function widthsWhileShowing(page: Page): Promise<number[]> {
+    return page.evaluate(
+      () =>
+        new Promise<number[]>((resolve) => {
+          const bar = document.querySelector('#message')!;
+          const widths: number[] = [];
+          (document.querySelector('#run-btn') as HTMLButtonElement).click();
+          const t0 = performance.now();
+          const frame = () => {
+            widths.push(bar.getBoundingClientRect().width);
+            if (performance.now() - t0 < 500) requestAnimationFrame(frame);
+            else resolve(widths);
+          };
+          frame();
+        }),
+    );
+  }
+
+  test('a new message resizes the bar smoothly, not instantly', async ({ page }) => {
+    await cv.click(...P.a); // "Added node 0." — short
+    await page.waitForTimeout(400); // let that change settle
+    const start = await bar(page).evaluate((el) => el.getBoundingClientRect().width);
+    const widths = await widthsWhileShowing(page);
+    const end = widths[widths.length - 1];
+    expect(end).toBeGreaterThan(start + 100); // the new message is much longer
+    // In between, the bar passes through intermediate widths, growing steadily.
+    const between = widths.filter((w) => w > start + 2 && w < end - 2);
+    expect(between.length).toBeGreaterThanOrEqual(3);
+    for (let i = 1; i < widths.length; i++) expect(widths[i]).toBeGreaterThanOrEqual(widths[i - 1] - 0.5);
+    // Once settled, the bar is exactly as wide as its text needs.
+    const natural = await bar(page).evaluate((el) => {
+      const text = el.querySelector('.message-text')!;
+      const cs = getComputedStyle(el);
+      return text.getBoundingClientRect().width + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + 2;
+    });
+    expect(Math.abs(end - natural)).toBeLessThan(1.5);
+  });
+
+  test('while resizing, the text is laid out at its final size from the start; the bar clips the rest', async ({ page }) => {
+    await cv.click(...P.a); // short message
+    await page.waitForTimeout(400);
+    const frames = await page.evaluate(
+      () =>
+        new Promise<Array<{ textW: number; textH: number; barW: number }>>((resolve) => {
+          const bar = document.querySelector('#message')!;
+          const text = bar.querySelector('.message-text')!;
+          const frames: Array<{ textW: number; textH: number; barW: number }> = [];
+          (document.querySelector('#run-btn') as HTMLButtonElement).click(); // much longer message
+          const t0 = performance.now();
+          const frame = () => {
+            const t = text.getBoundingClientRect();
+            frames.push({ textW: t.width, textH: t.height, barW: bar.getBoundingClientRect().width });
+            if (performance.now() - t0 < 500) requestAnimationFrame(frame);
+            else resolve(frames);
+          };
+          frame();
+        }),
+    );
+    const final = frames[frames.length - 1];
+    const lineHeight = await page.locator('#message .message-text').evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
+    expect(final.textH).toBeLessThan(lineHeight * 1.5); // the final message fits on one line
+    expect(frames.some((f) => f.barW < final.barW - 20)).toBe(true); // the bar really was narrower for a while
+    for (const f of frames) {
+      expect(Math.abs(f.textH - final.textH)).toBeLessThan(1); // never wraps onto a second line
+      expect(Math.abs(f.textW - final.textW)).toBeLessThan(1.5); // laid out at its final width throughout
+    }
+    // Whatever doesn't fit yet is clipped by the bar.
+    expect(await page.locator('#message').evaluate((el) => getComputedStyle(el).overflow)).toBe('hidden');
+  });
+
+  test.describe('on a narrow screen', () => {
+    test.use({ viewport: { width: 390, height: 844 } });
+
+    test('a message that wraps at its final size keeps exactly that wrapping while resizing', async ({ page }) => {
+      await cv.click(80, 300);
+      await page.waitForTimeout(400);
+      const frames = await page.evaluate(
+        () =>
+          new Promise<number[]>((resolve) => {
+            const text = document.querySelector('#message .message-text')!;
+            const heights: number[] = [];
+            (document.querySelector('#run-btn') as HTMLButtonElement).click();
+            const t0 = performance.now();
+            const frame = () => {
+              heights.push(text.getBoundingClientRect().height);
+              if (performance.now() - t0 < 500) requestAnimationFrame(frame);
+              else resolve(heights);
+            };
+            frame();
+          }),
+      );
+      const lineHeight = await page.locator('#message .message-text').evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
+      const final = frames[frames.length - 1];
+      expect(final).toBeGreaterThan(lineHeight * 1.5); // wraps at its final size on a phone…
+      for (const h of frames) expect(Math.abs(h - final)).toBeLessThan(1); // …and the same throughout
+      // Settled: back to normal, so it fits the screen.
+      const box = (await page.locator('#message').boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(390);
+    });
+  });
+
+  test('the new text fades in while the bar resizes', async ({ page }) => {
+    await cv.click(...P.a);
+    await page.waitForTimeout(400);
+    await page.getByRole('button', { name: 'Run', exact: true }).click();
+    const fading = await page
+      .locator('#message .message-text')
+      .evaluate((el) => el.getAnimations().some((a) => JSON.stringify((a.effect as KeyframeEffect).getKeyframes()).includes('opacity')));
+    expect(fading).toBe(true);
+  });
+
+  test('messages arriving mid-resize continue smoothly from the current size', async ({ page }) => {
+    await cv.click(...P.a);
+    await page.waitForTimeout(400);
+    const widths = await page.evaluate(
+      () =>
+        new Promise<number[]>((resolve) => {
+          const bar = document.querySelector('#message')!;
+          const widths: number[] = [];
+          (document.querySelector('#run-btn') as HTMLButtonElement).click(); // long message
+          let n = 0;
+          const frame = () => {
+            widths.push(bar.getBoundingClientRect().width);
+            if (++n === 4) (document.querySelector('#stop-btn') as HTMLButtonElement).click(); // another message mid-way
+            if (n < 40) requestAnimationFrame(frame);
+            else resolve(widths);
+          };
+          frame();
+        }),
+    );
+    // No jumps: consecutive frames never differ by more than a smooth step would.
+    for (let i = 1; i < widths.length; i++) expect(Math.abs(widths[i] - widths[i - 1])).toBeLessThan(80);
+  });
+
+  test('a hidden bar slides in at its new size instead', async ({ page }) => {
+    await page.clock.runFor(5100);
+    await expect.poll(() => position(page), { timeout: 3000 }).toBe('hidden');
+    await cv.click(...P.a);
+    const resizing = await bar(page).evaluate((el) =>
+      el.getAnimations().some((a) => JSON.stringify((a.effect as KeyframeEffect).getKeyframes()).includes('width')),
+    );
+    expect(resizing).toBe(false);
+    await expect.poll(() => position(page), { timeout: 1000 }).toBe('shown');
+  });
+
   test.describe('with reduced motion', () => {
     test.use({ reducedMotion: 'reduce' });
 
@@ -1793,6 +1943,12 @@ test.describe('status bar (auto-hiding message box)', () => {
       expect(await bar(page).evaluate((el) => getComputedStyle(el).transitionDuration)).toBe('0s');
       await page.clock.runFor(5100);
       await expect.poll(() => position(page)).toBe('hidden');
+    });
+
+    test('resizes instantly', async ({ page }) => {
+      await cv.click(...P.a);
+      await page.getByRole('button', { name: 'Run', exact: true }).click();
+      expect(await bar(page).evaluate((el) => el.getAnimations().length)).toBe(0);
     });
   });
 });
