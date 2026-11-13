@@ -102,7 +102,7 @@ const queueView = new QueueView(
   document.querySelector<HTMLElement>('#queue-strip')!,
   document.querySelector<HTMLElement>('#queue-empty')!,
 );
-queueView.onPeek = (peek) => editor.setLabelPeek(peek);
+queueView.onPeek = (peek) => editor.setPeek(peek ? 'ids' : null);
 
 // Prim's min-priority queue, smallest key first; its vertices show their keys.
 const priorityQueueView = new QueueView(
@@ -110,7 +110,8 @@ const priorityQueueView = new QueueView(
   document.querySelector<HTMLElement>('#pq-empty')!,
   { kind: 'priority' },
 );
-priorityQueueView.onPeek = (peek) => editor.setLabelPeek(peek);
+// Hovering it shows the keys on the canvas (Prim's vertices are compact dots otherwise).
+priorityQueueView.onPeek = (peek) => editor.setPeek(peek ? 'labels' : null);
 
 // DFS's recursion stack works the same way; its vertices show "discovery,finish" times.
 const stackView = new QueueView(
@@ -124,7 +125,14 @@ const stackView = new QueueView(
     },
   },
 );
-stackView.onPeek = (peek) => editor.setLabelPeek(peek);
+stackView.onPeek = (peek) => editor.setPeek(peek ? 'ids' : null);
+
+// Hovering the adjacency list or matrix always shows the vertex ids on the canvas, whatever
+// the algorithm draws inside the vertices, so they can be matched to the rows and columns.
+for (const inner of [adjacencyEl, matrixEl]) {
+  inner.addEventListener('pointerenter', () => editor.setPeek('ids'));
+  inner.addEventListener('pointerleave', () => editor.setPeek(null));
+}
 
 // DFS's timestamps as a chart; its corner button expands it to the middle of the screen.
 const timelineView = new TimelineView({

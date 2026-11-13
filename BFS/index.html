@@ -146,16 +146,20 @@
                 <li>
                   Prim's algorithm reads the graph as undirected and grows a
                   <strong>minimum spanning tree</strong> from the start node (green vertices and edges; other
-                  edges are dashed). Vertices show their <strong>key</strong>: the lightest edge found so far
-                  joining them to the tree (∞ if none). It uses the edge weights in weighted mode, and counts
-                  every edge as 1 in unweighted mode. <strong>Hover the priority queue</strong> to see the vertex
-                  numbers.
+                  edges are dashed). Vertices shrink to small dots; <strong>hover the priority queue</strong> to
+                  grow them back and see their <strong>keys</strong>: the lightest edge found so far joining them
+                  to the tree (∞ if none). It uses the edge weights in weighted mode, and counts every edge as 1
+                  in unweighted mode.
                 </li>
                 <li>
                   When DFS is done and found no backward edge (no cycle), <strong>Topological sort</strong> lines
                   the vertices up by decreasing finish time. Tree edges run along the line in white; the other
                   edges arc above (forward) or below (crossed). Auto-layout leaves this view; press the button
                   again to come back.
+                </li>
+                <li>
+                  While any algorithm runs, <strong>hover the adjacency list or matrix</strong> to see the vertex
+                  numbers on the canvas.
                 </li>
                 <li>
                   Messages appear at the bottom and slide away after 5&nbsp;s; move the mouse to the bottom

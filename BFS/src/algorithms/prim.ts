@@ -42,13 +42,15 @@ import type { AlgorithmDefinition, ExploredEdge, Highlight, QueueSnapshot, Simul
  *
  * The display shows what the next step will do: the white edge is the vertex's joining
  * edge — the light edge — that the next step adds (no vertex is ringed white). The other
- * crossing edges are solid grey. The cut
- * itself is drawn as a border on the canvas: the tree's territory (the canvas nearer to a
- * tree vertex than to any queued vertex) is shaded, so the border shows even when no edge
- * crosses the cut (a graph that is not connected). Vertices in
- * the tree are green, as are the tree's edges (solid) and the other edges between tree
- * vertices (dashed green); every other edge is dashed. Vertices still in the queue keep
- * their normal ring. Each vertex is labelled with its key.
+ * crossing edges are solid grey. The cut itself is drawn as a border on the canvas: the
+ * tree's territory (the canvas nearer to the tree's vertices and inner edges than to the
+ * rest) is shaded, so the border shows even when no edge crosses the cut (a graph that is
+ * not connected). Vertices in the tree are green, as are the tree's edges (solid) and the
+ * other edges between tree vertices (dashed green); every other edge is dashed.
+ *
+ * Vertices are drawn compact: half size, filled with their colour (green in the tree, the
+ * normal colour in the queue), with no number. Each is labelled with its key, shown when
+ * the priority queue is hovered (the vertices grow back to full size meanwhile).
  */
 export interface TreeEdge {
   from: NodeId;
@@ -167,6 +169,8 @@ export class PrimSimulation implements Simulation {
     return {
       // No vertex is ringed white: the white light edge shows where the tree grows next.
       current: null,
+      // Small filled dots; the keys show when the priority queue is hovered.
+      compact: true,
       done: [...this.order],
       activeEdges: next !== null && via !== null ? [[via, next]] : [],
       labels: Object.fromEntries([...this.key].map(([id, k]) => [id, formatKey(k)])),

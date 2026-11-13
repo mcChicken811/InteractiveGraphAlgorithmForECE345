@@ -127,16 +127,21 @@ export class GraphEditor {
     setHighlight(highlight) {
         this.highlight = highlight;
         this.svg.classList.toggle('sim-labels', !!highlight?.labels);
+        this.svg.classList.toggle('sim-compact', !!highlight?.compact);
         if (!highlight)
-            this.setLabelPeek(false);
+            this.setPeek(null);
         this.render();
     }
     /**
-     * While an algorithm labels the vertices (e.g. BFS distances), `true` shows the vertex
-     * ids again instead — used while the pointer is over the queue strip. CSS crossfades.
+     * Temporarily changes what the vertices show while the pointer is over (or focus is in)
+     * a side-panel strip or panel. CSS crossfades, and grows compact vertices back:
+     *  - 'ids': the vertex ids (instead of an algorithm's labels, such as BFS distances);
+     *  - 'labels': the algorithm's labels (Prim's keys, hidden while vertices are compact);
+     *  - null: back to normal.
      */
-    setLabelPeek(peek) {
-        this.svg.classList.toggle('peek-ids', peek);
+    setPeek(mode) {
+        this.svg.classList.toggle('peek-ids', mode === 'ids');
+        this.svg.classList.toggle('peek-labels', mode === 'labels');
     }
     get directed() {
         return this.graph.directed;
@@ -633,7 +638,7 @@ export class GraphEditor {
                 g = svgEl('g', { class: 'node' });
                 g.dataset.nodeId = String(node.id);
                 // Two overlapping labels: the id, and an algorithm's label (BFS: the distance). CSS
-                // crossfades between them (see setLabelPeek).
+                // crossfades between them (see setPeek).
                 const label = svgEl('text', { class: 'node-index', 'text-anchor': 'middle', 'dominant-baseline': 'central' });
                 label.textContent = String(node.id);
                 const simLabel = svgEl('text', { class: 'sim-label', 'text-anchor': 'middle', 'dominant-baseline': 'central' });

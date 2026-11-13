@@ -49,6 +49,11 @@ const LABEL_FONT = 12;
 export interface QueueViewOptions {
   /** 'queue' (BFS, the default), 'priority' (Prim's min-priority queue) or 'stack' (DFS's recursion stack). */
   kind: 'queue' | 'stack' | 'priority';
+  /**
+   * Whether hovering the strip switches its own circles to vertex ids (default: true; the
+   * priority queue keeps showing its keys, since hovering it shows keys on the canvas).
+   */
+  peekIds: boolean;
   /** How a vertex's label is read out to screen readers (default: "distance 2"; priority: "key 2"). */
   describeLabel: (label: string) => string;
 }
@@ -72,10 +77,10 @@ export class QueueView {
   ) {
     const kind = options.kind ?? 'queue';
     const describeLabel = (label: string) => (kind === 'priority' ? `key ${label}` : `distance ${label}`);
-    this.options = { kind, describeLabel, ...options };
+    this.options = { kind, describeLabel, peekIds: kind !== 'priority', ...options };
     strip.classList.add(`strip-${this.options.kind}`);
     const peek = (on: boolean) => {
-      strip.classList.toggle('peek-ids', on);
+      strip.classList.toggle('peek-ids', on && this.options.peekIds);
       this.onPeek?.(on);
     };
     strip.addEventListener('pointerenter', () => peek(true));

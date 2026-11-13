@@ -62,6 +62,7 @@ describe('PrimSimulation (weighted, CLRS MST-PRIM)', () => {
     expect(sim.queued).toEqual([0, 1, 2, 3, 4]);
     expect(sim.highlight()).toEqual({
       current: null, // no vertex is ringed white (0 is extracted next)
+      compact: true,
       done: [],
       activeEdges: [], // the root joins by no edge
       labels: { 0: '0', 1: '∞', 2: '∞', 3: '∞', 4: '∞' },
@@ -179,6 +180,11 @@ describe('PrimSimulation (weighted, CLRS MST-PRIM)', () => {
       [1, 3],
       [2, 3],
     ]);
+  });
+
+  it('asks for compact vertices (small filled dots) at every step', () => {
+    do expect(sim.highlight().compact).toBe(true);
+    while (sim.step());
   });
 
   it('never marks vertices as running (no yellow rings)', () => {

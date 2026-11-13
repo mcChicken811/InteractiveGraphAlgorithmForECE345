@@ -36,6 +36,12 @@ export interface Highlight {
    */
   exploredEdges?: ExploredEdge[];
   /**
+   * Draw the vertices compact (Prim): shrunk to half size, filled with what would be their
+   * ring colour, and with no number inside. Hovering a strip or panel that shows numbers
+   * or labels expands them back to show those (see GraphEditor.setPeek).
+   */
+  compact?: boolean;
+  /**
    * One side S of a cut (S, V − S) (Prim: the tree's vertices). The canvas shades S's
    * territory — the part of the canvas nearer to a vertex of S than to any other vertex
    * (its Voronoi cells) — and draws the border with V − S's territory, which exists even

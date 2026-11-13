@@ -1660,6 +1660,16 @@ test.describe('BFS distance labels', () => {
     await expect.poll(async () => (await canvasLabels(page))[2].showing).toBe('label');
   });
 
+  test('hovering the adjacency list also shows the ids instead of the distances', async ({ page }) => {
+    await build(page);
+    await run(page);
+    await page.locator('#adjacency').hover();
+    await expect(cv.canvas).toHaveClass(/peek-ids/);
+    await expect.poll(async () => (await canvasLabels(page)).map((n) => n.showing)).toEqual(['id', 'id', 'id', 'id']);
+    await cv.move(...P.d);
+    await expect.poll(async () => (await canvasLabels(page))[2].showing).toBe('label');
+  });
+
   test('keyboard focus on the queue also shows the ids', async ({ page }) => {
     await build(page);
     await run(page);
@@ -2457,7 +2467,21 @@ test.describe("algorithm simulation (Prim's minimum spanning tree)", () => {
   const WHITE = 'rgb(255, 255, 255)';
   const YELLOW = 'rgb(242, 169, 0)';
   const GREEN = 'rgb(47, 158, 68)';
+  const ACCENT = 'rgb(59, 91, 219)';
   const strokeOf = (id: number) => cv.node(id).locator('circle').evaluate((c) => getComputedStyle(c).stroke);
+  const settle = (page: Page) =>
+    page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => {}))));
+  /** Each vertex circle: 'small' (compact, half size) or 'full'. */
+  const circleWidths = (page: Page) =>
+    page.locator('#canvas .node circle').evaluateAll((cs) =>
+      cs.map((c) => (c.getBoundingClientRect().width < 30 ? 'small' : 'full')),
+    );
+  /** How many vertices show their label (key) and how many their number, fully. */
+  const showing = (page: Page) =>
+    page.locator('#canvas .node').evaluateAll((nodes) => ({
+      label: nodes.filter((g) => getComputedStyle(g.querySelector('.sim-label')!).opacity === '1').length ? 1 : 0,
+      index: nodes.filter((g) => getComputedStyle(g.querySelector('.node-index')!).opacity === '1').length ? 1 : 0,
+    }));
 
   /**
    * Edges with weights: 0—1 (4), 0—2 (8), 1—2 (2), 1—3 (5), 2—3 (9), 3—4 (3).
@@ -2771,6 +2795,31 @@ test.describe("algorithm simulation (Prim's minimum spanning tree)", () => {
     await expect(cv.edge(0, 1).locator('.edge-line')).toHaveCSS('stroke-dasharray', 'none'); // tree edges solid
   });
 
+  test('vertices shrink to half size, filled with their colour, with no number shown', async ({ page }) => {
+    await build(page);
+    const fullWidth = await cv.node(0).locator('circle').evaluate((c) => c.getBoundingClientRect().width);
+    await run(page);
+    // It animates: a transition on the circle's transform is under way.
+    const shrinking = await cv.node(0).locator('circle').evaluate((c) =>
+      c.getAnimations().some((a) => (a as CSSTransition).transitionProperty === 'transform'),
+    );
+    expect(shrinking).toBe(true);
+    await settle(page);
+    const width = await cv.node(0).locator('circle').evaluate((c) => c.getBoundingClientRect().width);
+    expect(width).toBeCloseTo(fullWidth / 2, 0);
+    expect(await showing(page)).toEqual({ label: 0, index: 0 }); // no numbers at all
+    await update(page); // 0 joins the tree
+    await settle(page);
+    await expect(cv.node(0).locator('circle')).toHaveCSS('fill', GREEN); // filled with its ring colour
+    await expect(cv.node(1).locator('circle')).toHaveCSS('fill', ACCENT);
+    // Stopping brings back the normal vertices.
+    await page.getByRole('button', { name: 'Stop', exact: true }).click();
+    await settle(page);
+    const back = await cv.node(0).locator('circle').evaluate((c) => c.getBoundingClientRect().width);
+    expect(back).toBeCloseTo(fullWidth, 0);
+    await expect(cv.node(0)).toHaveText(/^0/);
+  });
+
   test('finishes with the minimum spanning tree and its total weight', async ({ page }) => {
     await build(page);
     await run(page);
@@ -2883,18 +2932,41 @@ test.describe("algorithm simulation (Prim's minimum spanning tree)", () => {
       await expect(leaving).toHaveCount(0, { timeout: 2000 });
     });
 
-    test('hovering the queue shows the vertex numbers, here and on the canvas', async ({ page }) => {
+    test('hovering the queue grows the vertices back and shows their keys (not their numbers)', async ({ page }) => {
       await build(page);
       await run(page);
       await update(page);
-      await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => {}))));
+      await settle(page);
+      expect(await circleWidths(page)).toEqual(Array(5).fill('small'));
       await pqStrip(page).hover();
+      await expect(cv.canvas).toHaveClass(/peek-labels/);
+      await expect(cv.canvas).not.toHaveClass(/peek-ids/);
+      await settle(page);
+      expect(await circleWidths(page)).toEqual(Array(5).fill('full'));
+      expect(await showing(page)).toEqual({ label: 1, index: 0 });
+      expect(await labels(page)).toEqual(['0', '4', '8', '∞', '∞']); // the keys
+      // The strip itself keeps showing the keys.
+      await expect(pqStrip(page).locator('.q-label').first()).toHaveCSS('opacity', '1');
+      await cv.move(...S[4]);
+      await expect(cv.canvas).not.toHaveClass(/peek-labels/);
+      await settle(page);
+      expect(await circleWidths(page)).toEqual(Array(5).fill('small'));
+    });
+
+    test('hovering the adjacency list or matrix grows the vertices back and shows their numbers', async ({ page }) => {
+      await build(page);
+      await run(page);
+      await update(page);
+      await page.locator('#adjacency').hover();
       await expect(cv.canvas).toHaveClass(/peek-ids/);
-      await expect
-        .poll(() => cv.node(1).locator('.node-index').evaluate((el) => Number(getComputedStyle(el).opacity)))
-        .toBe(1);
+      await settle(page);
+      expect(await circleWidths(page)).toEqual(Array(5).fill('full'));
+      expect(await showing(page)).toEqual({ label: 0, index: 1 });
       await cv.move(...S[4]);
       await expect(cv.canvas).not.toHaveClass(/peek-ids/);
+      await page.getByRole('tab', { name: 'Adjacency matrix' }).click();
+      await page.locator('#adjacency-matrix').hover();
+      await expect(cv.canvas).toHaveClass(/peek-ids/);
     });
   });
 });

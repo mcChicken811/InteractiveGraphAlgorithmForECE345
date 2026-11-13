@@ -135,6 +135,8 @@ The header's picker lists the available algorithms: **Breadth-first search**, **
   - **Weighting:** the weighting the algorithm needs is forced and its switch is greyed out. BFS and DFS force **Unweighted**. Prim reads the weights but accepts either setting, so the switch keeps your choice and is only locked for the run.
   - Stop / Finish restore the direction and weighting you had chosen before.
 
+**Seeing the vertex numbers.** While any algorithm runs, hovering the adjacency list or matrix in the Graph representation card shows the vertex numbers on the canvas (growing Prim's compact vertices back), so vertices can be matched to rows and columns.
+
 **BFS steps.** The canvas always shows what the next Update will do:
 
 - **White:** the vertex at the front of the queue, which the next Update pops, and the edges that Update will travel (from it to neighbours not discovered yet). Right after Run, that's the start vertex.
@@ -238,8 +240,9 @@ A graph with *n* vertices takes exactly *n* Updates.
   - **Live:** it follows vertices as they are dragged or moved by auto-layout.
   - **Source:** this is the Voronoi view of a partition that GMap starts from (Gansner, Hu & Kobourov, *GMap: Visualizing Graphs and Clusters as Maps*, IEEE PacificVis 2010), extended to edges.
   - **Computation:** the exact Voronoi diagram of points *and segments* has curved (parabolic) borders. It is approximated in the usual way, by sampling points every 14 px along each non-crossing edge and computing the exact Voronoi cells of all the points. Each cell is the canvas rectangle clipped by the perpendicular bisectors with nearby points, found through a grid of buckets. A graph of 20 vertices and 40 edges (about 540 points) takes about 8 ms, and nothing is recomputed when nothing has moved.
-- **Keys:** each vertex shows its key, ∞ until some edge reaches it from the tree. Unlike BFS and DFS, unreached vertices are not blank: every vertex is in the queue from the start, and ∞ is the value that orders it.
-- **Priority queue card:** a **Priority queue** card appears at the bottom of the ☰ panel, listing the queue as `← min  (smallest key) … (largest key)`. The front vertex is the next to be extracted, marked by its place at the min end (no ring colour). On Update the extracted vertex turns green and slides out, and vertices whose keys dropped glide to their new places. Hovering or focusing the strip shows the vertex numbers, on the canvas too.
+- **Compact vertices:** while Prim runs, every vertex shrinks to half size (animated) and is filled with its colour — green in the tree, the normal blue in the queue — with no number inside.
+- **Keys:** each vertex's key is ∞ until some edge reaches it from the tree. Hovering (or focusing) the priority queue grows the vertices back to full size and shows their keys. Unlike BFS and DFS, unreached vertices are not blank: every vertex is in the queue from the start, and ∞ is the value that orders it.
+- **Priority queue card:** a **Priority queue** card appears at the bottom of the ☰ panel, listing the queue as `← min  (smallest key) … (largest key)`. The front vertex is the next to be extracted, marked by its place at the min end (no ring colour). On Update the extracted vertex turns green and slides out, and vertices whose keys dropped glide to their new places. The strip always shows keys; hovering it shows the keys on the canvas too.
 - **Graphs that are not connected:** CLRS assumes a connected graph, but the pseudocode still terminates. When only keys of ∞ are left, the extracted vertex has no joining edge and starts a new tree, so the result is a minimum spanning forest, one tree per connected part. The final message says so.
 
 ### Adding another algorithm

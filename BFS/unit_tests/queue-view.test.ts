@@ -224,6 +224,16 @@ describe('QueueView as a min-priority queue', () => {
     expect([...strip.querySelectorAll('.q-label')].map((el) => el.textContent)).toEqual(['4', '∞']);
   });
 
+  it('hovering keeps showing the keys in the strip (the canvas shows them instead), but still reports the peek', () => {
+    const peeks: boolean[] = [];
+    pq.onPeek = (p) => peeks.push(p);
+    pq.update({ items: [1, 2], incoming: [] }, false, { 1: '4', 2: '∞' });
+    strip.dispatchEvent(new PointerEvent('pointerenter'));
+    expect(strip.classList.contains('peek-ids')).toBe(false);
+    strip.dispatchEvent(new PointerEvent('pointerleave'));
+    expect(peeks).toEqual([true, false]);
+  });
+
   it('shows the empty note once every vertex has been extracted', () => {
     pq.update({ items: [], incoming: [] }, false);
     expect(empty.hidden).toBe(false);

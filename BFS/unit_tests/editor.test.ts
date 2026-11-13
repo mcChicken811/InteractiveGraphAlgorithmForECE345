@@ -986,6 +986,23 @@ describe('GraphEditor lock and algorithm highlight', () => {
     expect(parseFloat(size(1))).toBeLessThan(14);
   });
 
+  it('compact highlights mark the canvas; peeks show ids or labels; clearing resets both', () => {
+    editor.setHighlight({ current: null, done: [0], activeEdges: [], labels: { 0: '0', 1: '4' }, compact: true });
+    expect(svg.classList.contains('sim-compact')).toBe(true);
+    editor.setPeek('labels');
+    expect([svg.classList.contains('peek-labels'), svg.classList.contains('peek-ids')]).toEqual([true, false]);
+    editor.setPeek('ids'); // switching straight from one to the other
+    expect([svg.classList.contains('peek-labels'), svg.classList.contains('peek-ids')]).toEqual([false, true]);
+    editor.setPeek(null);
+    expect([svg.classList.contains('peek-labels'), svg.classList.contains('peek-ids')]).toEqual([false, false]);
+    editor.setPeek('labels');
+    editor.setHighlight(null);
+    expect(svg.classList.contains('sim-compact')).toBe(false);
+    expect(svg.classList.contains('peek-labels')).toBe(false);
+    editor.setHighlight({ current: 0, done: [], activeEdges: [] }); // BFS-like: not compact
+    expect(svg.classList.contains('sim-compact')).toBe(false);
+  });
+
   it('directed highlight matches the exact arc only', () => {
     editor.setDirected(true);
     editor.setHighlight({ current: 1, done: [], activeEdges: [[1, 0]] }); // no arc 1 → 0 exists

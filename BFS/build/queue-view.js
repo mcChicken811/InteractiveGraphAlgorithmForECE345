@@ -47,10 +47,10 @@ export class QueueView {
         this.emptyNote = emptyNote;
         const kind = options.kind ?? 'queue';
         const describeLabel = (label) => (kind === 'priority' ? `key ${label}` : `distance ${label}`);
-        this.options = { kind, describeLabel, ...options };
+        this.options = { kind, describeLabel, peekIds: kind !== 'priority', ...options };
         strip.classList.add(`strip-${this.options.kind}`);
         const peek = (on) => {
-            strip.classList.toggle('peek-ids', on);
+            strip.classList.toggle('peek-ids', on && this.options.peekIds);
             this.onPeek?.(on);
         };
         strip.addEventListener('pointerenter', () => peek(true));

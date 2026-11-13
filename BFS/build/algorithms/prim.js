@@ -100,6 +100,8 @@ export class PrimSimulation {
         return {
             // No vertex is ringed white: the white light edge shows where the tree grows next.
             current: null,
+            // Small filled dots; the keys show when the priority queue is hovered.
+            compact: true,
             done: [...this.order],
             activeEdges: next !== null && via !== null ? [[via, next]] : [],
             labels: Object.fromEntries([...this.key].map(([id, k]) => [id, formatKey(k)])),

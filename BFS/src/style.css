@@ -892,7 +892,10 @@ button:disabled {
   fill: var(--node-fill);
   stroke: var(--accent);
   stroke-width: 2.5;
-  transition: fill 0.12s, stroke-width 0.12s;
+  transition:
+    fill 0.3s,
+    stroke-width 0.12s,
+    transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 /* An algorithm's label (e.g. BFS distance) overlaps the id; one is shown at a time. */
@@ -913,13 +916,44 @@ button:disabled {
   opacity: 1;
 }
 
-/* Hovering the queue strip: back to the ids. */
+/* Hovering the queue strip, or the adjacency list / matrix: back to the ids. */
 #canvas.sim-labels.peek-ids .node .node-index {
   opacity: 1;
 }
 
 #canvas.sim-labels.peek-ids .node .sim-label {
   opacity: 0;
+}
+
+/* Compact vertices (Prim): half size, filled with their ring colour, no number. Hovering the
+   priority queue grows them back with their labels (keys); hovering the adjacency list or
+   matrix grows them back with their ids. */
+#canvas.sim-compact .node .node-index,
+#canvas.sim-compact .node .sim-label {
+  opacity: 0;
+}
+
+#canvas.sim-compact.peek-ids .node .node-index,
+#canvas.sim-compact.peek-labels .node .sim-label {
+  opacity: 1;
+}
+
+#canvas.sim-compact:not(.peek-ids, .peek-labels) .node circle {
+  /* The circle is centred on the node's origin, so this scales it about its centre. */
+  transform: scale(0.5);
+  fill: var(--accent);
+}
+
+#canvas.sim-compact:not(.peek-ids, .peek-labels) .node.sim-done circle {
+  fill: var(--sim-done);
+}
+
+#canvas.sim-compact:not(.peek-ids, .peek-labels) .node.sim-running circle {
+  fill: var(--sim-running);
+}
+
+#canvas.sim-compact:not(.peek-ids, .peek-labels) .node.sim-current circle {
+  fill: var(--sim-current);
 }
 
 .node text {
@@ -1703,6 +1737,7 @@ button:disabled {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .node circle,
   .node .node-index,
   .node .sim-label,
   .q-node > span {
