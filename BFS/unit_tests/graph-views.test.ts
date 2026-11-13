@@ -227,3 +227,138 @@ describe('purity', () => {
     }
   });
 });
+
+describe('weighted and unweighted views', () => {
+  // Same arcs as above, with weights: 0 → 1 = 5, 1 → 0 = 2, 1 → 2 = -3, 3 → 2 = 0 (default)
+  beforeEach(() => {
+    g.directed = true;
+    g.setWeight(0, 1, 5);
+    g.setWeight(1, 0, 2);
+    g.setWeight(1, 2, -3);
+    g.directed = false;
+  });
+
+  it('exposes four views, one per orientation × weighting', () => {
+    const views = [
+      g.view('directed', 'unweighted'),
+      g.view('directed', 'weighted'),
+      g.view('undirected', 'unweighted'),
+      g.view('undirected', 'weighted'),
+    ];
+    expect(new Set(views).size).toBe(4);
+    expect(views.map((v) => [v.orientation, v.weighting])).toEqual([
+      ['directed', 'unweighted'],
+      ['directed', 'weighted'],
+      ['undirected', 'unweighted'],
+      ['undirected', 'weighted'],
+    ]);
+    expect(g.view('directed')).toBe(g.directedView); // unweighted unless stated
+    expect(g.view('directed', 'weighted').weighted).toBe(true);
+  });
+
+  it('currentView follows both graph.directed and graph.weighted', () => {
+    expect(g.currentView).toBe(g.view('undirected', 'unweighted'));
+    g.weighted = true;
+    expect(g.currentView).toBe(g.view('undirected', 'weighted'));
+    g.directed = true;
+    expect(g.currentView).toBe(g.view('directed', 'weighted'));
+  });
+
+  it('new edges default to weight 0', () => {
+    g.addNode(0, 0); // 4
+    g.addEdge(4, 0);
+    expect(g.arcWeight(4, 0)).toBe(0);
+    expect(g.view('directed', 'weighted').weight(4, 0)).toBe(0);
+  });
+
+  it('directed weighted: every arc keeps its own stored weight', () => {
+    const v = g.view('directed', 'weighted');
+    expect(v.weight(0, 1)).toBe(5);
+    expect(v.weight(1, 0)).toBe(2);
+    expect(v.weight(2, 1)).toBeUndefined();
+    expect(v.weightedNeighbors(1)).toEqual([
+      { id: 0, weight: 2 },
+      { id: 2, weight: -3 },
+    ]);
+    expect(v.weightedEdges()).toEqual([
+      { from: 0, to: 1, weight: 5 },
+      { from: 1, to: 0, weight: 2 },
+      { from: 1, to: 2, weight: -3 },
+      { from: 3, to: 2, weight: 0 },
+    ]);
+    expect(v.weightMatrix()).toEqual({
+      ids: [0, 1, 2, 3],
+      matrix: [
+        [null, 5, null, null],
+        [2, null, -3, null],
+        [null, null, null, null],
+        [null, null, 0, null],
+      ],
+    });
+  });
+
+  it('undirected weighted: one arc gives its weight; arcs both ways give the smaller', () => {
+    const v = g.view('undirected', 'weighted');
+    expect(v.weight(0, 1)).toBe(2); // min(5, 2)
+    expect(v.weight(1, 0)).toBe(2);
+    expect(v.weight(2, 1)).toBe(-3); // only 1 → 2 is stored
+    expect(v.weightedEdges()).toEqual([
+      { from: 0, to: 1, weight: 2 },
+      { from: 1, to: 2, weight: -3 },
+      { from: 2, to: 3, weight: 0 },
+    ]);
+    const { matrix } = v.weightMatrix();
+    matrix.forEach((row, i) => row.forEach((w, j) => expect(w).toBe(matrix[j][i]))); // symmetric
+    expect(v.weightedAdjacencyList()[2]).toEqual({
+      id: 2,
+      neighbors: [
+        { id: 1, weight: -3 },
+        { id: 3, weight: 0 },
+      ],
+    });
+  });
+
+  it('unweighted views give every edge weight 1, whatever is stored', () => {
+    for (const v of [g.view('directed', 'unweighted'), g.view('undirected', 'unweighted')]) {
+      for (const { weight } of v.weightedEdges()) expect(weight).toBe(1);
+      for (const row of v.weightMatrix().matrix) for (const w of row) expect([1, null]).toContain(w);
+    }
+    expect(g.view('undirected').weight(1, 2)).toBe(1);
+    expect(g.view('undirected').weight(0, 3)).toBeUndefined();
+  });
+
+  it('weights never change the topology: same neighbours, edges and 0/1 matrix', () => {
+    for (const o of ['directed', 'undirected'] as const) {
+      const w = g.view(o, 'weighted');
+      const u = g.view(o, 'unweighted');
+      expect(w.edges()).toEqual(u.edges());
+      expect(w.adjacencyList()).toEqual(u.adjacencyList());
+      expect(w.adjacencyMatrix()).toEqual(u.adjacencyMatrix());
+      for (const id of w.nodeIds()) expect(w.weightedNeighbors(id).map((n) => n.id)).toEqual(u.neighbors(id));
+    }
+  });
+
+  it('weight matrix and weight() agree, with null exactly where there is no edge', () => {
+    for (const o of ['directed', 'undirected'] as const) {
+      const v = g.view(o, 'weighted');
+      const { ids, matrix } = v.weightMatrix();
+      ids.forEach((a, i) =>
+        ids.forEach((b, j) => {
+          expect(matrix[i][j]).toBe(v.weight(a, b) ?? null);
+          expect(matrix[i][j] !== null).toBe(v.hasEdge(a, b));
+        }),
+      );
+    }
+  });
+
+  it('weighted results are copies too', () => {
+    const v = g.view('directed', 'weighted');
+    v.weightedNeighbors(1)[0].weight = 99;
+    v.weightedEdges()[0].weight = 99;
+    v.weightMatrix().matrix[0][1] = 99;
+    v.weightedAdjacencyList()[0].neighbors[0].weight = 99;
+    expect(v.weight(1, 0)).toBe(2);
+    expect(v.weight(0, 1)).toBe(5);
+    expect(g.arcWeight(0, 1)).toBe(5);
+  });
+});

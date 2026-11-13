@@ -41,6 +41,13 @@
             <input type="radio" id="mode-directed" name="edge-mode" value="directed" />
             <label for="mode-directed">Directed</label>
           </fieldset>
+          <!-- How weights are shown. Edges always store a weight (default 0); unweighted mode hides them. -->
+          <fieldset class="mode-switch" aria-label="Edge weights">
+            <input type="radio" id="weights-off" name="weight-mode" value="unweighted" checked />
+            <label for="weights-off">Unweighted</label>
+            <input type="radio" id="weights-on" name="weight-mode" value="weighted" />
+            <label for="weights-on">Weighted</label>
+          </fieldset>
         </div>
 
         <!-- Hamburger menu: shows the help and adjacency list floating over the canvas. -->
@@ -74,6 +81,10 @@
               <li>
                 <strong>Undirected / Directed</strong> (top left) sets how edges are read. Clicking A then B
                 always records A → B; undirected mode ignores the direction.
+              </li>
+              <li>
+                <strong>Unweighted / Weighted</strong> (top left) shows or hides edge weights (default 0). In
+                weighted mode, <strong>scroll over an edge</strong> to change its weight (up = more).
               </li>
             </ul>
           </section>

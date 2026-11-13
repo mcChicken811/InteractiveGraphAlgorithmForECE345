@@ -9,6 +9,10 @@ const DRAG_THRESHOLD = 4;
 const MIN_NODE_GAP = 6;
 /** How far (px) the two arcs between a pair of nodes bow apart in directed mode. */
 const CURVE_OFFSET = 22;
+/** Weighted mode: scrolling one page (the window's height) over an edge changes its weight by this much. */
+export const WEIGHT_PER_PAGE = 15;
+/** Pixels per "line" for wheel events reported in lines (deltaMode 1). */
+const LINE_HEIGHT_PX = 16;
 
 interface Point {
   x: number;
@@ -38,11 +42,17 @@ export interface EditorCallbacks {
  *  - directed / undirected view: edges are stored as arcs (first click → second click);
  *    directed mode draws arrows (two curved arcs when they go both ways), undirected
  *    mode draws one plain line per connected pair
+ *  - weighted / unweighted view: weighted mode labels every edge with its weight, and
+ *    scrolling over an edge changes the weight (WEIGHT_PER_PAGE per page; up = more)
  */
 export class GraphEditor {
   private selected: NodeId | null = null;
   private pending: Pending | null = null;
   private cursor: Point | null = null;
+
+  /** Edge the wheel last adjusted, and the fractional weight change not yet applied to it. */
+  private wheelEdge: string | null = null;
+  private wheelCarry = 0;
 
   private readonly layout = new ForceLayout({ padding: NODE_RADIUS + 2 });
   private autoLayout = false;
@@ -70,6 +80,7 @@ export class GraphEditor {
     svg.addEventListener('pointercancel', this.onPointerCancel);
     svg.addEventListener('pointerleave', this.onPointerLeave);
     svg.addEventListener('contextmenu', this.onContextMenu);
+    svg.addEventListener('wheel', this.onWheel, { passive: false });
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('resize', this.onResize);
 
@@ -103,6 +114,26 @@ export class GraphEditor {
       directed
         ? 'Directed: clicking A then B adds an edge A → B.'
         : 'Undirected: edge directions are ignored; arcs both ways count as one edge.',
+    );
+  }
+
+  get weighted(): boolean {
+    return this.graph.weighted;
+  }
+
+  /**
+   * Shows the graph as weighted (weight labels; scroll over an edge to change its weight)
+   * or unweighted. The stored weights never change.
+   */
+  setWeighted(weighted: boolean): void {
+    if (weighted === this.graph.weighted) return;
+    this.graph.weighted = weighted;
+    this.render();
+    this.callbacks.onChange?.();
+    this.message(
+      weighted
+        ? 'Weighted: scroll over an edge to change its weight (up = more).'
+        : 'Unweighted: weights are hidden and every edge counts as weight 1.',
     );
   }
 
@@ -217,6 +248,41 @@ export class GraphEditor {
     this.kickLayout();
   };
 
+  /**
+   * Weighted mode: scrolling over an edge changes its weight linearly, WEIGHT_PER_PAGE per
+   * page of scrolling (up = increase). Weights stay whole numbers: the fractional part is
+   * carried over to the next wheel event on the same edge.
+   */
+  private onWheel = (e: WheelEvent): void => {
+    if (!this.graph.weighted || e.ctrlKey) return; // ctrl+wheel is the browser's zoom
+    const edgeEl = (e.target as Element).closest<SVGGElement>('[data-edge-a]');
+    if (!edgeEl) return;
+    e.preventDefault();
+
+    const a = Number(edgeEl.dataset.edgeA);
+    const b = Number(edgeEl.dataset.edgeB);
+    const key = `${this.graph.directed ? 'd' : 'u'}:${a}-${b}`;
+    if (key !== this.wheelEdge) {
+      this.wheelEdge = key;
+      this.wheelCarry = 0;
+    }
+
+    const page = window.innerHeight || 800;
+    const px = e.deltaMode === 1 ? e.deltaY * LINE_HEIGHT_PX : e.deltaMode === 2 ? e.deltaY * page : e.deltaY;
+    this.wheelCarry += (-px / page) * WEIGHT_PER_PAGE;
+    // Tiny tolerance so floating-point drift (e.g. 0.999999…) doesn't swallow a step.
+    const steps = Math.trunc(this.wheelCarry + Math.sign(this.wheelCarry) * 1e-9);
+    if (steps === 0) return;
+    this.wheelCarry -= steps;
+
+    const current = this.graph.currentView.weight(a, b);
+    if (current === undefined) return;
+    this.graph.setWeight(a, b, current + steps); // undirected: both arcs get the new weight
+    this.render();
+    this.callbacks.onChange?.();
+    this.message(`Weight of edge ${this.edgeLabel(a, b)}: ${current + steps}`);
+  };
+
   private onResize = (): void => {
     this.kickLayout();
   };
@@ -273,10 +339,14 @@ export class GraphEditor {
       );
       return;
     }
-    this.graph.addEdge(from, id); // stored as the arc from → id in either mode
+    this.graph.addEdge(from, id); // stored as the arc from → id (weight 0) in either mode
     this.select(null);
     this.changed();
-    this.message(`Added edge ${this.edgeLabel(from, id)}.`);
+    this.message(
+      this.graph.weighted
+        ? `Added edge ${this.edgeLabel(from, id)} with weight 0. Scroll over it to change the weight.`
+        : `Added edge ${this.edgeLabel(from, id)}.`,
+    );
   }
 
   private handleEdgeClick(a: NodeId, b: NodeId): void {
@@ -334,7 +404,10 @@ export class GraphEditor {
     // Directed: one arrow per arc a → b, ending at b's rim; when b → a also exists, both
     // arcs are drawn as curves bowing to opposite sides so each can be clicked.
     const directed = this.graph.directed;
+    const weighted = this.graph.weighted;
+    const view = this.graph.currentView;
     this.svg.classList.toggle('directed', directed);
+    this.svg.classList.toggle('weighted', weighted);
     const liveEdges = new Set<string>();
     for (const [a, b] of this.graph.getEdges()) {
       const curved = directed && this.graph.hasArc(b, a);
@@ -351,14 +424,27 @@ export class GraphEditor {
         g.dataset.edgeA = String(a);
         g.dataset.edgeB = String(b);
         g.dataset.shape = shape;
-        const title = svgEl('title', {});
-        title.textContent = `Edge ${this.edgeLabel(a, b)} (click to delete)`;
-        g.append(svgEl(shape, { class: 'edge-hit' }), svgEl(shape, { class: 'edge-line' }), title);
+        // Weight label (shown in weighted mode). Part of the edge's group, so scrolling or
+        // clicking on the label acts on the edge.
+        const label = svgEl('g', { class: 'edge-weight' });
+        label.append(svgEl('rect', { rx: 9, height: 18 }), svgEl('text', { 'text-anchor': 'middle', 'dominant-baseline': 'central' }));
+        g.append(svgEl(shape, { class: 'edge-hit' }), svgEl(shape, { class: 'edge-line' }), label, svgEl('title', {}));
         this.edgeLayer.append(g);
         this.edgeEls.set(key, g);
       }
-      const geometry = this.edgeGeometry(this.graph.getNode(a)!, this.graph.getNode(b)!, directed, curved);
-      for (const el of g.querySelectorAll('.edge-hit, .edge-line')) setAttrs(el, geometry);
+      const { attrs, mid } = this.edgeGeometry(this.graph.getNode(a)!, this.graph.getNode(b)!, directed, curved);
+      for (const el of g.querySelectorAll('.edge-hit, .edge-line')) setAttrs(el, attrs);
+
+      const weight = view.weight(a, b)!;
+      const text = String(weight);
+      const width = 10 + text.length * 7.5;
+      g.querySelector('.edge-weight text')!.textContent = text;
+      setAttrs(g.querySelector('.edge-weight text')!, { x: mid.x, y: mid.y });
+      setAttrs(g.querySelector('.edge-weight rect')!, { x: mid.x - width / 2, y: mid.y - 9, width });
+      g.dataset.weight = text;
+      g.querySelector('title')!.textContent = weighted
+        ? `Edge ${this.edgeLabel(a, b)}, weight ${weight} (scroll to change the weight, click to delete)`
+        : `Edge ${this.edgeLabel(a, b)} (click to delete)`;
     }
     for (const [key, g] of this.edgeEls) {
       if (!liveEdges.has(key)) {
@@ -395,14 +481,23 @@ export class GraphEditor {
     this.updatePreview();
   }
 
-  /** SVG attributes for an edge from a to b (see render() for the three cases). */
-  private edgeGeometry(a: Point, b: Point, directed: boolean, curved: boolean): Record<string, number | string> {
-    if (!directed) return { x1: a.x, y1: a.y, x2: b.x, y2: b.y };
+  /**
+   * SVG attributes for an edge from a to b (see render() for the three cases), and the
+   * point midway along it, where the weight label goes.
+   */
+  private edgeGeometry(
+    a: Point,
+    b: Point,
+    directed: boolean,
+    curved: boolean,
+  ): { attrs: Record<string, number | string>; mid: Point } {
+    const centre = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    if (!directed) return { attrs: { x1: a.x, y1: a.y, x2: b.x, y2: b.y }, mid: centre };
     const len = Math.max(distance(a, b), 0.001);
     const ux = (b.x - a.x) / len;
     const uy = (b.y - a.y) / len;
     const rim = NODE_RADIUS + 1; // the arrow's tip sits just outside the target circle
-    if (!curved) return { x1: a.x, y1: a.y, x2: b.x - ux * rim, y2: b.y - uy * rim };
+    if (!curved) return { attrs: { x1: a.x, y1: a.y, x2: b.x - ux * rim, y2: b.y - uy * rim }, mid: centre };
 
     // Quadratic curve bowing to the right of a → b (so b → a bows the other way).
     const c = { x: (a.x + b.x) / 2 - uy * CURVE_OFFSET * 2, y: (a.y + b.y) / 2 + ux * CURVE_OFFSET * 2 };
@@ -412,7 +507,9 @@ export class GraphEditor {
     };
     const start = toward(a, c, NODE_RADIUS);
     const end = toward(b, c, rim);
-    return { d: `M ${start.x} ${start.y} Q ${c.x} ${c.y} ${end.x} ${end.y}` };
+    // Midpoint of the quadratic curve (t = 1/2) between the node centres: (a + 2c + b) / 4.
+    const mid = { x: (a.x + 2 * c.x + b.x) / 4, y: (a.y + 2 * c.y + b.y) / 4 };
+    return { attrs: { d: `M ${start.x} ${start.y} Q ${c.x} ${c.y} ${end.x} ${end.y}` }, mid };
   }
 
   /** Dashed line from the selected node to the cursor while choosing an edge target. */

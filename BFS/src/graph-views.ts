@@ -3,27 +3,48 @@ import type { NodeId } from './graph.js';
 /**
  * Read-only views of a graph's edges.
  *
- * A `Graph` stores every edge as a directed arc (from → to). The same arcs can be read
- * two ways, and both views are always available, whatever the UI's current mode:
+ * A `Graph` stores every edge as a *weighted directed arc* (from → to, weight). The same
+ * arcs can be read in four ways, and all four views are always available, whatever the
+ * UI's current mode:
  *
- *  - `DirectedView`:   every arc is its own edge; A → B and B → A are two edges.
- *  - `UndirectedView`: A and B are adjacent if there is an arc either way; A → B,
- *                      B → A, or both are the single edge {A, B}.
+ *               │ unweighted                       │ weighted
+ *   ────────────┼──────────────────────────────────┼─────────────────────────────────────
+ *   directed    │ every arc is an edge, weight 1   │ every arc is an edge, stored weight
+ *   undirected  │ an arc either way (or both) is   │ same, weight = the arc's weight, or
+ *               │ one edge, weight 1               │ the smaller of the two (UNDIRECTED_WEIGHT)
+ *
+ * "Unweighted" uses the standard convention that every edge has weight 1 (what BFS
+ * implicitly assumes), so weight-aware code works unchanged on unweighted views.
  *
  * Views are pure: they never modify the graph, and every method returns freshly built
  * data (sorted by node id), so callers may keep or mutate the results freely. They are
  * also live: each call reflects the graph's state at that moment.
  *
- * Typical use, e.g. for a BFS that must work in both interpretations:
- *
- *   const view = graph.view('undirected'); // or graph.directedView, graph.currentView
- *   for (const w of view.neighbors(v)) …
+ *   const view = graph.view('undirected', 'weighted'); // or graph.currentView
+ *   for (const { id, weight } of view.weightedNeighbors(v)) …
  */
 
 export type Orientation = 'directed' | 'undirected';
+export type Weighting = 'weighted' | 'unweighted';
+
+/** A neighbour together with the weight of the edge leading to it. */
+export interface WeightedNeighbor {
+  id: NodeId;
+  weight: number;
+}
+
+/** An edge with its weight. Undirected views give each pair once, with from < to. */
+export interface WeightedEdge {
+  from: NodeId;
+  to: NodeId;
+  weight: number;
+}
 
 /** Adjacency-list representation: every node (ascending id) with its sorted neighbours. */
 export type AdjacencyList = Array<{ id: NodeId; neighbors: NodeId[] }>;
+
+/** Weighted adjacency list: every node with its sorted neighbours and edge weights. */
+export type WeightedAdjacencyList = Array<{ id: NodeId; neighbors: WeightedNeighbor[] }>;
 
 /**
  * Adjacency-matrix representation. `ids` (ascending) label the rows and columns, and
@@ -35,24 +56,53 @@ export interface AdjacencyMatrix {
   matrix: Array<Array<0 | 1>>;
 }
 
-/** What both views offer. */
+/**
+ * Weight matrix: like AdjacencyMatrix, but each cell holds the edge's weight, or `null`
+ * when there is no edge (0 is a valid weight, so it cannot mean "no edge").
+ */
+export interface WeightMatrix {
+  ids: NodeId[];
+  matrix: Array<Array<number | null>>;
+}
+
+/**
+ * How an undirected *weighted* view combines the weights when arcs run both ways with
+ * different weights: the smaller one (the cheapest way between the two nodes). Editing
+ * an undirected edge sets both arcs to the same value, so they then agree.
+ */
+export const UNDIRECTED_WEIGHT = (a: number, b: number): number => Math.min(a, b);
+
+/** What every view offers. */
 export interface GraphView {
   readonly orientation: Orientation;
   /** Shorthand for `orientation === 'directed'`. */
   readonly directed: boolean;
+  readonly weighting: Weighting;
+  /** Shorthand for `weighting === 'weighted'`. */
+  readonly weighted: boolean;
   /** Node ids, ascending. */
   nodeIds(): NodeId[];
   /** Directed: out-neighbours (where its arcs point). Undirected: neighbours either way. Sorted. */
   neighbors(id: NodeId): NodeId[];
+  /** `neighbors` with the weight of each edge (always 1 in unweighted views). */
+  weightedNeighbors(id: NodeId): WeightedNeighbor[];
   /** Number of neighbours (directed: the out-degree). */
   degree(id: NodeId): number;
   /** Directed: is there an arc a → b? Undirected: is there an arc either way? */
   hasEdge(a: NodeId, b: NodeId): boolean;
+  /** Weight of the edge a → b (undirected: between a and b), or undefined if there is none. */
+  weight(a: NodeId, b: NodeId): number | undefined;
   /** Directed: every arc [from, to]. Undirected: every adjacent pair once, as [min, max]. Sorted. */
   edges(): Array<[NodeId, NodeId]>;
+  /** `edges` with weights. */
+  weightedEdges(): WeightedEdge[];
   readonly edgeCount: number;
   adjacencyList(): AdjacencyList;
+  weightedAdjacencyList(): WeightedAdjacencyList;
+  /** 0/1 connectivity matrix (ignores weights). */
   adjacencyMatrix(): AdjacencyMatrix;
+  /** Weight per cell, or null for no edge (unweighted views: 1 or null). */
+  weightMatrix(): WeightMatrix;
 }
 
 /**
@@ -62,8 +112,8 @@ export interface GraphView {
 export interface ArcReader {
   /** Node ids, ascending. */
   nodeIds(): NodeId[];
-  /** Targets of the arcs leaving `id` (undefined for an unknown node). */
-  out(id: NodeId): ReadonlySet<NodeId> | undefined;
+  /** Arcs leaving `id`: target → weight (undefined for an unknown node). */
+  out(id: NodeId): ReadonlyMap<NodeId, number> | undefined;
   /** Sources of the arcs entering `id` (undefined for an unknown node). */
   in(id: NodeId): ReadonlySet<NodeId> | undefined;
 }
@@ -71,18 +121,27 @@ export interface ArcReader {
 const ascending = (a: NodeId, b: NodeId): number => a - b;
 const sorted = (ids: Iterable<NodeId> | undefined): NodeId[] => [...(ids ?? [])].sort(ascending);
 
-/** Shared implementation: everything here is derived from `neighbors` and `hasEdge`. */
+/** Shared implementation: everything here is derived from `neighbors`, `hasEdge` and `storedWeight`. */
 abstract class BaseView implements GraphView {
   abstract readonly orientation: Orientation;
 
-  constructor(protected readonly arcs: ArcReader) {}
+  constructor(
+    protected readonly arcs: ArcReader,
+    readonly weighting: Weighting,
+  ) {}
 
   abstract neighbors(id: NodeId): NodeId[];
   abstract hasEdge(a: NodeId, b: NodeId): boolean;
   abstract edges(): Array<[NodeId, NodeId]>;
+  /** The stored weight of the edge, by this view's orientation (undefined if none). */
+  protected abstract storedWeight(a: NodeId, b: NodeId): number | undefined;
 
   get directed(): boolean {
     return this.orientation === 'directed';
+  }
+
+  get weighted(): boolean {
+    return this.weighting === 'weighted';
   }
 
   nodeIds(): NodeId[] {
@@ -97,13 +156,37 @@ abstract class BaseView implements GraphView {
     return this.edges().length;
   }
 
+  weight(a: NodeId, b: NodeId): number | undefined {
+    const stored = this.storedWeight(a, b);
+    if (stored === undefined) return undefined;
+    return this.weighted ? stored : 1;
+  }
+
+  weightedNeighbors(id: NodeId): WeightedNeighbor[] {
+    return this.neighbors(id).map((n) => ({ id: n, weight: this.weight(id, n)! }));
+  }
+
+  weightedEdges(): WeightedEdge[] {
+    return this.edges().map(([from, to]) => ({ from, to, weight: this.weight(from, to)! }));
+  }
+
   adjacencyList(): AdjacencyList {
     return this.nodeIds().map((id) => ({ id, neighbors: this.neighbors(id) }));
+  }
+
+  weightedAdjacencyList(): WeightedAdjacencyList {
+    return this.nodeIds().map((id) => ({ id, neighbors: this.weightedNeighbors(id) }));
   }
 
   adjacencyMatrix(): AdjacencyMatrix {
     const ids = this.nodeIds();
     const matrix = ids.map((a) => ids.map((b) => (this.hasEdge(a, b) ? 1 : 0) as 0 | 1));
+    return { ids, matrix };
+  }
+
+  weightMatrix(): WeightMatrix {
+    const ids = this.nodeIds();
+    const matrix = ids.map((a) => ids.map((b) => this.weight(a, b) ?? null));
     return { ids, matrix };
   }
 }
@@ -118,7 +201,7 @@ export class DirectedView extends BaseView {
 
   /** Nodes this node's arcs point to, sorted. Same as `neighbors`. */
   outNeighbors(id: NodeId): NodeId[] {
-    return sorted(this.arcs.out(id));
+    return sorted(this.arcs.out(id)?.keys());
   }
 
   /** Nodes whose arcs point to this node, sorted. */
@@ -143,6 +226,10 @@ export class DirectedView extends BaseView {
     for (const from of this.nodeIds()) for (const to of this.outNeighbors(from)) edges.push([from, to]);
     return edges;
   }
+
+  protected storedWeight(a: NodeId, b: NodeId): number | undefined {
+    return this.arcs.out(a)?.get(b);
+  }
 }
 
 /** Directions are ignored: an arc either way (or both) makes one edge. */
@@ -150,7 +237,7 @@ export class UndirectedView extends BaseView {
   readonly orientation = 'undirected' as const;
 
   neighbors(id: NodeId): NodeId[] {
-    return sorted(new Set([...(this.arcs.out(id) ?? []), ...(this.arcs.in(id) ?? [])]));
+    return sorted(new Set([...(this.arcs.out(id)?.keys() ?? []), ...(this.arcs.in(id) ?? [])]));
   }
 
   hasEdge(a: NodeId, b: NodeId): boolean {
@@ -161,6 +248,14 @@ export class UndirectedView extends BaseView {
     const edges: Array<[NodeId, NodeId]> = [];
     for (const a of this.nodeIds()) for (const b of this.neighbors(a)) if (a < b) edges.push([a, b]);
     return edges;
+  }
+
+  protected storedWeight(a: NodeId, b: NodeId): number | undefined {
+    const there = this.arcs.out(a)?.get(b);
+    const back = this.arcs.out(b)?.get(a);
+    if (there === undefined) return back;
+    if (back === undefined) return there;
+    return UNDIRECTED_WEIGHT(there, back);
   }
 
   /**

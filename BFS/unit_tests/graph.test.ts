@@ -287,6 +287,69 @@ describe('Graph', () => {
     });
   });
 
+  describe('weights', () => {
+    beforeEach(() => {
+      for (let i = 0; i < 3; i++) g.addNode(0, 0);
+    });
+
+    it('stores a weight with every arc, 0 by default', () => {
+      g.addEdge(0, 1);
+      g.addEdge(1, 2, 7);
+      expect(g.arcWeight(0, 1)).toBe(0);
+      expect(g.arcWeight(1, 2)).toBe(7);
+      expect(g.arcWeight(2, 1)).toBeUndefined();
+    });
+
+    it('rejects non-finite weights', () => {
+      expect(g.addEdge(0, 1, Number.NaN)).toBe(false);
+      expect(g.addEdge(0, 1, Infinity)).toBe(false);
+      g.addEdge(0, 1);
+      expect(g.setWeight(0, 1, Number.NaN)).toBe(false);
+      expect(g.arcWeight(0, 1)).toBe(0);
+    });
+
+    it('directed setWeight changes only the arc a → b', () => {
+      g.directed = true;
+      g.addEdge(0, 1);
+      g.addEdge(1, 0);
+      expect(g.setWeight(0, 1, 4)).toBe(true);
+      expect(g.arcWeight(0, 1)).toBe(4);
+      expect(g.arcWeight(1, 0)).toBe(0);
+      expect(g.setWeight(2, 0, 1)).toBe(false); // no such arc
+    });
+
+    it('undirected setWeight sets every arc between the pair, whichever way it was stored', () => {
+      g.directed = true;
+      g.addEdge(0, 1, 3);
+      g.addEdge(1, 0, 8);
+      g.addEdge(2, 1, 5);
+      g.directed = false;
+      expect(g.setWeight(1, 0, -2)).toBe(true);
+      expect(g.arcWeight(0, 1)).toBe(-2);
+      expect(g.arcWeight(1, 0)).toBe(-2);
+      expect(g.setWeight(1, 2, 9)).toBe(true); // stored as 2 → 1
+      expect(g.arcWeight(2, 1)).toBe(9);
+      expect(g.setWeight(0, 2, 1)).toBe(false);
+    });
+
+    it('switching weighted mode never changes stored weights', () => {
+      g.addEdge(0, 1, 6);
+      g.weighted = true;
+      g.weighted = false;
+      expect(g.arcWeight(0, 1)).toBe(6);
+    });
+
+    it('removing an edge or node drops its weight', () => {
+      g.addEdge(0, 1, 6);
+      g.removeEdge(0, 1);
+      g.addEdge(0, 1);
+      expect(g.arcWeight(0, 1)).toBe(0);
+      g.addEdge(1, 2, 4);
+      g.removeNode(2);
+      expect(g.arcWeight(1, 2)).toBeUndefined();
+    });
+  });
+
   describe('representations', () => {
     beforeEach(() => {
       for (let i = 0; i < 4; i++) g.addNode(0, 0);

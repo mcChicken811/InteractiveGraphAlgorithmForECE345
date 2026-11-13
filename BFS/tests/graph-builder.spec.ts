@@ -73,7 +73,8 @@ async function adjacencyText(page: Page): Promise<string> {
     return rows
       .map((row) => {
         const vertex = row.querySelector('.adj-vertex')!.textContent;
-        const boxes = [...row.querySelectorAll('.adj-box')].map((b) => b.textContent);
+        // Read only the neighbour id (weighted boxes also contain the weight).
+        const boxes = [...row.querySelectorAll('.adj-box')].map((b) => (b.querySelector('.adj-id') ?? b).textContent);
         return `${vertex}: ${boxes.length ? boxes.join(', ') : '—'}`;
       })
       .join('\n');
@@ -731,6 +732,183 @@ test.describe('directed / undirected switch', () => {
     await page.keyboard.press('ArrowLeft');
     await expect(undirected(page)).toBeChecked();
     await expect(cv.canvas).not.toHaveClass(/directed/);
+  });
+});
+
+test.describe('weighted / unweighted switch', () => {
+  const unweighted = (page: Page) => page.getByRole('radio', { name: 'Unweighted', exact: true });
+  const weighted = (page: Page) => page.getByRole('radio', { name: 'Weighted', exact: true });
+  const choose = (page: Page, id: 'weights-on' | 'weights-off' | 'mode-directed' | 'mode-undirected') =>
+    page.locator(`label[for="${id}"]`).click();
+  const weightLabel = (a: number, b: number) => cv.edge(a, b).locator('.edge-weight text');
+
+  /** Moves the mouse onto the middle of an edge (line or curve), in page coordinates. */
+  async function hoverEdge(a: number, b: number): Promise<void> {
+    const [x, y] = await cv
+      .edge(a, b)
+      .locator('.edge-line')
+      .evaluate((el) => {
+        const shape = el as SVGGeometryElement;
+        const p = shape.getPointAtLength(shape.getTotalLength() / 2);
+        return [p.x, p.y];
+      });
+    await cv.move(x, y);
+  }
+
+  /** Scrolls by a fraction of the page (the window height); negative = up. */
+  async function scrollPages(page: Page, pages: number): Promise<void> {
+    await page.mouse.wheel(0, pages * page.viewportSize()!.height);
+  }
+
+  test('sits next to the Undirected/Directed switch and starts unweighted', async ({ page }) => {
+    await expect(unweighted(page)).toBeChecked();
+    const w = (await page.getByRole('group', { name: 'Edge weights' }).boundingBox())!;
+    const d = (await page.getByRole('group', { name: 'Edge type' }).boundingBox())!;
+    expect(w.x).toBeGreaterThan(d.x + d.width - 1);
+    expect(Math.abs(w.y - d.y)).toBeLessThan(2);
+    const c = (await cv.canvas.boundingBox())!;
+    expect(w.x + w.width).toBeLessThan(c.x + c.width / 2);
+  });
+
+  test('unweighted: no weight labels, and scrolling over an edge changes nothing', async ({ page }) => {
+    await addTriangleNodes();
+    await connect(P.a, P.b);
+    await expect(weightLabel(0, 1)).toBeHidden();
+    await hoverEdge(0, 1);
+    await scrollPages(page, -1);
+    await choose(page, 'weights-on');
+    await expect(weightLabel(0, 1)).toHaveText('0');
+  });
+
+  test('weighted: edges show their weight, 0 by default', async ({ page }) => {
+    await choose(page, 'weights-on');
+    await expect(weighted(page)).toBeChecked();
+    await addTriangleNodes();
+    await connect(P.a, P.b);
+    await expect(weightLabel(0, 1)).toBeVisible();
+    await expect(weightLabel(0, 1)).toHaveText('0');
+    await expect(page.locator('#message')).toContainText('weight 0');
+  });
+
+  test('scrolling one page up over an edge adds 15, down subtracts', async ({ page }) => {
+    await choose(page, 'weights-on');
+    await addTriangleNodes();
+    await connect(P.a, P.b);
+    await hoverEdge(0, 1);
+    await scrollPages(page, -1);
+    await expect(weightLabel(0, 1)).toHaveText('15');
+    await expect(page.locator('#message')).toHaveText('Weight of edge 0 — 1: 15');
+    await scrollPages(page, 2);
+    await expect(weightLabel(0, 1)).toHaveText('-15');
+  });
+
+  test('the change is linear in the scroll distance', async ({ page }) => {
+    await choose(page, 'weights-on');
+    await addTriangleNodes();
+    await connect(P.a, P.b);
+    await hoverEdge(0, 1);
+    for (let i = 0; i < 10; i++) await scrollPages(page, -0.1); // 1.5 each
+    await expect(weightLabel(0, 1)).toHaveText('15');
+    for (let i = 0; i < 4; i++) await scrollPages(page, -0.05); // 0.75 each → +3
+    await expect(weightLabel(0, 1)).toHaveText('18');
+  });
+
+  test('scrolling over empty canvas does not change any weight', async ({ page }) => {
+    await choose(page, 'weights-on');
+    await addTriangleNodes();
+    await connect(P.a, P.b);
+    await cv.move(...P.d);
+    await scrollPages(page, -1);
+    await expect(weightLabel(0, 1)).toHaveText('0');
+  });
+
+  test('directed: each of two opposite arcs has its own weight', async ({ page }) => {
+    await choose(page, 'mode-directed');
+    await choose(page, 'weights-on');
+    await addTriangleNodes();
+    await connect(P.a, P.b);
+    await connect(P.b, P.a);
+    await hoverEdge(1, 0);
+    await scrollPages(page, -1);
+    await expect(weightLabel(1, 0)).toHaveText('15');
+    await expect(weightLabel(0, 1)).toHaveText('0');
+  });
+
+  test('undirected: arcs both ways show the smaller weight; editing sets both', async ({ page }) => {
+    await choose(page, 'mode-directed');
+    await choose(page, 'weights-on');
+    await addTriangleNodes();
+    await connect(P.a, P.b);
+    await connect(P.b, P.a);
+    await hoverEdge(0, 1);
+    await scrollPages(page, -1); // 0 → 1 = 15, 1 → 0 = 0
+
+    await choose(page, 'mode-undirected');
+    await expect(weightLabel(0, 1)).toHaveText('0'); // min(15, 0)
+    await hoverEdge(0, 1);
+    await scrollPages(page, -0.4); // +6
+    await expect(weightLabel(0, 1)).toHaveText('6');
+
+    await choose(page, 'mode-directed');
+    await expect(weightLabel(0, 1)).toHaveText('6');
+    await expect(weightLabel(1, 0)).toHaveText('6');
+  });
+
+  test('weights survive switching to unweighted and back', async ({ page }) => {
+    await choose(page, 'weights-on');
+    await addTriangleNodes();
+    await connect(P.a, P.b);
+    await hoverEdge(0, 1);
+    await scrollPages(page, -1);
+    await choose(page, 'weights-off');
+    await expect(weightLabel(0, 1)).toBeHidden();
+    await choose(page, 'weights-on');
+    await expect(weightLabel(0, 1)).toHaveText('15');
+  });
+
+  test('the panel shows weights in the list and the matrix only in weighted mode', async ({ page }) => {
+    await addTriangleNodes();
+    await connect(P.a, P.b);
+    await connect(P.b, P.c);
+    await choose(page, 'weights-on');
+    await hoverEdge(1, 2);
+    await scrollPages(page, -0.2); // 3
+
+    await page.getByRole('button', { name: 'Help and adjacency list' }).click();
+    const rowWeights = (i: number) => page.locator('#adjacency .adj-row').nth(i).locator('.adj-weight');
+    await expect(rowWeights(1)).toHaveText(['0', '3']); // 1: 0 (w 0), 2 (w 3)
+    await expect(page.locator('#list-note')).toContainText('edge weight');
+
+    await page.getByRole('tab', { name: 'Adjacency matrix' }).click();
+    const cells = await page
+      .getByRole('table', { name: 'Adjacency matrix' })
+      .locator('tbody tr')
+      .evaluateAll((rows) => rows.map((r) => [...r.querySelectorAll('td')].map((c) => c.textContent)));
+    expect(cells).toEqual([
+      ['—', '0', '—'],
+      ['0', '—', '3'],
+      ['—', '3', '—'],
+    ]);
+    await expect(page.locator('#matrix-note')).toContainText('— means no edge');
+
+    await choose(page, 'weights-off');
+    await expect(page.locator('#adjacency .adj-weight')).toHaveCount(0);
+    const plain = await page
+      .getByRole('table', { name: 'Adjacency matrix' })
+      .locator('tbody tr')
+      .evaluateAll((rows) => rows.map((r) => [...r.querySelectorAll('td')].map((c) => c.textContent)));
+    expect(plain).toEqual([
+      ['0', '1', '0'],
+      ['1', '0', '1'],
+      ['0', '1', '0'],
+    ]);
+  });
+
+  test('is keyboard operable', async ({ page }) => {
+    await unweighted(page).focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(weighted(page)).toBeChecked();
+    await expect(cv.canvas).toHaveClass(/weighted/);
   });
 });
 

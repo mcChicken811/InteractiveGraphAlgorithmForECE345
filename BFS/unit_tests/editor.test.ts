@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { Graph } from '../src/graph.js';
-import { GraphEditor, NODE_RADIUS, type EditorCallbacks } from '../src/editor.js';
+import { GraphEditor, NODE_RADIUS, WEIGHT_PER_PAGE, type EditorCallbacks } from '../src/editor.js';
 
 const WIDTH = 800;
 const HEIGHT = 600;
@@ -593,5 +593,155 @@ describe('GraphEditor directed / undirected mode', () => {
     editor.setDirected(true);
     editor.setDirected(false);
     expect(graph.getNodes()).toEqual(before);
+  });
+});
+
+describe('GraphEditor weighted mode', () => {
+  beforeEach(() => {
+    addRow(3); // nodes 0, 1, 2 at x = 100, 250, 400 (y = 300)
+    clickNode(0);
+    clickNode(1); // arc 0 → 1, weight 0
+    onChange.mockClear();
+  });
+
+  const page = () => window.innerHeight;
+
+  /** Dispatches a wheel event on `target`; returns whether the page scroll was prevented. */
+  function wheel(target: Element, deltaY: number, init: WheelEventInit = {}): boolean {
+    const event = new WheelEvent('wheel', { deltaY, bubbles: true, cancelable: true, ...init });
+    // happy-dom's WheelEvent ignores modifier keys in its init dictionary.
+    if (init.ctrlKey) Object.defineProperty(event, 'ctrlKey', { value: true });
+    target.dispatchEvent(event);
+    return event.defaultPrevented;
+  }
+
+  const hit = (a: number, b: number) => svg.querySelector(`[data-edge-a="${a}"][data-edge-b="${b}"] .edge-hit`)!;
+  const label = (a: number, b: number) => svg.querySelector(`[data-edge-a="${a}"][data-edge-b="${b}"] .edge-weight text`)!;
+
+  it('starts unweighted: scrolling does nothing and is not intercepted', () => {
+    expect(editor.weighted).toBe(false);
+    expect(svg.classList.contains('weighted')).toBe(false);
+    expect(wheel(hit(0, 1), -page())).toBe(false);
+    expect(graph.arcWeight(0, 1)).toBe(0);
+  });
+
+  it('switching to weighted shows labels, reports a change and explains scrolling', () => {
+    editor.setWeighted(true);
+    expect(editor.weighted).toBe(true);
+    expect(graph.weighted).toBe(true);
+    expect(svg.classList.contains('weighted')).toBe(true);
+    expect(label(0, 1).textContent).toBe('0');
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(lastMessage()[0]).toContain('scroll over an edge');
+  });
+
+  it(`one page of scrolling up adds ${WEIGHT_PER_PAGE}; down subtracts`, () => {
+    editor.setWeighted(true);
+    expect(wheel(hit(0, 1), -page())).toBe(true);
+    expect(graph.arcWeight(0, 1)).toBe(WEIGHT_PER_PAGE);
+    expect(label(0, 1).textContent).toBe(String(WEIGHT_PER_PAGE));
+    expect(lastMessage()[0]).toBe(`Weight of edge 0 — 1: ${WEIGHT_PER_PAGE}`);
+
+    wheel(hit(0, 1), 2 * page());
+    expect(graph.arcWeight(0, 1)).toBe(-WEIGHT_PER_PAGE); // negative weights are allowed
+  });
+
+  it('is linear: small scrolls add up, with fractions carried over', () => {
+    editor.setWeighted(true);
+    const tenth = page() / 10; // 1.5 weight units each
+    for (let i = 0; i < 10; i++) wheel(hit(0, 1), -tenth);
+    expect(graph.arcWeight(0, 1)).toBe(WEIGHT_PER_PAGE);
+    wheel(hit(0, 1), -tenth); // +1.5 → +1, carry 0.5
+    expect(graph.arcWeight(0, 1)).toBe(WEIGHT_PER_PAGE + 1);
+    wheel(hit(0, 1), -tenth); // 0.5 + 1.5 = 2
+    expect(graph.arcWeight(0, 1)).toBe(WEIGHT_PER_PAGE + 3);
+  });
+
+  it('keeps weights whole numbers', () => {
+    editor.setWeighted(true);
+    wheel(hit(0, 1), -page() / 7);
+    expect(Number.isInteger(graph.arcWeight(0, 1))).toBe(true);
+  });
+
+  it('understands line- and page-based wheel deltas', () => {
+    editor.setWeighted(true);
+    wheel(hit(0, 1), -1, { deltaMode: 2 }); // one page
+    expect(graph.arcWeight(0, 1)).toBe(WEIGHT_PER_PAGE);
+    const lines = page() / 16; // one page's worth of 16px lines
+    wheel(hit(0, 1), lines, { deltaMode: 1 });
+    expect(graph.arcWeight(0, 1)).toBeCloseTo(0, 0);
+  });
+
+  it('the carry does not leak from one edge to another', () => {
+    editor.setWeighted(true);
+    clickNode(1);
+    clickNode(2);
+    wheel(hit(0, 1), -page() / 20); // +0.75, nothing applied yet
+    wheel(hit(1, 2), -page() / 20); // a different edge starts from 0 again
+    expect(graph.arcWeight(0, 1)).toBe(0);
+    expect(graph.arcWeight(1, 2)).toBe(0);
+  });
+
+  it('scrolling over the weight label works too', () => {
+    editor.setWeighted(true);
+    wheel(label(0, 1), -page());
+    expect(graph.arcWeight(0, 1)).toBe(WEIGHT_PER_PAGE);
+  });
+
+  it('ignores ctrl+wheel (browser zoom) and scrolling over empty space', () => {
+    editor.setWeighted(true);
+    expect(wheel(hit(0, 1), -page(), { ctrlKey: true })).toBe(false);
+    expect(wheel(svg, -page())).toBe(false);
+    expect(graph.arcWeight(0, 1)).toBe(0);
+  });
+
+  it('does not re-run the layout or count as a structural edit beyond the panel refresh', () => {
+    editor.setWeighted(true);
+    onChange.mockClear();
+    wheel(hit(0, 1), -page());
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(graph.getArcs()).toEqual([[0, 1]]);
+  });
+
+  it('directed: changes only the arc under the pointer', () => {
+    editor.setDirected(true);
+    editor.setWeighted(true);
+    clickNode(1);
+    clickNode(0); // add 1 → 0 (two curved arcs now)
+    wheel(hit(1, 0), -page());
+    expect(graph.arcWeight(1, 0)).toBe(WEIGHT_PER_PAGE);
+    expect(graph.arcWeight(0, 1)).toBe(0);
+    expect(lastMessage()[0]).toBe(`Weight of edge 1 → 0: ${WEIGHT_PER_PAGE}`);
+  });
+
+  it('undirected: shows the smaller of two arcs, and editing sets both', () => {
+    editor.setDirected(true);
+    clickNode(1);
+    clickNode(0);
+    graph.setWeight(0, 1, 8);
+    graph.setWeight(1, 0, 3);
+    editor.setDirected(false);
+    editor.setWeighted(true);
+    expect(label(0, 1).textContent).toBe('3');
+
+    wheel(hit(0, 1), -page());
+    expect(graph.arcWeight(0, 1)).toBe(3 + WEIGHT_PER_PAGE);
+    expect(graph.arcWeight(1, 0)).toBe(3 + WEIGHT_PER_PAGE);
+  });
+
+  it('new edges in weighted mode mention their weight', () => {
+    editor.setWeighted(true);
+    clickNode(1);
+    clickNode(2);
+    expect(lastMessage()[0]).toBe('Added edge 1 — 2 with weight 0. Scroll over it to change the weight.');
+  });
+
+  it('switching weighting never changes stored weights or moves nodes', () => {
+    editor.setWeighted(true);
+    wheel(hit(0, 1), -page());
+    const nodes = graph.getNodes().map((n) => ({ ...n }));
+    editor.setWeighted(false);
+    expect(graph.arcWeight(0, 1)).toBe(WEIGHT_PER_PAGE);
+    expect(graph.getNodes()).toEqual(nodes);
   });
 });

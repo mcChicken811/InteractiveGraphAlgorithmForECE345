@@ -1,6 +1,6 @@
 # BFS · Graph Builder
 
-Interactive editor for building an unweighted graph, viewed as directed or undirected, in the browser (TypeScript, no runtime dependencies).
+Interactive editor for building a graph in the browser. The graph is stored as weighted and directed, and can be viewed as directed or undirected, weighted or unweighted (TypeScript, no runtime dependencies).
 
 ## Setup
 
@@ -80,6 +80,8 @@ The image tag in `docker/playwright.Dockerfile` must match the exact `@playwrigh
 | Esc, or click empty space while a node is selected | Cancel the selection |
 | **Auto-layout** button (top-left of the canvas) | Turn automatic spacing on/off |
 | **Undirected / Directed** switch (top-left, next to Auto-layout) | Choose how edges are interpreted (see below) |
+| **Unweighted / Weighted** switch (top-left, next to Undirected / Directed) | Show or hide edge weights (see below) |
+| Weighted mode: **scroll over an edge** (or its weight label) | Change its weight: 15 per page of scrolling, up = more |
 | **☰** button (top-right of the canvas), or Esc to close | Show/hide the help and the live graph representation, floating over the canvas |
 | **Adjacency list / Adjacency matrix** switch (in the ☰ panel; ← / → when focused) | Choose which representation of the graph to show |
 
@@ -98,15 +100,33 @@ Edges are always **stored as directed arcs**: clicking A, then B, records A → 
 
 `Graph.directed` holds the UI's mode. The mode-dependent methods on `Graph` (`hasEdge`, `neighbors`, `getEdges`, `edgeCount`, `addEdge`, `removeEdge`, `adjacencyList`, `adjacencyMatrix`) follow it. Code that needs a particular reading should use the views below instead. Auto-layout and `connectedComponents()` always ignore direction (for a directed graph, the components are its weakly connected components), so switching modes never moves nodes.
 
-### Reading the graph in code: directed and undirected views
+## Weighted and unweighted mode
 
-`src/graph-views.ts` adds a read-only layer over the stored arcs. Both readings of the same graph are always available, regardless of the UI's mode:
+Every stored arc carries a whole-number **weight**, which defaults to 0. The **Unweighted / Weighted** switch only changes how weights are shown and used; switching never changes them.
+
+- **Weighted:**
+  - every edge is labelled with its weight
+  - the adjacency list shows each neighbour's id over the edge weight
+  - the matrix shows weights, with "—" for "no edge" (0 is a real weight)
+- **Unweighted:** labels are hidden, and the views treat every edge as weight 1, the usual convention (what BFS implicitly assumes).
+- **Editing:** in weighted mode, scroll over an edge or its label to change the weight.
+  - The change is linear: one page of scrolling (the window's height) changes it by `WEIGHT_PER_PAGE` = 15, and scrolling up increases it.
+  - Fractions carry over between scroll events, so the rate stays exact while weights stay whole numbers.
+  - Negative weights are allowed.
+  - Ctrl+scroll is left to the browser for zooming.
+- **Undirected weighted:** when arcs run both ways with different weights, the edge shows the **smaller** one (`UNDIRECTED_WEIGHT` in `src/graph-views.ts`). Editing an undirected edge sets both arcs to the new value, so they agree afterwards. Directed mode edits only the arc under the pointer.
+
+### Reading the graph in code: directed/undirected and weighted/unweighted views
+
+`src/graph-views.ts` adds a read-only layer over the stored weighted arcs. All four readings of the same graph are always available, regardless of the UI's modes:
 
 ```ts
-// Stored arcs: 0 → 1, 1 → 0, 1 → 2, 3 → 2
-const d = graph.directedView;    // or graph.view('directed')
-const u = graph.undirectedView;  // or graph.view('undirected')
-const v = graph.currentView;     // whichever the Undirected/Directed switch selects
+graph.view('directed' | 'undirected', 'weighted' | 'unweighted'); // weighting defaults to 'unweighted'
+graph.currentView; // the one the two switches select
+
+// Stored arcs: 0 → 1, 1 → 0, 1 → 2, 3 → 2 (all weight 0)
+const d = graph.directedView;    // = graph.view('directed')   (unweighted)
+const u = graph.undirectedView;  // = graph.view('undirected') (unweighted)
 
 u.neighbors(2);          // [1, 3]       neighbours either way, sorted
 d.neighbors(2);          // []           out-neighbours
@@ -117,9 +137,23 @@ d.edges();               // [[0,1],[1,0],[1,2],[3,2]]   every arc
 u.adjacencyList();       // [{ id: 0, neighbors: [1] }, …]
 d.adjacencyMatrix();     // { ids: [0,1,2,3], matrix: [[0,1,0,0], …] }
 u.connectedComponents(); // BFS components, ignoring direction
+
+// Weight-aware methods, on every view (unweighted views report weight 1):
+const w = graph.view('undirected', 'weighted');
+w.weight(0, 1);              // stored weight; undefined if no edge
+w.weightedNeighbors(1);      // [{ id: 0, weight: … }, { id: 2, weight: … }]
+w.weightedEdges();           // [{ from: 0, to: 1, weight: … }, …]
+w.weightedAdjacencyList();   // [{ id: 0, neighbors: [{ id: 1, weight: … }] }, …]
+w.weightMatrix();            // { ids, matrix } with weights, null = no edge
 ```
 
-Both views implement `GraphView`: `orientation`, `directed`, `nodeIds`, `neighbors`, `degree`, `hasEdge`, `edges`, `edgeCount`, `adjacencyList` and `adjacencyMatrix`.
+Every view implements `GraphView`:
+
+- **Description:** `orientation` and `directed`, `weighting` and `weighted`.
+- **Structure:** `nodeIds`, `neighbors`, `degree`, `hasEdge`, `edges`, `edgeCount`, `adjacencyList`, and `adjacencyMatrix` (0/1, ignoring weights).
+- **Weights:** `weight`, `weightedNeighbors`, `weightedEdges`, `weightedAdjacencyList`, `weightMatrix`.
+
+Weights never change the structure: a weighted and an unweighted view with the same orientation always report the same neighbours, edges and 0/1 matrix.
 
 - **Pure:** reading never changes the graph, and each call returns fresh arrays, so callers can keep or modify the results without affecting the graph.
 - **Live:** each call reflects the graph's current state.
@@ -167,8 +201,8 @@ Freivalds, Dogrusoz & Kikusts study this approach in *Disconnected Graph Layout 
 
 ## Code layout
 
-- `src/graph.ts` — `Graph` model: stores nodes (with positions) and arcs as out/in adjacency `Set`s, handles all edits, and exposes the two views. Its mode-dependent readers follow `graph.directed`.
-- `src/graph-views.ts` — the read-only `GraphView` layer: `DirectedView` (with in/out neighbours and degrees) and `UndirectedView` (with BFS-based `connectedComponents()`). `neighbors(id)` returns ids in sorted order, giving BFS a deterministic visiting order.
+- `src/graph.ts` — `Graph` model: stores nodes (with positions) and weighted arcs (out: target → weight maps; in: source sets), handles all edits (`addEdge(a, b, weight = 0)`, `setWeight`, …), and exposes the four views. Its mode-dependent readers follow `graph.directed` / `graph.weighted`.
+- `src/graph-views.ts` — the read-only `GraphView` layer: `DirectedView` (with in/out neighbours and degrees) and `UndirectedView` (with BFS-based `connectedComponents()`), each available weighted or unweighted. `neighbors(id)` returns ids in sorted order, giving BFS a deterministic visiting order.
 - `src/editor.ts` — `GraphEditor`: SVG rendering, pointer/keyboard interaction, and driving the auto-layout animation.
 - `src/layout.ts` — `ForceLayout` (per-component force-directed layout, fitting and packing) and `packRows`; pure, no DOM.
 - `src/main.ts` — wires the editor to the stats, status message, Auto-layout toggle and the ☰ help/adjacency-list panel.

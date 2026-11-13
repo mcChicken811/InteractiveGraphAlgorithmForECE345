@@ -6,6 +6,7 @@ import {
   type GraphView,
   type Orientation,
   UndirectedView,
+  type Weighting,
 } from './graph-views.js';
 
 export type NodeId = number;
@@ -17,29 +18,35 @@ export interface GraphNode {
 }
 
 /**
- * Unweighted graph. Edges are always *stored* as directed arcs (from → to), in an
- * out-adjacency list plus an in-adjacency list for fast removal.
+ * Weighted graph. Edges are always *stored* as weighted directed arcs (from → to, weight;
+ * the weight defaults to 0), in an out-adjacency map plus an in-adjacency set for fast
+ * removal.
  *
- * Reading: the arcs can be interpreted as a directed or an undirected graph. Both
- * interpretations are always available as pure, read-only views (see graph-views.ts):
+ * Reading: the arcs can be interpreted as directed or undirected, and as weighted or
+ * unweighted (every edge weight 1). All four interpretations are always available as
+ * pure, read-only views (see graph-views.ts):
  *
- *   graph.directedView     every arc is its own edge
- *   graph.undirectedView   an arc either way (or both) is one edge
- *   graph.view(o)          either of the above, by name
- *   graph.currentView      the one selected by `graph.directed` (the UI's mode)
+ *   graph.view('directed' | 'undirected', 'weighted' | 'unweighted')
+ *   graph.directedView / graph.undirectedView   the two unweighted views (shortcuts)
+ *   graph.currentView                           the one selected by `directed` and
+ *                                               `weighted` (the UI's modes)
  *
  * The convenience readers on Graph itself (`neighbors`, `hasEdge`, `getEdges`,
  * `edgeCount`, `adjacencyList`, `adjacencyMatrix`) delegate to `currentView`.
  *
- * Writing: `addEdge` / `removeEdge` also follow `directed` (see their docs). Node
- * positions live here too so the editor can render them.
+ * Writing: `addEdge` / `removeEdge` / `setWeight` follow `directed` (see their docs).
+ * Node positions live here too so the editor can render them.
  */
 export class Graph {
-  /** Which view the mode-dependent methods use. Switching it never changes the stored arcs. */
+  /** Directed or undirected reading for the mode-dependent methods. Never changes stored arcs. */
   directed = false;
+  /** Weighted or unweighted reading for `currentView`. Never changes stored weights. */
+  weighted = false;
 
   private readonly nodes = new Map<NodeId, GraphNode>();
-  private readonly out = new Map<NodeId, Set<NodeId>>();
+  /** from → (to → weight) */
+  private readonly out = new Map<NodeId, Map<NodeId, number>>();
+  /** to → sources */
   private readonly in = new Map<NodeId, Set<NodeId>>();
 
   /** Read-only access to the stored arcs, shared by the views. */
@@ -49,22 +56,38 @@ export class Graph {
     in: (id) => this.in.get(id),
   };
 
-  /** The arcs read as a directed graph. */
-  readonly directedView = new DirectedView(this.reader);
-  /** The arcs read as an undirected graph. */
-  readonly undirectedView = new UndirectedView(this.reader);
+  private readonly views = {
+    directed: {
+      unweighted: new DirectedView(this.reader, 'unweighted'),
+      weighted: new DirectedView(this.reader, 'weighted'),
+    },
+    undirected: {
+      unweighted: new UndirectedView(this.reader, 'unweighted'),
+      weighted: new UndirectedView(this.reader, 'weighted'),
+    },
+  };
 
-  /** The view for the given orientation. */
-  view(orientation: 'directed'): DirectedView;
-  view(orientation: 'undirected'): UndirectedView;
-  view(orientation: Orientation): GraphView;
-  view(orientation: Orientation): GraphView {
-    return orientation === 'directed' ? this.directedView : this.undirectedView;
+  /** The view for the given orientation and weighting (unweighted unless stated). */
+  view(orientation: 'directed', weighting?: Weighting): DirectedView;
+  view(orientation: 'undirected', weighting?: Weighting): UndirectedView;
+  view(orientation: Orientation, weighting?: Weighting): GraphView;
+  view(orientation: Orientation, weighting: Weighting = 'unweighted'): GraphView {
+    return this.views[orientation][weighting];
   }
 
-  /** The view selected by `directed`. */
+  /** The arcs read as an unweighted directed graph. */
+  get directedView(): DirectedView {
+    return this.views.directed.unweighted;
+  }
+
+  /** The arcs read as an unweighted undirected graph. */
+  get undirectedView(): UndirectedView {
+    return this.views.undirected.unweighted;
+  }
+
+  /** The view selected by `directed` and `weighted`. */
   get currentView(): GraphView {
-    return this.directed ? this.directedView : this.undirectedView;
+    return this.view(this.directed ? 'directed' : 'undirected', this.weighted ? 'weighted' : 'unweighted');
   }
 
   // ------------------------------------------------------------------ nodes
@@ -79,7 +102,7 @@ export class Graph {
     while (this.nodes.has(id)) id++;
     const node: GraphNode = { id, x, y };
     this.nodes.set(id, node);
-    this.out.set(id, new Set());
+    this.out.set(id, new Map());
     this.in.set(id, new Set());
     return node;
   }
@@ -87,7 +110,7 @@ export class Graph {
   /** Removes a node and every arc into or out of it. */
   removeNode(id: NodeId): boolean {
     if (!this.nodes.has(id)) return false;
-    for (const to of this.out.get(id)!) this.in.get(to)!.delete(id);
+    for (const to of this.out.get(id)!.keys()) this.in.get(to)!.delete(id);
     for (const from of this.in.get(id)!) this.out.get(from)!.delete(id);
     this.out.delete(id);
     this.in.delete(id);
@@ -119,21 +142,46 @@ export class Graph {
     return this.directedView.hasEdge(from, to);
   }
 
+  /** Stored weight of the arc from → to, or undefined if there is no such arc. */
+  arcWeight(from: NodeId, to: NodeId): number | undefined {
+    return this.out.get(from)?.get(to);
+  }
+
   /** Every stored arc as [from, to], sorted (ignores `directed`). */
   getArcs(): Array<[NodeId, NodeId]> {
     return this.directedView.edges();
   }
 
   /**
-   * Adds an edge from a to b, always stored as the arc a → b.
-   * Returns false for self-loops, unknown nodes, or an edge that already exists in the
-   * current view (undirected: a and b already adjacent either way).
+   * Adds an edge from a to b, always stored as the arc a → b with the given weight
+   * (default 0). Returns false for self-loops, unknown nodes, non-finite weights, or an
+   * edge that already exists in the current view (undirected: a and b adjacent either way).
    */
-  addEdge(a: NodeId, b: NodeId): boolean {
-    if (a === b || !this.nodes.has(a) || !this.nodes.has(b) || this.hasEdge(a, b)) return false;
-    this.out.get(a)!.add(b);
+  addEdge(a: NodeId, b: NodeId, weight = 0): boolean {
+    if (a === b || !this.nodes.has(a) || !this.nodes.has(b) || !Number.isFinite(weight)) return false;
+    if (this.hasEdge(a, b)) return false;
+    this.out.get(a)!.set(b, weight);
     this.in.get(b)!.add(a);
     return true;
+  }
+
+  /**
+   * Sets the weight of the edge between a and b in the current orientation:
+   * directed → the arc a → b; undirected → every stored arc between them (one or both
+   * directions), so they agree afterwards. Returns false if there is no such edge.
+   */
+  setWeight(a: NodeId, b: NodeId, weight: number): boolean {
+    if (!Number.isFinite(weight)) return false;
+    let changed = false;
+    const arcs: Array<[NodeId, NodeId]> = this.directed ? [[a, b]] : [[a, b], [b, a]];
+    for (const [from, to] of arcs) {
+      const targets = this.out.get(from);
+      if (targets?.has(to)) {
+        targets.set(to, weight);
+        changed = true;
+      }
+    }
+    return changed;
   }
 
   /**

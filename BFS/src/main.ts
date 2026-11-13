@@ -12,6 +12,8 @@ const matrixEl = document.querySelector<HTMLElement>('#adjacency-matrix')!;
 const listNote = document.querySelector<HTMLElement>('#list-note')!;
 const matrixNote = document.querySelector<HTMLElement>('#matrix-note')!;
 const modeInputs = document.querySelectorAll<HTMLInputElement>('input[name="edge-mode"]');
+const weightInputs = document.querySelectorAll<HTMLInputElement>('input[name="weight-mode"]');
+const toolbar = document.querySelector<HTMLElement>('.canvas-toolbar')!;
 const clearBtn = document.querySelector<HTMLButtonElement>('#clear-btn')!;
 const layoutBtn = document.querySelector<HTMLButtonElement>('#layout-toggle')!;
 const layoutState = layoutBtn.querySelector<HTMLElement>('.state')!;
@@ -29,13 +31,32 @@ function refreshPanels(): void {
   // The panel shows whichever reading of the graph the Undirected/Directed switch selects.
   renderAdjacencyList(adjacencyEl, graph.currentView);
   renderAdjacencyMatrix(matrixEl, graph.currentView);
-  listNote.textContent = graph.directed
-    ? 'Each node followed by the nodes its edges point to.'
-    : 'Each node followed by its neighbours.';
-  matrixNote.textContent = graph.directed
-    ? 'Row r, column c is 1 when there is an edge r → c, so the matrix need not be symmetric.'
-    : '1 marks an edge between the row and column nodes. The matrix is symmetric because edges are undirected.';
+  listNote.textContent =
+    (graph.directed ? 'Each node followed by the nodes its edges point to.' : 'Each node followed by its neighbours.') +
+    (graph.weighted ? ' Each box shows the neighbour (top) and the edge weight (bottom).' : '');
+  matrixNote.textContent = graph.weighted
+    ? (graph.directed
+        ? 'Row r, column c is the weight of the edge r → c; — means no edge.'
+        : 'Each cell is the weight of the edge between the row and column nodes; — means no edge. If edges run both ways with different weights, the smaller is shown.')
+    : graph.directed
+      ? 'Row r, column c is 1 when there is an edge r → c, so the matrix need not be symmetric.'
+      : '1 marks an edge between the row and column nodes. The matrix is symmetric because edges are undirected.';
+  placePanel();
 }
+
+/** Opens the ☰ panel below the toolbar when the toolbar would otherwise overlap it. */
+function placePanel(): void {
+  if (panel.hasAttribute('hidden')) return;
+  panel.style.removeProperty('--panel-top');
+  const bar = toolbar.getBoundingClientRect();
+  const box = panel.getBoundingClientRect();
+  if (bar.right > box.left - 8) {
+    const wrapTop = panel.offsetParent!.getBoundingClientRect().top;
+    panel.style.setProperty('--panel-top', `${Math.ceil(bar.bottom - wrapTop + 8)}px`);
+  }
+}
+
+window.addEventListener('resize', placePanel);
 
 setupTabs(document.querySelector<HTMLElement>('.rep-tabs')!);
 
@@ -58,6 +79,13 @@ for (const input of modeInputs) {
   });
 }
 
+// Unweighted / Weighted switch: only changes whether the stored weights are shown and used.
+for (const input of weightInputs) {
+  input.addEventListener('change', () => {
+    if (input.checked) editor.setWeighted(input.value === 'weighted');
+  });
+}
+
 layoutBtn.addEventListener('click', () => {
   const enabled = !editor.autoLayoutEnabled;
   editor.setAutoLayout(enabled);
@@ -72,6 +100,7 @@ const isPanelOpen = (): boolean => !panel.hasAttribute('hidden');
 function setPanelOpen(open: boolean): void {
   panel.toggleAttribute('hidden', !open);
   panelBtn.setAttribute('aria-expanded', String(open));
+  placePanel();
 }
 
 panelBtn.addEventListener('click', () => setPanelOpen(!isPanelOpen()));

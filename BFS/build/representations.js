@@ -11,7 +11,8 @@ const EMPTY = 'No nodes yet.';
  * Built from nested lists so screen readers announce "Neighbours of 0, 2 items" etc.
  */
 export function renderAdjacencyList(target, view) {
-    const rows = view.adjacencyList();
+    // Weighted views: each neighbour box also shows the edge's weight (below the id).
+    const rows = view.weightedAdjacencyList();
     if (rows.length === 0) {
         const empty = document.createElement('p');
         empty.className = 'adj-empty';
@@ -20,10 +21,10 @@ export function renderAdjacencyList(target, view) {
         return;
     }
     const list = document.createElement('ul');
-    list.className = 'adj-list';
+    list.className = view.weighted ? 'adj-list weighted' : 'adj-list';
     list.setAttribute('aria-label', 'Adjacency list');
     // Every box shares one width (sized for the longest id), keeping the vertex column aligned.
-    const digits = Math.max(...rows.map((r) => String(r.id).length));
+    const digits = Math.max(...rows.map((r) => String(r.id).length), ...(view.weighted ? rows.flatMap((r) => r.neighbors.map((n) => String(n.weight).length)) : []));
     list.style.setProperty('--adj-cell', `${Math.max(28, 12 + digits * 9)}px`);
     for (const { id, neighbors } of rows) {
         const row = document.createElement('li');
@@ -37,7 +38,17 @@ export function renderAdjacencyList(target, view) {
         for (const n of neighbors) {
             const box = document.createElement('li');
             box.className = 'adj-box';
-            box.textContent = String(n);
+            const idEl = document.createElement('span');
+            idEl.className = 'adj-id';
+            idEl.textContent = String(n.id);
+            box.append(idEl);
+            if (view.weighted) {
+                const weightEl = document.createElement('span');
+                weightEl.className = 'adj-weight';
+                weightEl.textContent = String(n.weight);
+                weightEl.setAttribute('aria-label', `weight ${n.weight}`);
+                box.append(weightEl);
+            }
             chain.append(box);
         }
         row.append(vertex, chain);
@@ -54,7 +65,8 @@ export function renderAdjacencyList(target, view) {
 }
 /** Renders the adjacency matrix as a table with node ids as row and column headers. */
 export function renderAdjacencyMatrix(target, view) {
-    const { ids, matrix } = view.adjacencyMatrix();
+    // Unweighted: 0/1. Weighted: the weight, or "—" where there is no edge (0 is a real weight).
+    const { ids, matrix } = view.weighted ? view.weightMatrix() : view.adjacencyMatrix();
     if (ids.length === 0) {
         const empty = document.createElement('p');
         empty.className = 'matrix-empty';
@@ -77,8 +89,9 @@ export function renderAdjacencyMatrix(target, view) {
         const tr = document.createElement('tr');
         tr.append(cell('th', String(ids[i]), { scope: 'row' }));
         row.forEach((value, j) => {
-            const td = cell('td', String(value));
-            if (value)
+            const present = view.weighted ? value !== null : value === 1;
+            const td = cell('td', value === null ? '—' : String(value));
+            if (present)
                 td.classList.add('on');
             if (i === j)
                 td.classList.add('diag');
