@@ -51,7 +51,7 @@ function segmentDistance(px, py, ax, ay, bx, by) {
     return Math.sqrt(cx * cx + cy * cy);
 }
 /** The field for one cut, from the distances to its nearest inside and outside features. */
-function field(dIn, dOut, mode) {
+function field(dIn, dOut, mode, needBoth = false) {
     if (mode === 'empty')
         return FLAT;
     if (mode === 'all')
@@ -59,7 +59,7 @@ function field(dIn, dOut, mode) {
     if (dIn === Infinity)
         return FLAT;
     if (dOut === Infinity)
-        return -FLAT;
+        return needBoth ? FLAT : -FLAT;
     return dIn - dOut;
 }
 /**
@@ -126,8 +126,8 @@ export function cutShape(features, bounds, options) {
             if (seedOf[k] && d < seed)
                 seed = d;
         }
-        scratch[0] = field(fIn, fOut, from);
-        scratch[1] = field(tIn, tOut, to);
+        scratch[0] = field(fIn, fOut, from, options.needBoth);
+        scratch[1] = field(tIn, tOut, to, options.needBoth);
         scratch[2] = seed;
         return scratch;
     };

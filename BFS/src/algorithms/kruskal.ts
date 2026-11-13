@@ -143,6 +143,9 @@ export class KruskalSimulation implements Simulation {
       // The cut around the upcoming edge's u (Corollary 21.2); at the end, the whole graph
       // when it is one tree (the territory floods the canvas, as with Prim).
       cut: edge ? this.treeOf(edge.from) : oneTree ? ids : undefined,
+      // Only the non-crossing edges shape the border: none at first, when every tree is a
+      // single vertex.
+      cutEdgesOnly: true,
     };
   }
 

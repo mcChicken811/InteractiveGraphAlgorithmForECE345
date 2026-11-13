@@ -111,6 +111,16 @@ describe('cutShape (a single cut)', () => {
     expect(inRegion(all.region, { x: 799, y: 599 })).toBe(true);
   });
 
+  it('needBoth: a side with no features of its own gives no territory, instead of the whole canvas', () => {
+    const feats: CutFeature[] = [{ a: { x: 100, y: 300 }, b: { x: 200, y: 300 }, from: 'in', to: 'in' }];
+    const flood = cutShape(feats, BOUNDS, { t: 1, from: 'split', to: 'split' });
+    expect(inRegion(flood.region, { x: 790, y: 590 })).toBe(true); // nothing outside: all of it
+    expect(cutShape(feats, BOUNDS, { t: 1, from: 'split', to: 'split', needBoth: true })).toEqual({ region: [], border: [] });
+    // Everything in S still floods the canvas.
+    const all = cutShape(feats, BOUNDS, { t: 1, from: 'split', to: 'all', needBoth: true });
+    expect(inRegion(all.region, { x: 790, y: 590 })).toBe(true);
+  });
+
   it('closes every contour, even where the territory reaches the canvas edge', () => {
     const { verts, edges, inside } = randomCut(99);
     const { region } = cutShape(features(verts, edges, inside, inside), BOUNDS, { t: 1, from: 'split', to: 'split' });

@@ -1470,6 +1470,34 @@ describe('GraphEditor cut transitions', () => {
     for (const cb of queued) cb(now);
   };
 
+  it('cutEdgesOnly: the border comes from the non-crossing edges alone, so a lone vertex has none', () => {
+    // Add 3 at x = 550 and the edge 2 — 3: 0 — 1 — 2 — 3 along the row.
+    clickBackground(550, 300);
+    clickNode(2);
+    clickNode(3);
+    const settle = () => {
+      for (let i = 0; i < 80 && frames.length; i++) frame(16);
+    };
+    editor.setHighlight({ current: null, done: [], activeEdges: [], cut: [0], cutEdgesOnly: true });
+    settle();
+    expect(svg.querySelector('.cut-region')!.getAttribute('d')).toBe('');
+    expect(border()).toBe('');
+    // With the vertices as sites, the same cut has a border (between 0 and 1).
+    editor.setHighlight({ current: null, done: [], activeEdges: [], cut: [0] });
+    settle();
+    expect(borderX()).toBeCloseTo(175, 0);
+    // S = {0, 1}: its edge 0 — 1 against the others' 2 — 3 (1 — 2 crosses): the bisector of the gap.
+    editor.setHighlight({ current: null, done: [], activeEdges: [], cut: [0, 1], cutEdgesOnly: true });
+    settle();
+    expect(borderX()).toBeCloseTo(325, 0);
+    // S = {0, 1, 2}: the others (3 alone) have no edge of their own: no border, and no
+    // territory either (rather than S flooding the canvas around 3).
+    editor.setHighlight({ current: null, done: [], activeEdges: [], cut: [0, 1, 2], cutEdgesOnly: true });
+    settle();
+    expect(border()).toBe('');
+    expect(svg.querySelector('.cut-region')!.getAttribute('d')).toBe('');
+  });
+
   it('moves the border continuously to its new place instead of jumping', () => {
     editor.setHighlight({ current: null, done: [0], activeEdges: [], cut: [0] });
     for (let i = 0; i < 60 && frames.length; i++) frame(16); // settle the first cut

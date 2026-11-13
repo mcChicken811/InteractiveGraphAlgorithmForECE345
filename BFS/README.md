@@ -290,7 +290,10 @@ Kruskal's algorithm follows `MST-KRUSKAL(G, w)` in *Introduction to Algorithms* 
 - **Undirected, either weighting:** like Prim it solves the minimum-spanning-tree problem of CLRS Chapter 21, so Run forces **Undirected**, and the weighting is kept but locked (unweighted: every edge counts as 1). A graph that is not connected gets a minimum spanning forest.
 - **Presented like Prim:** compact vertices, the same colours and the same moving border.
   - **White:** the edge the next Update considers.
-  - **The cut:** the territory of *u*'s tree is shaded, with the border sweeping to it after each Update, and its crossing edges are grey. When the next edge joins two trees, it is a light edge crossing this cut (*C*, *V* − *C*), which is why it is safe to add (CLRS Corollary 21.2). When it would close a cycle, both its ends lie inside the territory, so it visibly crosses nothing.
+  - **The cut:** the cut (*C*, *V* − *C*) around *u*'s tree, with its crossing edges grey. When the next edge joins two trees, it is a light edge crossing this cut, which is why it is safe to add (CLRS Corollary 21.2).
+  - **The border:** unlike Prim's, it is drawn from the **non-crossing edges alone**, leaving out the vertices. *C*'s territory is the part of the canvas nearer to an edge with both ends in *C* than to an edge with both ends outside it, and it moves smoothly after each Update.
+    - **When there is none:** while either side has no edge of its own there is no border and no shading. That includes the start, when *u*'s tree is a single vertex.
+    - **Cycle edges:** when the next edge would close a cycle, both its ends lie inside the territory, so it visibly crosses nothing.
   - **Green:** the forest's edges (solid), vertices in a tree with an edge, and edges inside one tree that are not in the forest (dashed).
   - On the last step, if the graph is connected, the tree's territory floods the canvas and fades.
 - **Sorted edges card:** a **Sorted edges** card lists the edges still to come, lightest first: `← next  [1 — 2 · 2] [0 — 1 · 4] …`. On Update the edge taken slides out, green if it was added and faded and struck through if skipped, and the rest glide along.

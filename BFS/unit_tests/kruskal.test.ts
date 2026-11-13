@@ -126,6 +126,7 @@ describe('KruskalSimulation (weighted, CLRS MST-KRUSKAL)', () => {
       activeEdges: [[1, 2]],
       labels: { 0: '0', 1: '1', 2: '2', 3: '3', 4: '4' },
       cut: [1], // 1's tree: just 1
+      cutEdgesOnly: true, // only non-crossing edges shape the border: none around a lone vertex
     });
     sim.step();
     sim.step();

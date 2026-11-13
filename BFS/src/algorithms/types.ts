@@ -50,6 +50,12 @@ export interface Highlight {
    * the canvas and fades out.
    */
   cut?: NodeId[];
+  /**
+   * Draw the cut's border from the non-crossing edges alone, leaving the vertices out
+   * (Kruskal). While either side has no edge of its own (S a lone vertex, at first) there
+   * is no border, and no territory, until S takes every vertex and floods the canvas.
+   */
+  cutEdgesOnly?: boolean;
 }
 
 export interface ExploredEdge {

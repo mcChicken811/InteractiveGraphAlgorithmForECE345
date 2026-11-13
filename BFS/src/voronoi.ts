@@ -74,6 +74,11 @@ export interface CutShapeOptions {
   to: CutMode;
   /** Grid spacing (px). */
   step?: number;
+  /**
+   * A side with no features of its own: by default the other side's territory takes the
+   * whole canvas; with `needBoth`, neither side has any (no territory, no border).
+   */
+  needBoth?: boolean;
 }
 
 export interface CutShape {
@@ -101,11 +106,11 @@ function segmentDistance(px: number, py: number, ax: number, ay: number, bx: num
 }
 
 /** The field for one cut, from the distances to its nearest inside and outside features. */
-function field(dIn: number, dOut: number, mode: CutMode): number {
+function field(dIn: number, dOut: number, mode: CutMode, needBoth = false): number {
   if (mode === 'empty') return FLAT;
   if (mode === 'all') return -FLAT;
   if (dIn === Infinity) return FLAT;
-  if (dOut === Infinity) return -FLAT;
+  if (dOut === Infinity) return needBoth ? FLAT : -FLAT;
   return dIn - dOut;
 }
 
@@ -169,8 +174,8 @@ export function cutShape(features: CutFeature[], bounds: Bounds, options: CutSha
       if (fromOut[k] && d < fOut) fOut = d;
       if (seedOf[k] && d < seed) seed = d;
     }
-    scratch[0] = field(fIn, fOut, from);
-    scratch[1] = field(tIn, tOut, to);
+    scratch[0] = field(fIn, fOut, from, options.needBoth);
+    scratch[1] = field(tIn, tOut, to, options.needBoth);
     scratch[2] = seed;
     return scratch;
   };

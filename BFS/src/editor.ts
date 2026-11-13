@@ -986,12 +986,15 @@ export class GraphEditor {
       if (from.has(a)) touchesFrom.add(b);
       if (from.has(b)) touchesFrom.add(a);
     }
-    const features: CutFeature[] = nodes.map((node) => ({
-      a: node,
-      from: sideIn(from, node.id),
-      to: sideIn(to, node.id),
-      seed: !from.has(node.id) && to.has(node.id) && !touchesFrom.has(node.id),
-    }));
+    // Kruskal draws the border from the non-crossing edges alone (cutEdgesOnly).
+    const features: CutFeature[] = this.highlight?.cutEdgesOnly
+      ? []
+      : nodes.map((node) => ({
+          a: node,
+          from: sideIn(from, node.id),
+          to: sideIn(to, node.id),
+          seed: !from.has(node.id) && to.has(node.id) && !touchesFrom.has(node.id),
+        }));
     for (const [a, b] of this.graph.getEdges()) {
       const f = edgeSide(from, a, b);
       const g = edgeSide(to, a, b);
@@ -1011,6 +1014,8 @@ export class GraphEditor {
       t,
       from: modeOf(from),
       to: toMode,
+      // Edges only: a side with no edge of its own has no border with the other.
+      needBoth: !!this.highlight?.cutEdgesOnly,
     });
     this.cutRegion.setAttribute('d', loopsPath(region));
     this.cutBorder.setAttribute('d', polylinesPath(border));

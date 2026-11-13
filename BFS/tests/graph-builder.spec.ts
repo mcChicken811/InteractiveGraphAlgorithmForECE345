@@ -3614,15 +3614,37 @@ test.describe("algorithm simulation (Kruskal's minimum spanning tree)", () => {
     await expect(cv.canvas).not.toHaveClass(/has-cut/);
   });
 
-  test('the border moves to the next edge’s tree after each Update', async ({ page }) => {
+  test('only the non-crossing edges shape the border: none while the next edge’s tree is a lone vertex', async ({ page }) => {
+    const region = cv.canvas.locator('.cut-region');
+    const border = cv.canvas.locator('.cut-border');
+    /** Whether a canvas-local point lies in the shaded territory. */
+    const inTerritory = (x: number, y: number) =>
+      region.evaluate((el, [px, py]) => {
+        const path = el as SVGPathElement;
+        if (!path.getAttribute('d')) return false;
+        const p = (path.ownerSVGElement as SVGSVGElement).createSVGPoint();
+        p.x = px;
+        p.y = py;
+        return path.isPointInFill(p);
+      }, [x, y]);
     await build(page);
     await run(page);
+    // Every tree is a single vertex: no edges inside the cut around 1, so no territory, no border.
     await cutSettled(page);
-    const before = await cv.canvas.locator('.cut-border').getAttribute('d');
-    await update(page);
+    await expect(border).toHaveAttribute('d', '');
+    await expect(region).toHaveAttribute('d', '');
+    await steps(page, 2); // adds 1—2 and 3—4; next 0—1, around 0: still a lone vertex
+    await cutSettled(page);
+    await expect(border).toHaveAttribute('d', '');
+    await update(page); // adds 0—1; next 1—3, around {0, 1, 2} with its edges 0—1, 1—2, 0—2
     await expect(cv.canvas).toHaveClass(/cut-moving/);
     await cutSettled(page);
-    await expect(cv.canvas.locator('.cut-border')).not.toHaveAttribute('d', before!);
+    await expect(border).not.toHaveAttribute('d', '');
+    // The territory is the side nearer the tree's edges than to the other side's edge 3—4.
+    const mid = (a: number, b: number): [number, number] => [(S[a][0] + S[b][0]) / 2, (S[a][1] + S[b][1]) / 2];
+    expect(await inTerritory(...mid(1, 2))).toBe(true);
+    expect(await inTerritory(...mid(0, 1))).toBe(true);
+    expect(await inTerritory(...mid(3, 4))).toBe(false);
   });
 
   test('unweighted: counts every edge as 1', async ({ page }) => {
