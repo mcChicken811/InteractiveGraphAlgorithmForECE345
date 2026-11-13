@@ -20,7 +20,11 @@
 			return this.orientation === "directed";
 		}
 		get weighted() {
-			return this.weighting === "weighted";
+			return this.weighting !== "unweighted";
+		}
+		/** How this view reads a stored weight: as it is, or (positive) its magnitude. */
+		read(stored) {
+			return this.weighting === "positive" ? Math.abs(stored) : stored;
 		}
 		nodeIds() {
 			return this.arcs.nodeIds();
@@ -34,7 +38,7 @@
 		weight(a, b) {
 			const stored = this.storedWeight(a, b);
 			if (stored === void 0) return void 0;
-			return this.weighted ? stored : 1;
+			return this.weighted ? this.read(stored) : 1;
 		}
 		weightedNeighbors(id) {
 			return this.neighbors(id).map((n) => ({
@@ -127,7 +131,7 @@
 			const back = this.arcs.out(b)?.get(a);
 			if (there === void 0) return back;
 			if (back === void 0) return there;
-			return UNDIRECTED_WEIGHT(there, back);
+			return UNDIRECTED_WEIGHT(this.read(there), this.read(back));
 		}
 		/**
 		* Connected components, found by breadth-first search (for the directed graph these
@@ -161,14 +165,14 @@
 	* the weight defaults to 0), in an out-adjacency map plus an in-adjacency set for fast
 	* removal.
 	*
-	* Reading: the arcs can be interpreted as directed or undirected, and as weighted or
-	* unweighted (every edge weight 1). All four interpretations are always available as
-	* pure, read-only views (see graph-views.ts):
+	* Reading: the arcs can be interpreted as directed or undirected, and as weighted,
+	* unweighted (every edge weight 1) or positive (each weight's magnitude). All six
+	* interpretations are always available as pure, read-only views (see graph-views.ts):
 	*
-	*   graph.view('directed' | 'undirected', 'weighted' | 'unweighted')
+	*   graph.view('directed' | 'undirected', 'weighted' | 'unweighted' | 'positive')
 	*   graph.directedView / graph.undirectedView   the two unweighted views (shortcuts)
 	*   graph.currentView                           the one selected by `directed` and
-	*                                               `weighted` (the UI's modes)
+	*                                               `weighting` (the UI's modes)
 	*
 	* The convenience readers on Graph itself (`neighbors`, `hasEdge`, `getEdges`,
 	* `edgeCount`, `adjacencyList`, `adjacencyMatrix`) delegate to `currentView`.
@@ -179,8 +183,15 @@
 	var Graph = class {
 		/** Directed or undirected reading for the mode-dependent methods. Never changes stored arcs. */
 		directed = false;
-		/** Weighted or unweighted reading for `currentView`. Never changes stored weights. */
-		weighted = false;
+		/** Weighted, unweighted or positive reading for `currentView`. Never changes stored weights. */
+		weighting = "unweighted";
+		/** Whether weights are read ('weighted' or 'positive'). Setting it picks 'weighted' or 'unweighted'. */
+		get weighted() {
+			return this.weighting !== "unweighted";
+		}
+		set weighted(on) {
+			this.weighting = on ? "weighted" : "unweighted";
+		}
 		nodes = /* @__PURE__ */ new Map();
 		/** from → (to → weight) */
 		out = /* @__PURE__ */ new Map();
@@ -195,11 +206,13 @@
 		views = {
 			directed: {
 				unweighted: new DirectedView(this.reader, "unweighted"),
-				weighted: new DirectedView(this.reader, "weighted")
+				weighted: new DirectedView(this.reader, "weighted"),
+				positive: new DirectedView(this.reader, "positive")
 			},
 			undirected: {
 				unweighted: new UndirectedView(this.reader, "unweighted"),
-				weighted: new UndirectedView(this.reader, "weighted")
+				weighted: new UndirectedView(this.reader, "weighted"),
+				positive: new UndirectedView(this.reader, "positive")
 			}
 		};
 		view(orientation, weighting = "unweighted") {
@@ -213,9 +226,9 @@
 		get undirectedView() {
 			return this.views.undirected.unweighted;
 		}
-		/** The view selected by `directed` and `weighted`. */
+		/** The view selected by `directed` and `weighting`. */
 		get currentView() {
-			return this.view(this.directed ? "directed" : "undirected", this.weighted ? "weighted" : "unweighted");
+			return this.view(this.directed ? "directed" : "undirected", this.weighting);
 		}
 		get nodeCount() {
 			return this.nodes.size;
@@ -1307,7 +1320,11 @@
 		const { clearance } = options;
 		const maxWeight = options.maxWeight ?? 20;
 		const bothWays = options.directed ? options.bothWays ?? .25 : 0;
-		const weight = () => options.weighted ? 1 + Math.floor(rand() * maxWeight) : 0;
+		const weight = () => {
+			if (!options.weighted) return 0;
+			const magnitude = 1 + Math.floor(rand() * maxWeight);
+			return options.negative && rand() < .5 ? -magnitude : magnitude;
+		};
 		const extra = Math.round(n * (options.extraPerNode ?? .5));
 		const pairs = [];
 		for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++) if (!points.some((p, k) => k !== a && k !== b && segmentDistance(p, points[a], points[b]) < clearance)) pairs.push({
@@ -1385,6 +1402,12 @@
 	const ARRANGE_MS = 750;
 	/** How long a cut's border takes to move to its new place when the cut changes. */
 	const CUT_MS = 650;
+	/** How a weighting is named in messages. */
+	const WEIGHTING_NAMES = {
+		unweighted: "unweighted",
+		weighted: "weighted",
+		positive: "positive-weighted"
+	};
 	/** Numbers the editors' clip paths apart (an id must be unique on the page). */
 	let clipIds = 0;
 	const BEND_MS = 450;
@@ -1404,8 +1427,9 @@
 	*  - directed / undirected view: edges are stored as arcs (first click → second click);
 	*    directed mode draws arrows (two curved arcs when they go both ways), undirected
 	*    mode draws one plain line per connected pair
-	*  - weighted / unweighted view: weighted mode labels every edge with its weight, and
-	*    scrolling over an edge changes the weight (WEIGHT_PER_PAGE per page; up = more)
+	*  - weighted / unweighted / positive view: weighted mode labels every edge with its
+	*    weight, and scrolling over an edge changes the weight (WEIGHT_PER_PAGE per page;
+	*    up = more); positive mode does the same with each weight's magnitude
 	*  - arc diagram (DFS's topological sort): vertices glide into a left-to-right line and
 	*    edges bend into half circles (see showArcDiagram)
 	*/
@@ -1521,8 +1545,9 @@
 		* Randomise: on an empty canvas, scatters a handful of nodes and connects them; with
 		* nodes already placed, keeps them where they are and replaces their edges with a
 		* random set. The graph is random for the current mode: directed graphs may join a
-		* pair both ways, weighted ones get weights 1–20, unweighted ones weight 0. It is still
-		* stored as weighted directed arcs, as every edge is. See random-graph.ts.
+		* pair both ways; weighted ones get weights from −20 to 20 (never 0), positive ones
+		* from 1 to 20, and unweighted ones weight 0. It is still stored as weighted directed
+		* arcs, as every edge is. See random-graph.ts.
 		*/
 		randomise(rand = Math.random) {
 			if (this.locked) return;
@@ -1534,11 +1559,12 @@
 			}
 			const nodes = this.graph.getNodes();
 			this.graph.clearEdges();
-			const { directed, weighted } = this.graph;
+			const { directed, weighted, weighting } = this.graph;
 			const arcs = randomArcs(nodes, rand, {
 				clearance: 26,
 				directed,
-				weighted
+				weighted,
+				negative: weighting === "weighted"
 			});
 			for (const arc of arcs) this.graph.addEdge(nodes[arc.from].id, nodes[arc.to].id, arc.weight);
 			this.selected = null;
@@ -1547,7 +1573,7 @@
 			this.changed();
 			const m = this.graph.edgeCount;
 			const edges = `${m} edge${m === 1 ? "" : "s"}`;
-			const kind = `${directed ? "directed" : "undirected"}, ${weighted ? "weighted" : "unweighted"}`;
+			const kind = `${directed ? "directed" : "undirected"}, ${WEIGHTING_NAMES[weighting]}`;
 			if (fresh) this.message(`Random ${kind} graph: ${nodes.length} nodes and ${edges}.`);
 			else if (nodes.length < 2) this.message("Randomise needs at least two nodes to connect.", "warn");
 			else this.message(`Random ${kind} edges between the ${nodes.length} nodes: ${edges}.`);
@@ -1661,16 +1687,24 @@
 		get weighted() {
 			return this.graph.weighted;
 		}
-		/**
-		* Shows the graph as weighted (weight labels; scroll over an edge to change its weight)
-		* or unweighted. The stored weights never change.
-		*/
+		get weighting() {
+			return this.graph.weighting;
+		}
+		/** setWeighting('weighted') or setWeighting('unweighted'). */
 		setWeighted(weighted) {
-			if (weighted === this.graph.weighted) return;
-			this.graph.weighted = weighted;
+			this.setWeighting(weighted ? "weighted" : "unweighted");
+		}
+		/**
+		* Shows the graph as weighted (weight labels; scroll over an edge to change its weight),
+		* positive (the same, each weight read as its magnitude) or unweighted. Changing the
+		* mode never changes the stored weights.
+		*/
+		setWeighting(weighting) {
+			if (weighting === this.graph.weighting) return;
+			this.graph.weighting = weighting;
 			this.render();
 			this.callbacks.onChange?.();
-			this.message(weighted ? "Weighted: scroll over an edge to change its weight (up = more)." : "Unweighted: weights are hidden and every edge counts as weight 1.");
+			this.message(weighting === "weighted" ? "Weighted: scroll over an edge to change its weight (up = more)." : weighting === "positive" ? "Positive: every weight counts as its magnitude (−5 as 5). Scroll over an edge to change it (up = more)." : "Unweighted: weights are hidden and every edge counts as weight 1.");
 		}
 		get autoLayoutEnabled() {
 			return this.autoLayout;
@@ -2004,10 +2038,12 @@
 			this.wheelCarry -= steps;
 			const current = this.graph.currentView.weight(a, b);
 			if (current === void 0) return;
-			this.graph.setWeight(a, b, current + steps);
+			const next = this.graph.weighting === "positive" ? Math.max(0, current + steps) : current + steps;
+			if (next === current) return;
+			this.graph.setWeight(a, b, next);
 			this.render();
 			this.callbacks.onChange?.();
-			this.message(`Weight of edge ${this.edgeLabel(a, b)}: ${current + steps}`);
+			this.message(`Weight of edge ${this.edgeLabel(a, b)}: ${next}`);
 		};
 		onResize = () => {
 			this.kickLayout();
@@ -3639,7 +3675,7 @@
 		hooks;
 		simulation = null;
 		/** The weighting / direction chosen before Run forced one, restored on Stop. */
-		savedWeighted = null;
+		savedWeighting = null;
 		savedDirected = null;
 		constructor(graph, editor, el, hooks) {
 			this.graph = graph;
@@ -3672,14 +3708,14 @@
 			this.editor.setLocked(true);
 			const { weighted, directed } = algorithm.requires;
 			if (weighted !== void 0) {
-				this.savedWeighted = this.graph.weighted;
-				this.editor.setWeighted(weighted);
-				this.syncSwitch(this.el.weightSwitch, "weighted", this.graph.weighted);
+				this.savedWeighting = this.graph.weighting;
+				if (weighted !== this.graph.weighted) this.editor.setWeighted(weighted);
+				this.syncSwitch(this.el.weightSwitch, this.graph.weighting);
 			}
 			if (directed !== void 0) {
 				this.savedDirected = this.graph.directed;
 				this.editor.setDirected(directed);
-				this.syncSwitch(this.el.directionSwitch, "directed", this.graph.directed);
+				this.syncSwitch(this.el.directionSwitch, this.graph.directed ? "directed" : "undirected");
 			}
 			this.lockSwitch(this.el.weightSwitch, weighted !== void 0 || !!algorithm.usesWeights);
 			this.lockSwitch(this.el.directionSwitch, true);
@@ -3760,14 +3796,14 @@
 			this.editor.showArcDiagram(null);
 			this.editor.setHighlight(null);
 			this.editor.setLocked(false);
-			if (this.savedWeighted !== null) {
-				this.editor.setWeighted(this.savedWeighted);
-				this.syncSwitch(this.el.weightSwitch, "weighted", this.graph.weighted);
-				this.savedWeighted = null;
+			if (this.savedWeighting !== null) {
+				this.editor.setWeighting(this.savedWeighting);
+				this.syncSwitch(this.el.weightSwitch, this.graph.weighting);
+				this.savedWeighting = null;
 			}
 			if (this.savedDirected !== null) {
 				this.editor.setDirected(this.savedDirected);
-				this.syncSwitch(this.el.directionSwitch, "directed", this.graph.directed);
+				this.syncSwitch(this.el.directionSwitch, this.graph.directed ? "directed" : "undirected");
 				this.savedDirected = null;
 			}
 			this.lockSwitch(this.el.weightSwitch, false);
@@ -3845,8 +3881,9 @@
 			this.updateControls();
 		}
 		/** Checks the radio matching the graph's state (`on`: the option named `onValue`). */
-		syncSwitch(fieldset, onValue, on) {
-			for (const input of fieldset.querySelectorAll("input")) input.checked = input.value === onValue === on;
+		/** Checks the switch's option with this value. */
+		syncSwitch(fieldset, value) {
+			for (const input of fieldset.querySelectorAll("input")) input.checked = input.value === value;
 		}
 		lockSwitch(fieldset, locked) {
 			fieldset.disabled = locked;
@@ -4825,6 +4862,11 @@
 		renderAdjacencyMatrix(matrixEl, graph.currentView);
 		listNote.textContent = (graph.directed ? "Each node followed by the nodes its edges point to." : "Each node followed by its neighbours.") + (graph.weighted ? " Each box shows the neighbour (top) and the edge weight (bottom)." : "");
 		matrixNote.textContent = graph.weighted ? graph.directed ? "Row r, column c is the weight of the edge r → c; — means no edge." : "Each cell is the weight of the edge between the row and column nodes; — means no edge. If edges run both ways with different weights, the smaller is shown." : graph.directed ? "Row r, column c is 1 when there is an edge r → c, so the matrix need not be symmetric." : "1 marks an edge between the row and column nodes. The matrix is symmetric because edges are undirected.";
+		if (graph.weighting === "positive") {
+			const positive = " Positive: every weight is shown, and used, as its magnitude (−5 as 5).";
+			listNote.textContent += positive;
+			matrixNote.textContent += positive;
+		}
 		placePanel();
 	}
 	/** Opens the ☰ panel below the toolbar when the toolbar would otherwise overlap it. */
@@ -4910,7 +4952,7 @@
 		if (input.checked) editor.setDirected(input.value === "directed");
 	});
 	for (const input of weightInputs) input.addEventListener("change", () => {
-		if (input.checked) editor.setWeighted(input.value === "weighted");
+		if (input.checked) editor.setWeighting(input.value);
 	});
 	layoutBtn.addEventListener("click", () => {
 		const leaving = editor.autoLayoutEnabled ? null : editor.arrangement;

@@ -1,6 +1,7 @@
 import { ALGORITHMS, type AlgorithmDefinition, type Simulation } from './algorithms/index.js';
 import type { GraphEditor } from './editor.js';
 import type { Graph } from './graph.js';
+import type { Weighting } from './graph-views.js';
 import type { QueueView } from './queue-view.js';
 import type { SelectMenu } from './select-menu.js';
 import type { TimelineView } from './timeline-view.js';
@@ -19,7 +20,7 @@ export interface RunnerElements {
   forest?: HTMLButtonElement;
   /** "Show as tree", a toggle offered while the simulation has a search tree to show (BFS). */
   tree?: HTMLButtonElement;
-  /** The Unweighted / Weighted switch (locked when an algorithm requires a weighting or reads the weights). */
+  /** The Unweighted / Weighted / Positive switch (locked when an algorithm requires a weighting or reads the weights). */
   weightSwitch: HTMLFieldSetElement;
   /** The Undirected / Directed switch (locked while running: changing it would change the graph). */
   directionSwitch: HTMLFieldSetElement;
@@ -68,7 +69,7 @@ const LOCKED_TITLE = 'Locked while the algorithm runs. Press Stop to change it.'
 export class AlgorithmRunner {
   private simulation: Simulation | null = null;
   /** The weighting / direction chosen before Run forced one, restored on Stop. */
-  private savedWeighted: boolean | null = null;
+  private savedWeighting: Weighting | null = null;
   private savedDirected: boolean | null = null;
 
   constructor(
@@ -110,14 +111,15 @@ export class AlgorithmRunner {
     this.editor.setLocked(true);
     const { weighted, directed } = algorithm.requires;
     if (weighted !== undefined) {
-      this.savedWeighted = this.graph.weighted;
-      this.editor.setWeighted(weighted);
-      this.syncSwitch(this.el.weightSwitch, 'weighted', this.graph.weighted);
+      this.savedWeighting = this.graph.weighting;
+      // Requiring weights keeps Positive if it is chosen; requiring none forces Unweighted.
+      if (weighted !== this.graph.weighted) this.editor.setWeighted(weighted);
+      this.syncSwitch(this.el.weightSwitch, this.graph.weighting);
     }
     if (directed !== undefined) {
       this.savedDirected = this.graph.directed;
       this.editor.setDirected(directed);
-      this.syncSwitch(this.el.directionSwitch, 'directed', this.graph.directed);
+      this.syncSwitch(this.el.directionSwitch, this.graph.directed ? 'directed' : 'undirected');
     }
     // An algorithm that reads the weights keeps the user's weighting, but it must not
     // change under it part-way.
@@ -237,14 +239,14 @@ export class AlgorithmRunner {
     this.editor.showArcDiagram(null); // vertices stay where they are
     this.editor.setHighlight(null);
     this.editor.setLocked(false);
-    if (this.savedWeighted !== null) {
-      this.editor.setWeighted(this.savedWeighted);
-      this.syncSwitch(this.el.weightSwitch, 'weighted', this.graph.weighted);
-      this.savedWeighted = null;
+    if (this.savedWeighting !== null) {
+      this.editor.setWeighting(this.savedWeighting);
+      this.syncSwitch(this.el.weightSwitch, this.graph.weighting);
+      this.savedWeighting = null;
     }
     if (this.savedDirected !== null) {
       this.editor.setDirected(this.savedDirected);
-      this.syncSwitch(this.el.directionSwitch, 'directed', this.graph.directed);
+      this.syncSwitch(this.el.directionSwitch, this.graph.directed ? 'directed' : 'undirected');
       this.savedDirected = null;
     }
     this.lockSwitch(this.el.weightSwitch, false);
@@ -332,9 +334,10 @@ export class AlgorithmRunner {
   }
 
   /** Checks the radio matching the graph's state (`on`: the option named `onValue`). */
-  private syncSwitch(fieldset: HTMLFieldSetElement, onValue: string, on: boolean): void {
+  /** Checks the switch's option with this value. */
+  private syncSwitch(fieldset: HTMLFieldSetElement, value: string): void {
     for (const input of fieldset.querySelectorAll<HTMLInputElement>('input')) {
-      input.checked = (input.value === onValue) === on;
+      input.checked = input.value === value;
     }
   }
 

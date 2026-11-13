@@ -4,7 +4,7 @@ import type { NodeId } from './graph.js';
  * Read-only views of a graph's edges.
  *
  * A `Graph` stores every edge as a *weighted directed arc* (from → to, weight). The same
- * arcs can be read in four ways, and all four views are always available, whatever the
+ * arcs can be read in six ways, and all six views are always available, whatever the
  * UI's current mode:
  *
  *               │ unweighted                       │ weighted
@@ -15,6 +15,8 @@ import type { NodeId } from './graph.js';
  *
  * "Unweighted" uses the standard convention that every edge has weight 1 (what BFS
  * implicitly assumes), so weight-aware code works unchanged on unweighted views.
+ * "Positive" is weighted, reading each arc's weight as its magnitude (−5 counts as 5),
+ * so no edge weighs less than 0; undirected, the smaller of the two magnitudes.
  *
  * Views are pure: they never modify the graph, and every method returns freshly built
  * data (sorted by node id), so callers may keep or mutate the results freely. They are
@@ -25,7 +27,8 @@ import type { NodeId } from './graph.js';
  */
 
 export type Orientation = 'directed' | 'undirected';
-export type Weighting = 'weighted' | 'unweighted';
+/** 'positive': weighted, with each stored weight read as its magnitude (|w|). */
+export type Weighting = 'weighted' | 'unweighted' | 'positive';
 
 /** A neighbour together with the weight of the edge leading to it. */
 export interface WeightedNeighbor {
@@ -78,7 +81,7 @@ export interface GraphView {
   /** Shorthand for `orientation === 'directed'`. */
   readonly directed: boolean;
   readonly weighting: Weighting;
-  /** Shorthand for `weighting === 'weighted'`. */
+  /** Whether weights are read at all: 'weighted' or 'positive' (not 'unweighted'). */
   readonly weighted: boolean;
   /** Node ids, ascending. */
   nodeIds(): NodeId[];
@@ -141,7 +144,12 @@ abstract class BaseView implements GraphView {
   }
 
   get weighted(): boolean {
-    return this.weighting === 'weighted';
+    return this.weighting !== 'unweighted';
+  }
+
+  /** How this view reads a stored weight: as it is, or (positive) its magnitude. */
+  protected read(stored: number): number {
+    return this.weighting === 'positive' ? Math.abs(stored) : stored;
   }
 
   nodeIds(): NodeId[] {
@@ -159,7 +167,7 @@ abstract class BaseView implements GraphView {
   weight(a: NodeId, b: NodeId): number | undefined {
     const stored = this.storedWeight(a, b);
     if (stored === undefined) return undefined;
-    return this.weighted ? stored : 1;
+    return this.weighted ? this.read(stored) : 1;
   }
 
   weightedNeighbors(id: NodeId): WeightedNeighbor[] {
@@ -255,7 +263,8 @@ export class UndirectedView extends BaseView {
     const back = this.arcs.out(b)?.get(a);
     if (there === undefined) return back;
     if (back === undefined) return there;
-    return UNDIRECTED_WEIGHT(there, back);
+    // Positive: the smaller magnitude (|−5| and 3 combine to 3).
+    return UNDIRECTED_WEIGHT(this.read(there), this.read(back));
   }
 
   /**

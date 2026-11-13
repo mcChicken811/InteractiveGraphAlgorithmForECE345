@@ -238,19 +238,23 @@ describe('weighted and unweighted views', () => {
     g.directed = false;
   });
 
-  it('exposes four views, one per orientation × weighting', () => {
+  it('exposes six views, one per orientation × weighting', () => {
     const views = [
       g.view('directed', 'unweighted'),
       g.view('directed', 'weighted'),
+      g.view('directed', 'positive'),
       g.view('undirected', 'unweighted'),
       g.view('undirected', 'weighted'),
+      g.view('undirected', 'positive'),
     ];
-    expect(new Set(views).size).toBe(4);
+    expect(new Set(views).size).toBe(6);
     expect(views.map((v) => [v.orientation, v.weighting])).toEqual([
       ['directed', 'unweighted'],
       ['directed', 'weighted'],
+      ['directed', 'positive'],
       ['undirected', 'unweighted'],
       ['undirected', 'weighted'],
+      ['undirected', 'positive'],
     ]);
     expect(g.view('directed')).toBe(g.directedView); // unweighted unless stated
     expect(g.view('directed', 'weighted').weighted).toBe(true);
@@ -316,6 +320,32 @@ describe('weighted and unweighted views', () => {
         { id: 3, weight: 0 },
       ],
     });
+  });
+
+  it('positive views read every weight as its magnitude; undirected, the smaller magnitude', () => {
+    g.directed = true;
+    g.setWeight(1, 0, -4); // 0 → 1 = 5, 1 → 0 = -4: the smaller magnitude is 4, not min(5, -4) = -4
+    g.directed = false;
+    const d = g.view('directed', 'positive');
+    expect(d.weighting).toBe('positive');
+    expect(d.weighted).toBe(true);
+    expect(d.weight(0, 1)).toBe(5);
+    expect(d.weight(1, 0)).toBe(4);
+    expect(d.weight(1, 2)).toBe(3); // stored -3
+    const u = g.view('undirected', 'positive');
+    expect(u.weight(0, 1)).toBe(4);
+    expect(u.weight(2, 1)).toBe(3);
+    expect(u.weightedEdges().every(({ weight }) => weight >= 0)).toBe(true);
+    expect(u.weightMatrix().matrix[1][2]).toBe(3);
+    // Reading never changes the stored weights.
+    expect(g.arcWeight(1, 2)).toBe(-3);
+    expect(g.view('undirected', 'weighted').weight(0, 1)).toBe(-4);
+    // currentView follows graph.weighting.
+    g.weighting = 'positive';
+    expect(g.currentView).toBe(u);
+    expect(g.weighted).toBe(true);
+    g.weighted = false;
+    expect(g.weighting).toBe('unweighted');
   });
 
   it('unweighted views give every edge weight 1, whatever is stored', () => {

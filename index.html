@@ -81,12 +81,15 @@
             <input type="radio" id="mode-directed" name="edge-mode" value="directed" />
             <label for="mode-directed">Directed</label>
           </fieldset>
-          <!-- How weights are shown. Edges always store a weight (default 0); unweighted mode hides them. -->
+          <!-- How weights are shown. Edges always store a weight (default 0); unweighted mode hides them,
+               positive mode reads each one as its magnitude (−5 as 5). -->
           <fieldset id="weight-switch" class="mode-switch" aria-label="Edge weights">
             <input type="radio" id="weights-off" name="weight-mode" value="unweighted" checked />
             <label for="weights-off">Unweighted</label>
             <input type="radio" id="weights-on" name="weight-mode" value="weighted" />
             <label for="weights-on">Weighted</label>
+            <input type="radio" id="weights-positive" name="weight-mode" value="positive" />
+            <label for="weights-positive" title="Weighted, reading each weight as its magnitude (−5 as 5)">Positive</label>
           </fieldset>
         </div>
 
@@ -135,7 +138,8 @@
                 <li>
                   <strong>Randomise</strong> (top) makes a random graph on an empty canvas, or random edges
                   between the nodes you have placed, of the kind selected: Directed may join two nodes both
-                  ways, Weighted gives weights from 1 to 20, and Unweighted leaves every weight at 0.
+                  ways, Weighted gives weights from −20 to 20 (never 0), Positive from 1 to 20, and Unweighted
+                  leaves every weight at 0.
                 </li>
                 <li><strong>Auto-layout</strong> (top left) spaces the graph out automatically.</li>
                 <li>
@@ -143,8 +147,9 @@
                   always records A → B; undirected mode ignores the direction.
                 </li>
                 <li>
-                  <strong>Unweighted / Weighted</strong> (top left) shows or hides edge weights (default 0). In
-                  weighted mode, <strong>scroll over an edge</strong> to change its weight (up = more).
+                  <strong>Unweighted / Weighted / Positive</strong> (top left) shows or hides edge weights
+                  (default 0). In weighted mode, <strong>scroll over an edge</strong> to change its weight (up =
+                  more). Positive reads every weight as its magnitude (−5 as 5), for the algorithms too.
                 </li>
                 <li>
                   <strong>Run</strong> (top right) simulates the chosen algorithm, starting from the selected

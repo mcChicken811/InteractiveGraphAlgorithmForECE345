@@ -2,6 +2,7 @@
 // script index.html loads (so the page also runs when opened from file://).
 // Imports use .js extensions, as NodeNext module resolution requires.
 import { Graph } from './graph.js';
+import type { Weighting } from './graph-views.js';
 import { GraphEditor } from './editor.js';
 import { renderAdjacencyList, renderAdjacencyMatrix, setupTabs } from './representations.js';
 import { followColorScheme } from './favicon.js';
@@ -56,6 +57,11 @@ function refreshPanels(): void {
     : graph.directed
       ? 'Row r, column c is 1 when there is an edge r → c, so the matrix need not be symmetric.'
       : '1 marks an edge between the row and column nodes. The matrix is symmetric because edges are undirected.';
+  if (graph.weighting === 'positive') {
+    const positive = ' Positive: every weight is shown, and used, as its magnitude (−5 as 5).';
+    listNote.textContent += positive;
+    matrixNote.textContent += positive;
+  }
   placePanel();
 }
 
@@ -193,10 +199,10 @@ for (const input of modeInputs) {
   });
 }
 
-// Unweighted / Weighted switch: only changes whether the stored weights are shown and used.
+// Unweighted / Weighted / Positive switch: only changes how the stored weights are shown and used.
 for (const input of weightInputs) {
   input.addEventListener('change', () => {
-    if (input.checked) editor.setWeighted(input.value === 'weighted');
+    if (input.checked) editor.setWeighting(input.value as Weighting);
   });
 }
 

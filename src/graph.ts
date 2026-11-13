@@ -22,14 +22,14 @@ export interface GraphNode {
  * the weight defaults to 0), in an out-adjacency map plus an in-adjacency set for fast
  * removal.
  *
- * Reading: the arcs can be interpreted as directed or undirected, and as weighted or
- * unweighted (every edge weight 1). All four interpretations are always available as
- * pure, read-only views (see graph-views.ts):
+ * Reading: the arcs can be interpreted as directed or undirected, and as weighted,
+ * unweighted (every edge weight 1) or positive (each weight's magnitude). All six
+ * interpretations are always available as pure, read-only views (see graph-views.ts):
  *
- *   graph.view('directed' | 'undirected', 'weighted' | 'unweighted')
+ *   graph.view('directed' | 'undirected', 'weighted' | 'unweighted' | 'positive')
  *   graph.directedView / graph.undirectedView   the two unweighted views (shortcuts)
  *   graph.currentView                           the one selected by `directed` and
- *                                               `weighted` (the UI's modes)
+ *                                               `weighting` (the UI's modes)
  *
  * The convenience readers on Graph itself (`neighbors`, `hasEdge`, `getEdges`,
  * `edgeCount`, `adjacencyList`, `adjacencyMatrix`) delegate to `currentView`.
@@ -40,8 +40,17 @@ export interface GraphNode {
 export class Graph {
   /** Directed or undirected reading for the mode-dependent methods. Never changes stored arcs. */
   directed = false;
-  /** Weighted or unweighted reading for `currentView`. Never changes stored weights. */
-  weighted = false;
+  /** Weighted, unweighted or positive reading for `currentView`. Never changes stored weights. */
+  weighting: Weighting = 'unweighted';
+
+  /** Whether weights are read ('weighted' or 'positive'). Setting it picks 'weighted' or 'unweighted'. */
+  get weighted(): boolean {
+    return this.weighting !== 'unweighted';
+  }
+
+  set weighted(on: boolean) {
+    this.weighting = on ? 'weighted' : 'unweighted';
+  }
 
   private readonly nodes = new Map<NodeId, GraphNode>();
   /** from → (to → weight) */
@@ -60,10 +69,12 @@ export class Graph {
     directed: {
       unweighted: new DirectedView(this.reader, 'unweighted'),
       weighted: new DirectedView(this.reader, 'weighted'),
+      positive: new DirectedView(this.reader, 'positive'),
     },
     undirected: {
       unweighted: new UndirectedView(this.reader, 'unweighted'),
       weighted: new UndirectedView(this.reader, 'weighted'),
+      positive: new UndirectedView(this.reader, 'positive'),
     },
   };
 
@@ -85,9 +96,9 @@ export class Graph {
     return this.views.undirected.unweighted;
   }
 
-  /** The view selected by `directed` and `weighted`. */
+  /** The view selected by `directed` and `weighting`. */
   get currentView(): GraphView {
-    return this.view(this.directed ? 'directed' : 'undirected', this.weighted ? 'weighted' : 'unweighted');
+    return this.view(this.directed ? 'directed' : 'undirected', this.weighting);
   }
 
   // ------------------------------------------------------------------ nodes

@@ -335,6 +335,23 @@ test.describe('Randomise', () => {
     await expect(randomBtn(page)).toBeEnabled();
   });
 
+  test('Positive makes positive weights only (1–20); Weighted negative ones too', async ({ page }) => {
+    await page.locator('label[for="weights-positive"]').click();
+    await randomBtn(page).click();
+    await expect(page.locator('#message')).toHaveText(/^Random undirected, positive-weighted graph: /);
+    const pos = await storedArcs(page); // read back as stored, in Weighted
+    expect(pos.length).toBeGreaterThan(3);
+    for (const [, , w] of pos) expect(w >= 1 && w <= 20).toBe(true);
+    // Weighted (now selected): from −20 to 20, never 0, some negative.
+    const all: number[] = [];
+    for (let i = 0; i < 3 && !all.some((w) => w < 0); i++) {
+      await randomBtn(page).click();
+      all.push(...(await storedArcs(page)).map(([, , w]) => w));
+    }
+    expect(all.every((w) => Number.isInteger(w) && w !== 0 && Math.abs(w) <= 20)).toBe(true);
+    expect(all.some((w) => w < 0)).toBe(true);
+  });
+
   test('on an empty canvas: makes a connected random graph clear of the toolbar and status bar', async ({ page }) => {
     await randomBtn(page).click();
     const n = await cv.nodes.count();
@@ -366,13 +383,13 @@ test.describe('Randomise', () => {
     for (const [, , w] of arcs) expect(w).toBe(0);
   });
 
-  test('undirected, weighted: weights from 1 to 20 on the canvas', async ({ page }) => {
+  test('undirected, weighted: weights from −20 to 20 (never 0) on the canvas', async ({ page }) => {
     await page.locator('label[for="weights-on"]').click();
     await randomBtn(page).click();
     await expect(page.locator('#message')).toHaveText(/^Random undirected, weighted graph: /);
     const weights = await cv.canvas.locator('.edge .edge-weight text').allTextContents();
     expect(weights.length).toBe(await cv.edges.count());
-    for (const w of weights.map(Number)) expect(Number.isInteger(w) && w >= 1 && w <= 20).toBe(true);
+    for (const w of weights.map(Number)) expect(Number.isInteger(w) && w !== 0 && Math.abs(w) <= 20).toBe(true);
   });
 
   test('directed: some pairs are joined both ways, drawn as two curved arrows', async ({ page }) => {
@@ -385,7 +402,7 @@ test.describe('Randomise', () => {
       const arcs = await storedArcs(page);
       const pairs = new Set(arcs.map(([a, b]) => `${Math.min(a, b)}-${Math.max(a, b)}`));
       twoWay = arcs.length - pairs.size;
-      for (const [, , w] of arcs) expect(w >= 1 && w <= 20).toBe(true);
+      for (const [, , w] of arcs) expect(w !== 0 && Math.abs(w) <= 20).toBe(true);
       await expect(page.locator('#stats')).toHaveText(new RegExp(` · ${arcs.length} edges$`));
       if (twoWay) {
         const [a, b] = arcs.find(([x, y]) => arcs.some(([p, q]) => p === y && q === x))!;
@@ -990,7 +1007,8 @@ test.describe('directed / undirected switch', () => {
 test.describe('weighted / unweighted switch', () => {
   const unweighted = (page: Page) => page.getByRole('radio', { name: 'Unweighted', exact: true });
   const weighted = (page: Page) => page.getByRole('radio', { name: 'Weighted', exact: true });
-  const choose = (page: Page, id: 'weights-on' | 'weights-off' | 'mode-directed' | 'mode-undirected') =>
+  const positive = (page: Page) => page.getByRole('radio', { name: 'Positive', exact: true });
+  const choose = (page: Page, id: 'weights-on' | 'weights-off' | 'weights-positive' | 'mode-directed' | 'mode-undirected') =>
     page.locator(`label[for="${id}"]`).click();
   const weightLabel = (a: number, b: number) => cv.edge(a, b).locator('.edge-weight text');
 
@@ -1018,8 +1036,9 @@ test.describe('weighted / unweighted switch', () => {
     const d = (await page.getByRole('group', { name: 'Edge type' }).boundingBox())!;
     expect(w.x).toBeGreaterThan(d.x + d.width - 1);
     expect(Math.abs(w.y - d.y)).toBeLessThan(2);
-    const c = (await cv.canvas.boundingBox())!;
-    expect(w.x + w.width).toBeLessThan(c.x + c.width / 2);
+    // On the left, well clear of the ☰ button on the right.
+    const menu = (await page.getByRole('button', { name: 'Help and adjacency list' }).boundingBox())!;
+    expect(w.x + w.width).toBeLessThan(menu.x - 200);
   });
 
   test('unweighted: no weight labels, and scrolling over an edge changes nothing', async ({ page }) => {
@@ -1161,6 +1180,46 @@ test.describe('weighted / unweighted switch', () => {
     await page.keyboard.press('ArrowRight');
     await expect(weighted(page)).toBeChecked();
     await expect(cv.canvas).toHaveClass(/weighted/);
+    await page.keyboard.press('ArrowRight');
+    await expect(positive(page)).toBeChecked();
+    await expect(cv.canvas).toHaveClass(/weighted/);
+  });
+
+  test('Positive, the third option: shows and uses each weight as its magnitude', async ({ page }) => {
+    const group = (await page.getByRole('group', { name: 'Edge weights' }).boundingBox())!;
+    const box = (await page.locator('label[for="weights-positive"]').boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual(group.x + group.width + 1); // inside the switch, last
+    await addTriangleNodes();
+    await connect(P.a, P.b);
+    await choose(page, 'weights-on');
+    await hoverEdge(0, 1);
+    await scrollPages(page, 5.4 / 15); // down: 0 → −5 (the 0.4 carries over)
+    await expect(weightLabel(0, 1)).toHaveText('-5');
+    await choose(page, 'weights-positive');
+    await expect(positive(page)).toBeChecked();
+    await expect(page.locator('#message')).toContainText('magnitude');
+    await expect(weightLabel(0, 1)).toHaveText('5');
+    await expect(page.locator('#matrix-note')).toContainText('as its magnitude');
+    // Scrolling changes the magnitude, and stops at 0.
+    await hoverEdge(0, 1);
+    await scrollPages(page, -2.4 / 15); // up by 2 (with the carried −0.4)
+    await expect(weightLabel(0, 1)).toHaveText('7');
+    await scrollPages(page, 20 / 15);
+    await expect(weightLabel(0, 1)).toHaveText('0');
+    await choose(page, 'weights-on');
+    await expect(weightLabel(0, 1)).toHaveText('0');
+  });
+
+  test('BFS forces Unweighted from Positive, and Stop brings Positive back', async ({ page }) => {
+    await addTriangleNodes();
+    await connect(P.a, P.b);
+    await choose(page, 'weights-positive');
+    await page.getByRole('button', { name: 'Run', exact: true }).click();
+    await expect(unweighted(page)).toBeChecked();
+    await expect(positive(page)).toBeDisabled();
+    await page.getByRole('button', { name: 'Stop', exact: true }).click();
+    await expect(positive(page)).toBeChecked();
+    await expect(positive(page)).toBeEnabled();
   });
 });
 

@@ -364,13 +364,30 @@ describe('GraphEditor randomise', () => {
     expect(arcs.some(([a, b]) => a > b) && arcs.some(([a, b]) => a < b)).toBe(true);
   });
 
-  it('undirected, weighted: one arc per pair, weights 1–20', () => {
+  it('undirected, weighted: one arc per pair, weights from −20 to 20 (never 0), some negative', () => {
     editor.setWeighted(true);
-    editor.randomise(seeded(3));
-    const { bothWays, weights } = arcSummary();
-    expect(bothWays).toBe(0);
-    expect(weights.every((w) => Number.isInteger(w) && w >= 1 && w <= 20)).toBe(true);
+    const all: number[] = [];
+    for (let seed = 1; seed <= 6; seed++) {
+      editor.clear();
+      editor.randomise(seeded(seed));
+      const { bothWays, weights } = arcSummary();
+      expect(bothWays).toBe(0);
+      all.push(...weights);
+    }
+    expect(all.every((w) => Number.isInteger(w) && w !== 0 && Math.abs(w) <= 20)).toBe(true);
+    expect(all.some((w) => w < 0)).toBe(true);
+    expect(all.some((w) => w > 0)).toBe(true);
     expect(lastMessage()[0]).toMatch(/^Random undirected, weighted graph: /);
+  });
+
+  it('positive: only positive weights, 1–20', () => {
+    editor.setWeighting('positive');
+    for (let seed = 1; seed <= 6; seed++) {
+      editor.clear();
+      editor.randomise(seeded(seed));
+      expect(arcSummary().weights.every((w) => Number.isInteger(w) && w >= 1 && w <= 20)).toBe(true);
+    }
+    expect(lastMessage()[0]).toMatch(/^Random undirected, positive-weighted graph: /);
   });
 
   it('directed: some pairs are joined both ways; the edge count is the arc count', () => {
@@ -387,7 +404,7 @@ describe('GraphEditor randomise', () => {
     }
     expect(seen).toBeGreaterThan(0);
     // Weighted: each arc of a two-way pair has its own weight.
-    editor.setWeighted(true);
+    editor.setWeighting('positive');
     editor.randomise(seeded(2));
     expect(arcSummary().weights.every((w) => w >= 1 && w <= 20)).toBe(true);
   });
@@ -754,6 +771,25 @@ describe('GraphEditor weighted mode', () => {
 
     wheel(hit(0, 1), 2 * page());
     expect(graph.arcWeight(0, 1)).toBe(-WEIGHT_PER_PAGE); // negative weights are allowed
+  });
+
+  it('positive: labels show magnitudes, scrolling changes the magnitude and stops at 0', () => {
+    graph.setWeight(0, 1, -5);
+    editor.setWeighting('positive');
+    expect(editor.weighting).toBe('positive');
+    expect(svg.classList.contains('weighted')).toBe(true);
+    expect(label(0, 1).textContent).toBe('5');
+    expect(lastMessage()[0]).toContain('magnitude');
+    wheel(hit(0, 1), -page() / WEIGHT_PER_PAGE); // up by 1
+    expect(label(0, 1).textContent).toBe('6');
+    expect(graph.arcWeight(0, 1)).toBe(6); // now stored positive
+    wheel(hit(0, 1), 3 * page()); // down far past 0
+    expect(graph.arcWeight(0, 1)).toBe(0);
+    expect(label(0, 1).textContent).toBe('0');
+    // Back in Weighted, the stored weight shows as it is.
+    graph.setWeight(0, 1, -2);
+    editor.setWeighting('weighted');
+    expect(label(0, 1).textContent).toBe('-2');
   });
 
   it('is linear: small scrolls add up, with fractions carried over', () => {

@@ -58,7 +58,7 @@ Pass Playwright options after `--`, e.g. `npm run test:e2e -- --grep "edge"`.
 - `unit_tests/select-menu.test.ts`: the picker's mouse and keyboard behaviour, disabling, and outside clicks.
 - `unit_tests/bfs.test.ts`: the BFS simulation (order, steps, highlights, messages, unreachable vertices, directed vs. undirected).
 - `unit_tests/graph.test.ts`: the `Graph` model (ids, edges, neighbors, removal).
-- `unit_tests/random-graph.test.ts`: the Randomise generator (nodes spaced apart inside the area; connected, none through another node; one arc per pair when undirected, some pairs both ways when directed; weights 1–20 when weighted, 0 when not).
+- `unit_tests/random-graph.test.ts`: the Randomise generator (nodes spaced apart inside the area; connected, none through another node; one arc per pair when undirected, some pairs both ways when directed; weights 1–20 when weighted, from −20 to 20 with `negative`, 0 when not).
 - `unit_tests/editor.test.ts`: `GraphEditor` interactions driven by synthetic pointer and keyboard events in a simulated DOM, including auto-layout with manually stepped animation frames.
 - `unit_tests/layout.test.ts`: `ForceLayout` behaviour:
   - pair spacing and equilateral triangles
@@ -121,7 +121,7 @@ Checking that a test can fail: break the feature in `src/`, not in `build/`. Pla
 | **Clear graph** button (header) | Remove every node and edge |
 | **Auto-layout** button (top-left of the canvas) | Turn automatic spacing on/off |
 | **Undirected / Directed** switch (top-left, next to Auto-layout) | Choose how edges are interpreted (see below) |
-| **Unweighted / Weighted** switch (top-left, next to Undirected / Directed) | Show or hide edge weights (see below) |
+| **Unweighted / Weighted / Positive** switch (top-left, next to Undirected / Directed) | Show or hide edge weights, or show and use their magnitudes (see below) |
 | Weighted mode: **scroll over an edge** (or its weight label) | Change its weight: 15 per page of scrolling, up = more |
 | **☰** button (top-right of the canvas), or Esc to close | Show/hide two cards floating over the canvas: **How to use** (top) and **Graph representation** (below) |
 | Click a card's **title** | Collapse/expand that card; remembered in this browser |
@@ -138,7 +138,7 @@ The header's picker lists the available algorithms: **Breadth-first search**, **
 - **While running, the graph is locked:**
   - **Edits are blocked:** you can't add, connect, delete or re-weight anything, and Clear is disabled. Dragging nodes and auto-layout still work.
   - **Undirected / Directed** is locked. DFS also forces **Directed**, and Prim and Kruskal force **Undirected**.
-  - **Weighting:** the weighting the algorithm needs is forced and its switch is greyed out. BFS and DFS force **Unweighted**. Prim and Kruskal read the weights but accept either setting, so the switch keeps your choice and is only locked for the run.
+  - **Weighting:** the weighting the algorithm needs is forced and its switch is greyed out. BFS and DFS force **Unweighted**. Prim and Kruskal read the weights but accept any setting, so the switch keeps your choice (Positive included) and is only locked for the run.
   - Stop / Finish restore the direction and weighting you had chosen before.
 
 **Seeing the vertex numbers.** While any algorithm runs, hovering the adjacency list or matrix in the Graph representation card shows the vertex numbers on the canvas (growing Prim's compact vertices back), so vertices can be matched to rows and columns.
@@ -340,28 +340,29 @@ Edges are always **stored as directed arcs**: clicking A, then B, records A → 
 
 `Graph.directed` holds the UI's mode. The mode-dependent methods on `Graph` (`hasEdge`, `neighbors`, `getEdges`, `edgeCount`, `addEdge`, `removeEdge`, `adjacencyList`, `adjacencyMatrix`) follow it. Code that needs a particular reading should use the views below instead. Auto-layout and `connectedComponents()` always ignore direction (for a directed graph, the components are its weakly connected components), so switching modes never moves nodes.
 
-## Weighted and unweighted mode
+## Weighted, unweighted and positive mode
 
-Every stored arc carries a whole-number **weight**, which defaults to 0. The **Unweighted / Weighted** switch only changes how weights are shown and used; switching never changes them.
+Every stored arc carries a whole-number **weight**, which defaults to 0. The **Unweighted / Weighted / Positive** switch only changes how weights are shown and used; switching never changes them.
 
 - **Weighted:**
   - every edge is labelled with its weight
   - the adjacency list shows each neighbour's id over the edge weight
   - the matrix shows weights, with "—" for "no edge" (0 is a real weight)
 - **Unweighted:** labels are hidden, and the views treat every edge as weight 1, the usual convention (what BFS implicitly assumes).
+- **Positive:** weighted, but every weight is read as its **magnitude**: a stored −5 is shown as 5, and Prim and Kruskal use 5. The stored weight stays −5 until you edit it, so switching back to Weighted shows −5 again. The panel notes say so too.
 - **Editing:** in weighted mode, scroll over an edge or its label to change the weight.
   - The change is linear: one page of scrolling (the window's height) changes it by `WEIGHT_PER_PAGE` = 15, and scrolling up increases it.
   - Fractions carry over between scroll events, so the rate stays exact while weights stay whole numbers.
-  - Negative weights are allowed.
+  - Negative weights are allowed in Weighted mode. In Positive mode scrolling changes the magnitude, never below 0, and stores the result: scrolling up over a −5 (shown as 5) stores 6.
   - Ctrl+scroll is left to the browser for zooming.
-- **Undirected weighted:** when arcs run both ways with different weights, the edge shows the **smaller** one (`UNDIRECTED_WEIGHT` in `src/graph-views.ts`). Editing an undirected edge sets both arcs to the new value, so they agree afterwards. Directed mode edits only the arc under the pointer.
+- **Undirected weighted:** when arcs run both ways with different weights, the edge shows the **smaller** one (`UNDIRECTED_WEIGHT` in `src/graph-views.ts`); in Positive mode, the smaller magnitude. Editing an undirected edge sets both arcs to the new value, so they agree afterwards. Directed mode edits only the arc under the pointer.
 
 ### Reading the graph in code: directed/undirected and weighted/unweighted views
 
-`src/graph-views.ts` adds a read-only layer over the stored weighted arcs. All four readings of the same graph are always available, regardless of the UI's modes:
+`src/graph-views.ts` adds a read-only layer over the stored weighted arcs. All six readings of the same graph are always available, regardless of the UI's modes:
 
 ```ts
-graph.view('directed' | 'undirected', 'weighted' | 'unweighted'); // weighting defaults to 'unweighted'
+graph.view('directed' | 'undirected', 'weighted' | 'unweighted' | 'positive'); // weighting defaults to 'unweighted'
 graph.currentView; // the one the two switches select
 
 // Stored arcs: 0 → 1, 1 → 0, 1 → 2, 3 → 2 (all weight 0)
@@ -389,7 +390,7 @@ w.weightMatrix();            // { ids, matrix } with weights, null = no edge
 
 Every view implements `GraphView`:
 
-- **Description:** `orientation` and `directed`, `weighting` and `weighted`.
+- **Description:** `orientation` and `directed`, `weighting` and `weighted` (true for `'weighted'` and `'positive'`). `Graph.weighting` holds the UI's mode; `Graph.weighted` is shorthand for it not being `'unweighted'`.
 - **Structure:** `nodeIds`, `neighbors`, `degree`, `hasEdge`, `edges`, `edgeCount`, `adjacencyList`, and `adjacencyMatrix` (0/1, ignoring weights).
 - **Weights:** `weight`, `weightedNeighbors`, `weightedEdges`, `weightedAdjacencyList`, `weightMatrix`.
 
@@ -450,7 +451,7 @@ Freivalds, Dogrusoz & Kikusts study this approach in *Disconnected Graph Layout 
   - **For the selected mode:** the graph is random for the kind of graph being edited, while it is stored, like every edge, as weighted directed arcs.
     - Undirected: one arc per connected pair, either way round (the direction doesn't matter in that reading).
     - Directed: each connected pair is joined one way, the other way, or (a quarter of the time) both ways, which Directed mode draws as two curved arrows.
-    - Weighted: each arc gets a whole-number weight from 1 to 20 (the two arcs of a two-way pair separately). Unweighted: every weight is 0, the weight of an edge added by hand.
+    - Weighted: each arc gets a whole-number weight from −20 to 20, never 0, as often negative as positive (the two arcs of a two-way pair separately). Positive: from 1 to 20 only. Unweighted: every weight is 0, the weight of an edge added by hand.
 - `src/layout.ts` — `ForceLayout` (per-component force-directed layout, fitting and packing) and `packRows`; pure, no DOM.
 - `src/main.ts` — wires the editor to the stats, status message, Auto-layout toggle and the ☰ help/adjacency-list panel.
 - `src/representations.ts` — renders the adjacency list (a column of vertex boxes, then each vertex's neighbours as a joined strip of boxes) and the adjacency matrix, and the list/matrix switch (ARIA tabs). The data comes from `Graph.adjacencyList()` and `Graph.adjacencyMatrix()`.

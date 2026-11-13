@@ -244,12 +244,13 @@ export interface AlgorithmDefinition {
    * matching switches for the duration (e.g. BFS forces the unweighted view; DFS forces
    * the unweighted, directed view; Prim forces the undirected view).
    */
+  /** `weighted: false` forces Unweighted; `true` forces Weighted unless Positive is chosen. */
   requires: { weighted?: boolean; directed?: boolean };
   /**
-   * The algorithm reads edge weights but accepts either weighting (Prim): the
-   * Unweighted / Weighted switch is not forced, only locked at the user's choice for the
-   * run, since switching part-way would change the weights under the algorithm.
-   * Unweighted views report every edge as weight 1.
+   * The algorithm reads edge weights but accepts any weighting (Prim): the
+   * Unweighted / Weighted / Positive switch is not forced, only locked at the user's
+   * choice for the run, since switching part-way would change the weights under the
+   * algorithm. Unweighted views report every edge as weight 1, positive ones |w|.
    */
   usesWeights?: boolean;
   /** Creates a simulation over `view`, starting from `start`. */

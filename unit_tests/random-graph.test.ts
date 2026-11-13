@@ -137,6 +137,22 @@ describe('randomArcs', () => {
     expect(all.some((g) => g.length > 7)).toBe(true);
   });
 
+  it('negative: weights from −maxWeight to maxWeight, never 0, both signs', () => {
+    const rand = rng(12);
+    const weights = Array.from({ length: 10 }, () =>
+      randomArcs(randomPositions(8, AREA, GAP, rand), rand, { clearance, weighted: true, negative: true }),
+    )
+      .flat()
+      .map((a) => a.weight);
+    expect(weights.every((w) => Number.isInteger(w) && w !== 0 && Math.abs(w) <= 20)).toBe(true);
+    const negatives = weights.filter((w) => w < 0).length;
+    expect(negatives / weights.length).toBeGreaterThan(0.3);
+    expect(negatives / weights.length).toBeLessThan(0.7);
+    // Without it (the default), every weight is positive.
+    const r = rng(12);
+    expect(randomArcs(randomPositions(8, AREA, GAP, r), r, { clearance, weighted: true }).every((a) => a.weight > 0)).toBe(true);
+  });
+
   it('follows the options: weight range and no extra edges', () => {
     const rand = rng(9);
     const points = randomPositions(8, AREA, GAP, rand);

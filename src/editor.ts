@@ -1,4 +1,5 @@
 import { Graph, type NodeId } from './graph.js';
+import type { Weighting } from './graph-views.js';
 import { ForceLayout } from './layout.js';
 import type { ArcDiagram, ForestDiagram, Highlight } from './algorithms/types.js';
 import { fitFontSize } from './label-fit.js';
@@ -25,6 +26,12 @@ const SIM_LABEL_WIDTH = NODE_RADIUS * 2 - 8;
 const ARRANGE_MS = 750;
 /** How long a cut's border takes to move to its new place when the cut changes. */
 const CUT_MS = 650;
+/** How a weighting is named in messages. */
+const WEIGHTING_NAMES: Record<Weighting, string> = {
+  unweighted: 'unweighted',
+  weighted: 'weighted',
+  positive: 'positive-weighted',
+};
 /** Numbers the editors' clip paths apart (an id must be unique on the page). */
 let clipIds = 0;
 const BEND_MS = 450;
@@ -106,8 +113,9 @@ interface Tween<T> {
  *  - directed / undirected view: edges are stored as arcs (first click → second click);
  *    directed mode draws arrows (two curved arcs when they go both ways), undirected
  *    mode draws one plain line per connected pair
- *  - weighted / unweighted view: weighted mode labels every edge with its weight, and
- *    scrolling over an edge changes the weight (WEIGHT_PER_PAGE per page; up = more)
+ *  - weighted / unweighted / positive view: weighted mode labels every edge with its
+ *    weight, and scrolling over an edge changes the weight (WEIGHT_PER_PAGE per page;
+ *    up = more); positive mode does the same with each weight's magnitude
  *  - arc diagram (DFS's topological sort): vertices glide into a left-to-right line and
  *    edges bend into half circles (see showArcDiagram)
  */
@@ -227,8 +235,9 @@ export class GraphEditor {
    * Randomise: on an empty canvas, scatters a handful of nodes and connects them; with
    * nodes already placed, keeps them where they are and replaces their edges with a
    * random set. The graph is random for the current mode: directed graphs may join a
-   * pair both ways, weighted ones get weights 1–20, unweighted ones weight 0. It is still
-   * stored as weighted directed arcs, as every edge is. See random-graph.ts.
+   * pair both ways; weighted ones get weights from −20 to 20 (never 0), positive ones
+   * from 1 to 20, and unweighted ones weight 0. It is still stored as weighted directed
+   * arcs, as every edge is. See random-graph.ts.
    */
   randomise(rand: () => number = Math.random): void {
     if (this.locked) return;
@@ -240,8 +249,10 @@ export class GraphEditor {
     }
     const nodes = this.graph.getNodes();
     this.graph.clearEdges();
-    const { directed, weighted } = this.graph;
-    const arcs = randomArcs(nodes, rand, { clearance: NODE_RADIUS + 6, directed, weighted });
+    const { directed, weighted, weighting } = this.graph;
+    // Weighted: negative weights too; Positive: positive ones only.
+    const negative = weighting === 'weighted';
+    const arcs = randomArcs(nodes, rand, { clearance: NODE_RADIUS + 6, directed, weighted, negative });
     for (const arc of arcs) this.graph.addEdge(nodes[arc.from].id, nodes[arc.to].id, arc.weight);
     this.selected = null;
     this.pending = null;
@@ -249,7 +260,7 @@ export class GraphEditor {
     this.changed();
     const m = this.graph.edgeCount;
     const edges = `${m} edge${m === 1 ? '' : 's'}`;
-    const kind = `${directed ? 'directed' : 'undirected'}, ${weighted ? 'weighted' : 'unweighted'}`;
+    const kind = `${directed ? 'directed' : 'undirected'}, ${WEIGHTING_NAMES[weighting]}`;
     if (fresh) this.message(`Random ${kind} graph: ${nodes.length} nodes and ${edges}.`);
     else if (nodes.length < 2) this.message('Randomise needs at least two nodes to connect.', 'warn');
     else this.message(`Random ${kind} edges between the ${nodes.length} nodes: ${edges}.`);
@@ -370,19 +381,31 @@ export class GraphEditor {
     return this.graph.weighted;
   }
 
-  /**
-   * Shows the graph as weighted (weight labels; scroll over an edge to change its weight)
-   * or unweighted. The stored weights never change.
-   */
+  get weighting(): Weighting {
+    return this.graph.weighting;
+  }
+
+  /** setWeighting('weighted') or setWeighting('unweighted'). */
   setWeighted(weighted: boolean): void {
-    if (weighted === this.graph.weighted) return;
-    this.graph.weighted = weighted;
+    this.setWeighting(weighted ? 'weighted' : 'unweighted');
+  }
+
+  /**
+   * Shows the graph as weighted (weight labels; scroll over an edge to change its weight),
+   * positive (the same, each weight read as its magnitude) or unweighted. Changing the
+   * mode never changes the stored weights.
+   */
+  setWeighting(weighting: Weighting): void {
+    if (weighting === this.graph.weighting) return;
+    this.graph.weighting = weighting;
     this.render();
     this.callbacks.onChange?.();
     this.message(
-      weighted
+      weighting === 'weighted'
         ? 'Weighted: scroll over an edge to change its weight (up = more).'
-        : 'Unweighted: weights are hidden and every edge counts as weight 1.',
+        : weighting === 'positive'
+          ? 'Positive: every weight counts as its magnitude (−5 as 5). Scroll over an edge to change it (up = more).'
+          : 'Unweighted: weights are hidden and every edge counts as weight 1.',
     );
   }
 
@@ -731,12 +754,15 @@ export class GraphEditor {
     if (steps === 0) return;
     this.wheelCarry -= steps;
 
+    // Positive: the shown magnitude changes, and never goes below 0.
     const current = this.graph.currentView.weight(a, b);
     if (current === undefined) return;
-    this.graph.setWeight(a, b, current + steps); // undirected: both arcs get the new weight
+    const next = this.graph.weighting === 'positive' ? Math.max(0, current + steps) : current + steps;
+    if (next === current) return;
+    this.graph.setWeight(a, b, next); // undirected: both arcs get the new weight
     this.render();
     this.callbacks.onChange?.();
-    this.message(`Weight of edge ${this.edgeLabel(a, b)}: ${current + steps}`);
+    this.message(`Weight of edge ${this.edgeLabel(a, b)}: ${next}`);
   };
 
   private onResize = (): void => {

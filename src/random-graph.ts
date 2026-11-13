@@ -14,7 +14,8 @@
  *  - undirected: one arc per connected pair, in either direction (which one does not
  *    matter in that reading);
  *  - directed: each connected pair gets an arc one way, the other way, or both ways;
- *  - weighted: each arc gets a random whole-number weight; unweighted: the weight is 0,
+ *  - weighted: each arc gets a random whole-number weight, never 0 (with `negative`, from
+ *    −maxWeight to maxWeight; otherwise positive, from 1); unweighted: the weight is 0,
  *    the weight of an edge added by hand.
  */
 
@@ -49,6 +50,8 @@ export interface ArcOptions {
   extraPerNode?: number;
   /** Weights are whole numbers from 1 to this (default 20). */
   maxWeight?: number;
+  /** Weighted: negative weights too, from −maxWeight to −1, as often as positive ones (default false). */
+  negative?: boolean;
 }
 
 /**
@@ -78,7 +81,11 @@ export function randomArcs(points: readonly Point[], rand: () => number, options
   const { clearance } = options;
   const maxWeight = options.maxWeight ?? 20;
   const bothWays = options.directed ? (options.bothWays ?? 0.25) : 0;
-  const weight = () => (options.weighted ? 1 + Math.floor(rand() * maxWeight) : 0);
+  const weight = () => {
+    if (!options.weighted) return 0;
+    const magnitude = 1 + Math.floor(rand() * maxWeight);
+    return options.negative && rand() < 0.5 ? -magnitude : magnitude;
+  };
   const extra = Math.round(n * (options.extraPerNode ?? 0.5));
 
   // Candidate pairs: those whose straight edge keeps clear of every other node.
