@@ -3,3 +3,5 @@ build
 test-results
 playwright-report
 .DS_Store
+.git
+.pw-browsers

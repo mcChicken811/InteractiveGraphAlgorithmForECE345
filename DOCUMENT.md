@@ -4,7 +4,7 @@ Interactive editor for building a graph in the browser. The graph is stored as w
 
 ## Setup
 
-Run these commands from the `BFS/` directory:
+Run these commands from the repository root:
 
 ```sh
 npm install
@@ -28,8 +28,8 @@ The browser can't run TypeScript, so `src/*.ts` is compiled to plain ES modules 
 
 Any static file server works, because `index.html` loads everything by relative path:
 
-- **VS Code Live Server:** keep `npm run dev` running and open `BFS/index.html` with Live Server. It reloads the page whenever `build/` changes.
-- **No editor server:** run `npm run serve` and open http://127.0.0.1:5199/BFS/.
+- **VS Code Live Server:** keep `npm run dev` running and open `index.html` with Live Server. It reloads the page whenever `build/` changes.
+- **No editor server:** run `npm run serve` and open http://127.0.0.1:5199/.
 
 Opening the file directly (`file://`) does not work, because browsers block ES modules there.
 
@@ -65,7 +65,7 @@ Pass Playwright options after `--`, e.g. `npm run test:e2e -- --grep "edge"`.
   - grids unfold, and isolated or coincident nodes spread out
   - nodes stay in bounds and pinned nodes stay put
   - the layout settles and gives the same result every run
-- `tests/graph-builder.spec.ts`: end-to-end tests that click, drag, right-click, type and tap in a real browser. Playwright runs `npm run build`, then starts `scripts/static-server.mjs` on port 5199. That server serves files as-is under `/BFS/`, the way Live Server does, so a page that only works through a dev server fails the tests.
+- `tests/graph-builder.spec.ts`: end-to-end tests that click, drag, right-click, type and tap in a real browser. Playwright runs `npm run build`, then starts `scripts/static-server.mjs` on port 5199. That server serves files as-is from the repository root, the way Live Server does, so a page that only works through a dev server fails the tests.
 
 ### Isolated browser-test environment (Docker)
 

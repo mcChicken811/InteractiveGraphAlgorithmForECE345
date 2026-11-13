@@ -89,7 +89,7 @@ async function expectAdjacency(page: Page, expected: string): Promise<void> {
 let cv: CanvasDriver;
 
 test.beforeEach(async ({ page }) => {
-  // Relative to baseURL (…/BFS/), i.e. the same URL Live Server opens.
+  // Relative to baseURL (the server root), i.e. the same URL Live Server opens.
   await page.goto('index.html');
   cv = new CanvasDriver(page);
 });

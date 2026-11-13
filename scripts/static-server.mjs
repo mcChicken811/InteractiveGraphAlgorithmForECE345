@@ -1,9 +1,9 @@
 // Minimal static file server used by the Playwright tests.
 //
 // It deliberately behaves like VS Code Live Server / GitHub Pages: files are served
-// as-is (no TypeScript compilation) and the project is mounted under /BFS/, as when
-// the repository root is the server root. A page that only works under a dev-server
-// or with root-absolute paths (e.g. "/src/main.ts") therefore fails the tests.
+// as-is (no TypeScript compilation), with the repository root as the server root. A page
+// that only works under a dev-server (e.g. one loading "/src/main.ts", which only Vite
+// could compile) therefore fails the tests.
 //
 // Usage: node scripts/static-server.mjs [--port 5199]
 import { createServer } from 'node:http';
@@ -12,7 +12,7 @@ import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url)).replace(/[\\/]$/, '');
-const PREFIX = '/BFS/';
+const PREFIX = '/';
 const portFlag = process.argv.indexOf('--port');
 const PORT = portFlag > -1 ? Number(process.argv[portFlag + 1]) : 5199;
 
@@ -34,10 +34,6 @@ function send(res, status, body, type = 'text/plain; charset=utf-8') {
 
 createServer(async (req, res) => {
   const { pathname } = new URL(req.url ?? '/', 'http://localhost');
-  if (pathname === '/' || pathname === '/BFS') {
-    res.writeHead(302, { Location: PREFIX }).end();
-    return;
-  }
   if (!pathname.startsWith(PREFIX)) return send(res, 404, 'Not found');
 
   let file = resolve(ROOT, '.' + decodeURIComponent(pathname.slice(PREFIX.length - 1)));
