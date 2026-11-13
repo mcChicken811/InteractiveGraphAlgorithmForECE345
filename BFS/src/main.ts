@@ -4,6 +4,7 @@ import { Graph } from './graph.js';
 import { GraphEditor } from './editor.js';
 import { renderAdjacencyList, renderAdjacencyMatrix, setupTabs } from './representations.js';
 import { followColorScheme } from './favicon.js';
+import { setupCollapsible } from './collapsible.js';
 
 followColorScheme();
 
@@ -107,6 +108,9 @@ function setPanelOpen(open: boolean): void {
 }
 
 panelBtn.addEventListener('click', () => setPanelOpen(!isPanelOpen()));
+
+// The two cards inside the panel ("How to use", "Graph representation") collapse from their titles.
+for (const toggle of panel.querySelectorAll<HTMLButtonElement>('.card-toggle')) setupCollapsible(toggle, placePanel);
 
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && isPanelOpen()) setPanelOpen(false);

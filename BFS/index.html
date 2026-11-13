@@ -69,58 +69,90 @@
           </svg>
         </button>
         <aside id="info-panel" class="info-panel" aria-label="Help and adjacency list" hidden>
-          <section>
-            <h2>How to use</h2>
-            <ul class="help">
-              <li><strong>Click empty space</strong> to add a node.</li>
-              <li><strong>Click a node, then another</strong> to connect them.</li>
-              <li><strong>Click an edge</strong> to delete it.</li>
-              <li><strong>Drag a node</strong> to move it.</li>
-              <li><strong>Right-click a node</strong> (or select it and press Delete) to remove it.</li>
-              <li><strong>Esc</strong> or click empty space to cancel a selection.</li>
-              <li><strong>Auto-layout</strong> (top left) spaces the graph out automatically.</li>
-              <li>
-                <strong>Undirected / Directed</strong> (top left) sets how edges are read. Clicking A then B
-                always records A → B; undirected mode ignores the direction.
-              </li>
-              <li>
-                <strong>Unweighted / Weighted</strong> (top left) shows or hides edge weights (default 0). In
-                weighted mode, <strong>scroll over an edge</strong> to change its weight (up = more).
-              </li>
-            </ul>
+          <!-- Two separate cards, stacked; each collapses from its title. -->
+          <section class="info-card" aria-labelledby="help-title">
+            <h2 class="card-title" id="help-title">
+              <button
+                class="card-toggle"
+                type="button"
+                aria-expanded="true"
+                aria-controls="help-body"
+                data-collapse-key="help"
+              >
+                <span>How to use</span>
+                <svg class="chevron" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
+            </h2>
+            <div id="help-body" class="card-body">
+              <ul class="help">
+                <li><strong>Click empty space</strong> to add a node.</li>
+                <li><strong>Click a node, then another</strong> to connect them.</li>
+                <li><strong>Click an edge</strong> to delete it.</li>
+                <li><strong>Drag a node</strong> to move it.</li>
+                <li><strong>Right-click a node</strong> (or select it and press Delete) to remove it.</li>
+                <li><strong>Esc</strong> or click empty space to cancel a selection.</li>
+                <li><strong>Auto-layout</strong> (top left) spaces the graph out automatically.</li>
+                <li>
+                  <strong>Undirected / Directed</strong> (top left) sets how edges are read. Clicking A then B
+                  always records A → B; undirected mode ignores the direction.
+                </li>
+                <li>
+                  <strong>Unweighted / Weighted</strong> (top left) shows or hides edge weights (default 0). In
+                  weighted mode, <strong>scroll over an edge</strong> to change its weight (up = more).
+                </li>
+              </ul>
+            </div>
           </section>
-          <section>
-            <!-- Left/right switch between the two standard graph representations (ARIA tabs). -->
-            <div class="rep-tabs" role="tablist" aria-label="Graph representation">
+          <section class="info-card" aria-labelledby="representation-title">
+            <h2 class="card-title" id="representation-title">
               <button
-                id="tab-list"
-                class="rep-tab"
+                class="card-toggle"
                 type="button"
-                role="tab"
-                aria-selected="true"
-                aria-controls="rep-list"
+                aria-expanded="true"
+                aria-controls="representation-body"
+                data-collapse-key="representation"
               >
-                Adjacency list
+                <span>Graph representation</span>
+                <svg class="chevron" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
               </button>
-              <button
-                id="tab-matrix"
-                class="rep-tab"
-                type="button"
-                role="tab"
-                aria-selected="false"
-                aria-controls="rep-matrix"
-                tabindex="-1"
-              >
-                Adjacency matrix
-              </button>
-            </div>
-            <div id="rep-list" class="rep-panel" role="tabpanel" aria-labelledby="tab-list">
-              <div id="adjacency" class="adjacency"></div>
-              <p id="list-note" class="rep-note">Each node followed by its neighbours.</p>
-            </div>
-            <div id="rep-matrix" class="rep-panel" role="tabpanel" aria-labelledby="tab-matrix" hidden>
-              <div id="adjacency-matrix" class="matrix-scroll"></div>
-              <p id="matrix-note" class="rep-note">1 marks an edge between the row and column nodes. The matrix is symmetric because edges are undirected.</p>
+            </h2>
+            <div id="representation-body" class="card-body">
+              <!-- Left/right switch between the two standard graph representations (ARIA tabs). -->
+              <div class="rep-tabs" role="tablist" aria-label="Graph representation">
+                <button
+                  id="tab-list"
+                  class="rep-tab"
+                  type="button"
+                  role="tab"
+                  aria-selected="true"
+                  aria-controls="rep-list"
+                >
+                  Adjacency list
+                </button>
+                <button
+                  id="tab-matrix"
+                  class="rep-tab"
+                  type="button"
+                  role="tab"
+                  aria-selected="false"
+                  aria-controls="rep-matrix"
+                  tabindex="-1"
+                >
+                  Adjacency matrix
+                </button>
+              </div>
+              <div id="rep-list" class="rep-panel" role="tabpanel" aria-labelledby="tab-list">
+                <div id="adjacency" class="adjacency"></div>
+                <p id="list-note" class="rep-note">Each node followed by its neighbours.</p>
+              </div>
+              <div id="rep-matrix" class="rep-panel" role="tabpanel" aria-labelledby="tab-matrix" hidden>
+                <div id="adjacency-matrix" class="matrix-scroll"></div>
+                <p id="matrix-note" class="rep-note">1 marks an edge between the row and column nodes. The matrix is symmetric because edges are undirected.</p>
+              </div>
             </div>
           </section>
         </aside>

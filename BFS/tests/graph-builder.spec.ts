@@ -101,7 +101,12 @@ test('loads every resource from a plain static server without errors', async ({ 
   page.on('response', (r) => {
     if (r.status() >= 400) failures.push(`${r.status()} ${r.url()}`);
   });
-  page.on('requestfailed', (r) => failures.push(`failed ${r.url()}`));
+  page.on('requestfailed', (r) => {
+    // With several candidate icons (SVG + PNG), Chrome may cancel the ones it doesn't pick.
+    // That abort is harmless; a missing icon would still show up as a 404 response above.
+    if (r.url().includes('/icons/favicon-') && r.failure()?.errorText === 'net::ERR_ABORTED') return;
+    failures.push(`failed ${r.url()} (${r.failure()?.errorText})`);
+  });
   page.on('console', (m) => {
     if (m.type() === 'error') failures.push(`console: ${m.text()}`);
   });
@@ -370,6 +375,118 @@ test.describe('help & adjacency panel (hamburger menu)', () => {
     await panel(page).getByRole('tab', { name: 'Adjacency matrix' }).click();
     await panel(page).getByRole('tab', { name: 'Adjacency list' }).click();
     await expect(cv.nodes).toHaveCount(0);
+  });
+});
+
+test.describe('panel cards (How to use / Graph representation)', () => {
+  const helpToggle = (page: Page) => page.getByRole('button', { name: 'How to use' });
+  const repToggle = (page: Page) => page.getByRole('button', { name: 'Graph representation' });
+  const helpCard = (page: Page) => page.getByRole('region', { name: 'How to use' });
+  const repCard = (page: Page) => page.getByRole('region', { name: 'Graph representation' });
+
+  test.beforeEach(async ({ page }) => {
+    await page.getByRole('button', { name: 'Help and adjacency list' }).click();
+    // Let the panel's slide-in animation finish so measured positions are final.
+    await page.locator('#info-panel').evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+  });
+
+  test('are two separate cards, How to use on top, representation below', async ({ page }) => {
+    await expect(helpCard(page)).toBeVisible();
+    await expect(repCard(page)).toBeVisible();
+    const [h, r] = await page.locator('.info-card').evaluateAll((cards) =>
+      cards.map((c) => {
+        const b = c.getBoundingClientRect();
+        return { x: b.x, top: b.top, bottom: b.bottom, width: b.width };
+      }),
+    );
+    expect(h.bottom).toBeLessThan(r.top); // separate, with a gap
+    expect(h.x).toBeCloseTo(r.x, 0); // aligned in one column
+    expect(h.width).toBeCloseTo(r.width, 0);
+  });
+
+  test('both start expanded', async ({ page }) => {
+    await expect(helpToggle(page)).toHaveAttribute('aria-expanded', 'true');
+    await expect(repToggle(page)).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('#help-body')).toBeVisible();
+    await expect(page.locator('#representation-body')).toBeVisible();
+  });
+
+  test('clicking a title collapses and expands only that card', async ({ page }) => {
+    await helpToggle(page).click();
+    await expect(helpToggle(page)).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('#help-body')).toBeHidden();
+    await expect(helpToggle(page)).toBeVisible(); // the title stays
+    await expect(page.locator('#representation-body')).toBeVisible();
+
+    await repToggle(page).click();
+    await expect(page.locator('#representation-body')).toBeHidden();
+    await expect(page.getByRole('tab', { name: 'Adjacency list' })).toBeHidden();
+
+    await helpToggle(page).click();
+    await expect(page.locator('#help-body')).toBeVisible();
+    await expect(page.locator('#representation-body')).toBeHidden();
+  });
+
+  test('a collapsed card shrinks to its title, moving the next card up', async ({ page }) => {
+    const repTop = () => repCard(page).evaluate((el) => el.getBoundingClientRect().top);
+    const before = await repTop();
+    await helpToggle(page).click();
+    await expect.poll(repTop).toBeLessThan(before - 50);
+  });
+
+  test('works from the keyboard', async ({ page }) => {
+    await helpToggle(page).focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#help-body')).toBeHidden();
+    await page.keyboard.press('Space');
+    await expect(page.locator('#help-body')).toBeVisible();
+  });
+
+  test('remembers which cards are collapsed after a reload', async ({ page }) => {
+    await helpToggle(page).click();
+    await page.reload();
+    await page.getByRole('button', { name: 'Help and adjacency list' }).click();
+    await expect(helpToggle(page)).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('#help-body')).toBeHidden();
+    await expect(repToggle(page)).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  test('the ☰ button still opens and closes both together', async ({ page }) => {
+    await page.getByRole('button', { name: 'Help and adjacency list' }).click();
+    await expect(helpCard(page)).toBeHidden();
+    await expect(repCard(page)).toBeHidden();
+    await page.getByRole('button', { name: 'Help and adjacency list' }).click();
+    await expect(helpCard(page)).toBeVisible();
+    await expect(repCard(page)).toBeVisible();
+  });
+
+  test('with lots of content, both titles stay on screen and each card scrolls itself', async ({ page }) => {
+    // 12 nodes → a long adjacency list; together with the help it overflows the panel.
+    for (let i = 0; i < 12; i++) await cv.click(80 + (i % 6) * 100, 200 + Math.floor(i / 6) * 150);
+    const canvas = (await cv.canvas.boundingBox())!;
+    for (const toggle of [helpToggle(page), repToggle(page)]) {
+      const b = (await toggle.boundingBox())!;
+      expect(b.y).toBeGreaterThanOrEqual(canvas.y);
+      expect(b.y + b.height).toBeLessThanOrEqual(canvas.y + canvas.height);
+    }
+    const scrolls = await page
+      .locator('.card-body')
+      .evaluateAll((bodies) => bodies.map((b) => b.scrollHeight > b.clientHeight));
+    expect(scrolls).toContain(true); // the overflow is handled inside the cards
+  });
+
+  test('the gap between the cards lets clicks through to the canvas', async ({ page }) => {
+    const [h, r] = await page.locator('.info-card').evaluateAll((cards) =>
+      cards.map((c) => {
+        const b = c.getBoundingClientRect();
+        return { x: b.x, top: b.top, bottom: b.bottom, width: b.width };
+      }),
+    );
+    const canvas = (await cv.canvas.boundingBox())!;
+    const x = h.x + h.width / 2 - canvas.x;
+    const y = (h.bottom + r.top) / 2 - canvas.y;
+    await cv.click(x, y);
+    await expect(cv.nodes).toHaveCount(1);
   });
 });
 
