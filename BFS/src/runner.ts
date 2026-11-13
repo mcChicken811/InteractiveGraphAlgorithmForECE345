@@ -1,6 +1,7 @@
 import { ALGORITHMS, type AlgorithmDefinition, type Simulation } from './algorithms/index.js';
 import type { GraphEditor } from './editor.js';
 import type { Graph } from './graph.js';
+import type { QueueView } from './queue-view.js';
 import type { SelectMenu } from './select-menu.js';
 
 export interface RunnerElements {
@@ -14,6 +15,9 @@ export interface RunnerElements {
   weightSwitch: HTMLFieldSetElement;
   /** The Undirected / Directed switch (locked while running: changing it would change the graph). */
   directionSwitch: HTMLFieldSetElement;
+  /** Side-panel card showing the algorithm's queue while it runs (if it has one). */
+  queueCard?: HTMLElement;
+  queueView?: QueueView;
 }
 
 const LOCKED_TITLE = 'Locked while the algorithm runs. Press Stop to change it.';
@@ -74,7 +78,7 @@ export class AlgorithmRunner {
     this.lockSwitch(this.el.directionSwitch, true);
 
     this.simulation = algorithm.create(this.graph.currentView, start);
-    this.show();
+    this.show(false);
   }
 
   /** Advances one step; once finished, ends the run like Stop. */
@@ -86,7 +90,7 @@ export class AlgorithmRunner {
       return;
     }
     simulation.step();
-    this.show();
+    this.show(true);
   }
 
   /** Ends the run and releases every lock. */
@@ -102,14 +106,20 @@ export class AlgorithmRunner {
     }
     this.lockSwitch(this.el.weightSwitch, false);
     this.lockSwitch(this.el.directionSwitch, false);
+    this.el.queueView?.update(null, false);
+    if (this.el.queueCard) this.el.queueCard.hidden = true;
     this.updateControls();
     this.hooks.onStateChange();
     this.hooks.message(`${message} The graph can be edited again.`);
   }
 
-  private show(): void {
+  /** Draws the simulation's state; `animate` animates the queue from its previous state. */
+  private show(animate: boolean): void {
     const simulation = this.simulation!;
     this.editor.setHighlight(simulation.highlight());
+    const queue = simulation.queueSnapshot?.() ?? null;
+    if (this.el.queueCard) this.el.queueCard.hidden = queue === null;
+    this.el.queueView?.update(queue, animate);
     this.updateControls();
     this.hooks.onStateChange();
     this.hooks.message(simulation.describe());

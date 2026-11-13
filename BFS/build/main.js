@@ -7,6 +7,7 @@ import { followColorScheme } from './favicon.js';
 import { setupCollapsible } from './collapsible.js';
 import { AlgorithmRunner } from './runner.js';
 import { SelectMenu } from './select-menu.js';
+import { QueueView } from './queue-view.js';
 followColorScheme();
 const svg = document.querySelector('#canvas');
 const stats = document.querySelector('#stats');
@@ -78,6 +79,8 @@ runner = new AlgorithmRunner(graph, editor, {
     stop: document.querySelector('#stop-btn'),
     weightSwitch: document.querySelector('#weight-switch'),
     directionSwitch: document.querySelector('#direction-switch'),
+    queueCard: document.querySelector('#queue-card'),
+    queueView: new QueueView(document.querySelector('#queue-strip'), document.querySelector('#queue-empty')),
 }, { message: (text) => showMessage(text), onStateChange: refreshPanels });
 // Undirected / Directed switch: only changes how the stored arcs are interpreted.
 for (const input of modeInputs) {

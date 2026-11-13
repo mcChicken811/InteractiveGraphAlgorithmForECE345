@@ -20,6 +20,14 @@ export interface Highlight {
   activeEdges: Array<[NodeId, NodeId]>;
 }
 
+/** A queue-like structure for the side panel (BFS's queue). */
+export interface QueueSnapshot {
+  /** Vertices in the queue, front (next to be popped) first. */
+  items: NodeId[];
+  /** Vertices the next step will push onto the back, in push order. */
+  incoming: NodeId[];
+}
+
 export interface Simulation {
   /** True once the last step has been taken; `step()` then does nothing. */
   readonly finished: boolean;
@@ -29,6 +37,8 @@ export interface Simulation {
   highlight(): Highlight;
   /** One-line, human-readable description of the latest step (for the status message). */
   describe(): string;
+  /** The algorithm's queue, if it has one; shown in the side panel while running. */
+  queueSnapshot?(): QueueSnapshot;
 }
 
 /** An entry in the algorithm picker. */

@@ -7,6 +7,7 @@ import { followColorScheme } from './favicon.js';
 import { setupCollapsible } from './collapsible.js';
 import { AlgorithmRunner } from './runner.js';
 import { SelectMenu } from './select-menu.js';
+import { QueueView } from './queue-view.js';
 
 followColorScheme();
 
@@ -95,6 +96,11 @@ runner = new AlgorithmRunner(
     stop: document.querySelector<HTMLButtonElement>('#stop-btn')!,
     weightSwitch: document.querySelector<HTMLFieldSetElement>('#weight-switch')!,
     directionSwitch: document.querySelector<HTMLFieldSetElement>('#direction-switch')!,
+    queueCard: document.querySelector<HTMLElement>('#queue-card')!,
+    queueView: new QueueView(
+      document.querySelector<HTMLElement>('#queue-strip')!,
+      document.querySelector<HTMLElement>('#queue-empty')!,
+    ),
   },
   { message: (text) => showMessage(text), onStateChange: refreshPanels },
 );

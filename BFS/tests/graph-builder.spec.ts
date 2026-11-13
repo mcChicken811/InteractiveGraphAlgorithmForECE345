@@ -1401,6 +1401,175 @@ test.describe('algorithm simulation (BFS)', () => {
   });
 });
 
+test.describe('BFS queue card (side panel)', () => {
+  const card = (page: Page) => page.getByRole('region', { name: 'Queue' });
+  const strip = (page: Page) => page.getByRole('list', { name: 'Queue, front first' });
+  const run = (page: Page) => page.getByRole('button', { name: 'Run', exact: true }).click();
+  const update = (page: Page) => page.getByRole('button', { name: 'Update', exact: true }).click();
+
+  /** Strip contents as tokens: 'pop', 'push', '<id>' (+ '*' front, '?' about to be pushed). */
+  const tokens = (page: Page) =>
+    page.locator('#queue-strip > [data-key]:not(.exiting)').evaluateAll((els) =>
+      els.map((el) => {
+        const key = (el as HTMLElement).dataset.key!;
+        if (key === 'pop' || key === 'push') return key;
+        return el.textContent! + (el.classList.contains('front') ? '*' : '') + (el.classList.contains('incoming') ? '?' : '');
+      }),
+    );
+
+  /** A star: 0 joined to 1, 2, 3; plus 1 — 4 (two levels, so the queue changes shape). */
+  async function buildStar(): Promise<void> {
+    const spots: Array<[number, number]> = [
+      [400, 380],
+      [240, 220],
+      [400, 180],
+      [560, 220],
+      [120, 140],
+    ];
+    for (const p of spots) await cv.click(...p);
+    for (const [a, b] of [
+      [0, 1],
+      [0, 2],
+      [0, 3],
+      [1, 4],
+    ]) await connect(spots[a], spots[b]);
+  }
+
+  test.beforeEach(async ({ page }) => {
+    await page.getByRole('button', { name: 'Help and adjacency list' }).click();
+  });
+
+  test('appears at the bottom of the panel only while BFS runs', async ({ page }) => {
+    await buildStar();
+    await expect(card(page)).toBeHidden();
+    await run(page);
+    await expect(card(page)).toBeVisible();
+    const [rep, queue] = await page.locator('.info-card:not([hidden])').evaluateAll((cards) =>
+      cards.slice(-2).map((c) => c.getBoundingClientRect().top),
+    );
+    expect(queue).toBeGreaterThan(rep); // appended below the other cards
+    await page.getByRole('button', { name: 'Stop', exact: true }).click();
+    await expect(card(page)).toBeHidden();
+  });
+
+  test('shows ← pop, the queue front first, the greyed vertices about to be pushed, then ← push', async ({ page }) => {
+    await buildStar();
+    await run(page);
+    expect(await tokens(page)).toEqual(['pop', '0*', '1?', '2?', '3?', 'push']);
+
+    // Laid out left to right in that order, on one line.
+    const boxes = await page.locator('#queue-strip > [data-key]').evaluateAll((els) =>
+      els.map((el) => {
+        const r = el.getBoundingClientRect();
+        return { left: r.left, right: r.right, mid: r.top + r.height / 2 };
+      }),
+    );
+    for (let i = 1; i < boxes.length; i++) {
+      expect(boxes[i].left).toBeGreaterThanOrEqual(boxes[i - 1].right - 0.5);
+      expect(Math.abs(boxes[i].mid - boxes[0].mid)).toBeLessThan(2);
+    }
+
+    await update(page); // pop 0, push 1, 2, 3 → popping 1 next will push 4
+    expect(await tokens(page)).toEqual(['pop', '1*', '2', '3', '4?', 'push']);
+    await update(page); // pop 1, push 4
+    expect(await tokens(page)).toEqual(['pop', '2*', '3', '4']);
+  });
+
+  test('vertices look like the canvas nodes, smaller, with the same states', async ({ page }) => {
+    await buildStar();
+    await run(page);
+    const look = (sel: string) =>
+      page.locator(sel).first().evaluate((el) => {
+        const cs = getComputedStyle(el as HTMLElement);
+        return { radius: cs.borderTopLeftRadius, width: el.getBoundingClientRect().width, border: cs.borderTopColor, opacity: Number(cs.opacity), text: el.textContent };
+      });
+    const canvasNode = await cv.node(1).locator('circle').evaluate((c) => ({
+      stroke: getComputedStyle(c).stroke,
+      width: c.getBoundingClientRect().width,
+    }));
+    const front = await look('#queue-strip .q-node.front');
+    const incoming = await look('#queue-strip .q-node.incoming');
+    expect(front.radius).toBe('50%');
+    expect(front.width).toBeLessThan(canvasNode.width); // shrunk
+    expect(front.text).toBe('0');
+    expect(front.border).toBe('rgb(255, 255, 255)'); // white, like the canvas's next vertex
+    expect(incoming.border).toBe(canvasNode.stroke); // the normal node ring…
+    expect(incoming.opacity).toBeLessThan(0.5); // …greyed out
+  });
+
+  test('Update animates the queue: the popped vertex slides out green, the rest glide over', async ({ page }) => {
+    await buildStar();
+    await run(page);
+    await update(page);
+    const popped = page.locator('#queue-strip > .exiting');
+    await expect(popped).toHaveCount(1);
+    await expect(popped).toHaveText('0');
+    await expect(popped).toHaveClass(/popped/);
+    const animating = await page
+      .locator('#queue-strip > [data-key]')
+      .evaluateAll((els) => els.filter((el) => el.getAnimations().length > 0).length);
+    expect(animating).toBeGreaterThan(1); // the popped one and the ones moving into place
+    await expect(popped).toHaveCount(0, { timeout: 2000 }); // removed once it has slid out
+  });
+
+  test.describe('with reduced motion', () => {
+    test.use({ reducedMotion: 'reduce' });
+
+    test('updates instantly, without animation', async ({ page }) => {
+      await buildStar();
+      await run(page);
+      await update(page);
+      await expect(page.locator('#queue-strip > .exiting')).toHaveCount(0);
+      const animating = await page
+        .locator('#queue-strip > [data-key]')
+        .evaluateAll((els) => els.filter((el) => el.getAnimations().length > 0).length);
+      expect(animating).toBe(0);
+    });
+  });
+
+  test('a long queue scrolls sideways inside the strip', async ({ page }) => {
+    // A hub joined to 10 others: 10 vertices waiting to be pushed.
+    await cv.click(400, 420);
+    const leaves: Array<[number, number]> = [];
+    for (let i = 0; i < 10; i++) leaves.push([80 + (i % 5) * 150, 180 + Math.floor(i / 5) * 420]);
+    for (const p of leaves) await cv.click(...p);
+    for (const p of leaves) await connect([400, 420], p);
+    await run(page);
+
+    const s = await strip(page).evaluate((el) => ({
+      overflowX: getComputedStyle(el).overflowX,
+      scrollable: el.scrollWidth > el.clientWidth,
+    }));
+    expect(s).toEqual({ overflowX: 'auto', scrollable: true });
+
+    // The user can scroll it to reach the back of the queue.
+    await strip(page).hover();
+    await page.mouse.wheel(400, 0);
+    await expect.poll(() => strip(page).evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
+    await expect(page.locator('#queue-strip .q-push')).toBeInViewport();
+    // The page itself never scrolls sideways.
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+  });
+
+  test('says the queue is empty once BFS is done', async ({ page }) => {
+    await cv.click(...P.a);
+    await run(page);
+    expect(await tokens(page)).toEqual(['pop', '0*']);
+    await update(page);
+    await expect(page.locator('#queue-empty')).toBeVisible();
+    await expect(strip(page)).toBeHidden();
+  });
+
+  test('collapses from its title like the other cards', async ({ page }) => {
+    await buildStar();
+    await run(page);
+    await page.getByRole('button', { name: 'Queue', exact: true }).click();
+    await expect(strip(page)).toBeHidden();
+    await page.getByRole('button', { name: 'Queue', exact: true }).click();
+    await expect(strip(page)).toBeVisible();
+  });
+});
+
 test.describe('on a phone-sized screen', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 

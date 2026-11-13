@@ -49,7 +49,7 @@ export class AlgorithmRunner {
         this.lockSwitch(this.el.weightSwitch, algorithm.requires.weighted !== undefined);
         this.lockSwitch(this.el.directionSwitch, true);
         this.simulation = algorithm.create(this.graph.currentView, start);
-        this.show();
+        this.show(false);
     }
     /** Advances one step; once finished, ends the run like Stop. */
     step() {
@@ -61,7 +61,7 @@ export class AlgorithmRunner {
             return;
         }
         simulation.step();
-        this.show();
+        this.show(true);
     }
     /** Ends the run and releases every lock. */
     stop(message = 'Stopped.') {
@@ -77,13 +77,21 @@ export class AlgorithmRunner {
         }
         this.lockSwitch(this.el.weightSwitch, false);
         this.lockSwitch(this.el.directionSwitch, false);
+        this.el.queueView?.update(null, false);
+        if (this.el.queueCard)
+            this.el.queueCard.hidden = true;
         this.updateControls();
         this.hooks.onStateChange();
         this.hooks.message(`${message} The graph can be edited again.`);
     }
-    show() {
+    /** Draws the simulation's state; `animate` animates the queue from its previous state. */
+    show(animate) {
         const simulation = this.simulation;
         this.editor.setHighlight(simulation.highlight());
+        const queue = simulation.queueSnapshot?.() ?? null;
+        if (this.el.queueCard)
+            this.el.queueCard.hidden = queue === null;
+        this.el.queueView?.update(queue, animate);
         this.updateControls();
         this.hooks.onStateChange();
         this.hooks.message(simulation.describe());

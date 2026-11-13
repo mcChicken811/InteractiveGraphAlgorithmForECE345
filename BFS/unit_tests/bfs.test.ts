@@ -87,6 +87,26 @@ describe('BfsSimulation (undirected)', () => {
     expect(sim.describe()).toBe('Popped 2: nothing new. Queue: 3.');
   });
 
+  it('queue snapshot: the queue front first, then what the next pop will push', () => {
+    expect(sim.queueSnapshot()).toEqual({ items: [0], incoming: [1, 2] });
+    sim.step(); // pop 0 → queue 1, 2; popping 1 next will push 3
+    expect(sim.queueSnapshot()).toEqual({ items: [1, 2], incoming: [3] });
+    sim.step(); // pop 1 → queue 2, 3; 2 has nothing new
+    expect(sim.queueSnapshot()).toEqual({ items: [2, 3], incoming: [] });
+    runToEnd(sim);
+    expect(sim.queueSnapshot()).toEqual({ items: [], incoming: [] });
+  });
+
+  it('queue snapshot agrees with the highlight', () => {
+    for (let i = 0; i < 4; i++) {
+      const { items, incoming } = sim.queueSnapshot();
+      const h = sim.highlight();
+      expect(h.current).toBe(items[0] ?? null);
+      expect(h.activeEdges.map(([, w]) => w)).toEqual(incoming);
+      sim.step();
+    }
+  });
+
   it('visits in BFS order with hop distances and a BFS tree', () => {
     runToEnd(sim);
     expect(sim.order).toEqual([0, 1, 2, 3]);

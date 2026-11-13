@@ -1,6 +1,6 @@
 import type { NodeId } from '../graph.js';
 import type { GraphView } from '../graph-views.js';
-import type { AlgorithmDefinition, Highlight, Simulation } from './types.js';
+import type { AlgorithmDefinition, Highlight, QueueSnapshot, Simulation } from './types.js';
 
 /**
  * Breadth-first search from a single source, one queue pop per step.
@@ -72,19 +72,23 @@ export class BfsSimulation implements Simulation {
     return true;
   }
 
+  /** Undiscovered neighbours of the front vertex: what the next step will push, in order. */
+  private incoming(): NodeId[] {
+    const next = this.queue[0];
+    return next === undefined ? [] : this.view.neighbors(next).filter((w) => !this.discovered.has(w));
+  }
+
   highlight(): Highlight {
     const next = this.queue[0] ?? null;
     return {
       current: next,
       done: [...this.popped],
-      activeEdges:
-        next === null
-          ? []
-          : this.view
-              .neighbors(next)
-              .filter((w) => !this.discovered.has(w))
-              .map((w) => [next, w] as [NodeId, NodeId]),
+      activeEdges: next === null ? [] : this.incoming().map((w) => [next, w] as [NodeId, NodeId]),
     };
+  }
+
+  queueSnapshot(): QueueSnapshot {
+    return { items: [...this.queue], incoming: this.incoming() };
   }
 
   describe(): string {

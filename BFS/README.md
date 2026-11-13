@@ -45,6 +45,7 @@ npm run test:e2e:local  # browser tests directly on this machine (uses installed
 
 Pass Playwright options after `--`, e.g. `npm run test:e2e -- --grep "edge"`.
 
+- `unit_tests/queue-view.test.ts`: the queue strip's contents, order, labels, reuse of elements, empty state.
 - `unit_tests/select-menu.test.ts`: the picker's mouse and keyboard behaviour, disabling, and outside clicks.
 - `unit_tests/bfs.test.ts`: the BFS simulation (order, steps, highlights, messages, unreachable vertices, directed vs. undirected).
 - `unit_tests/graph.test.ts`: the `Graph` model (ids, edges, neighbors, removal).
@@ -108,11 +109,20 @@ The header's picker lists the available algorithms; for now there is one, **Brea
 
 Each Update pops the front vertex (it turns green) and appends its undiscovered neighbours to the queue in ascending id order; the new front vertex turns white. The status message lists the whole queue, front (white) vertex first, for example "Popped 0: discovered 1, 2. Queue: 1, 2." A start vertex with *n* reachable vertices takes exactly *n* Updates, then Update becomes Finish.
 
+**Queue card.** While BFS runs, a **Queue** card appears at the bottom of the ☰ panel. It shows the queue as a horizontal strip: `← pop  (front) … (back)  (incoming…)  ← push`.
+
+- **Front:** the first vertex is the one the next Update pops, with the same white ring as on the canvas.
+- **Incoming:** after the back of the queue come the vertices that Update will push, greyed out.
+- **Circles** are smaller copies of the canvas nodes.
+- **Animation on Update:** the popped vertex turns green and slides out to the left, the rest glide into place, the incoming vertices fill in as they join, and the next incoming ones fade in. With "reduce motion" it updates instantly.
+- **Overflow:** a long queue scrolls sideways inside the strip, with an always-visible themed scrollbar.
+- **Collapsing:** the card collapses from its title like the other cards.
+
 BFS runs from a single source, so vertices it can't reach stay uncoloured, and the final message counts them. On the light theme, white highlights get a thin dark outline so they stay visible.
 
 ### Adding another algorithm
 
-1. Implement `Simulation` (in `src/algorithms/types.ts`). It works on a read-only `GraphView`, takes one step per `step()`, and reports `highlight()` (current vertex, finished vertices, active edges) and `describe()` (the status message).
+1. Implement `Simulation` (in `src/algorithms/types.ts`). An algorithm with a queue can also implement `queueSnapshot()`, returning `{ items, incoming }`, to get the animated Queue card. It works on a read-only `GraphView`, takes one step per `step()`, and reports `highlight()` (current vertex, finished vertices, active edges) and `describe()` (the status message).
 2. Export an `AlgorithmDefinition` from its own file: `id`, `name`, `requires` (e.g. `{ weighted: true }` for Dijkstra), and `create(view, start)`. By convention `highlight()` previews the *next* step: `current` is what it will process and `activeEdges` what it will travel.
 3. Add it to `ALGORITHMS` in `src/algorithms/index.ts`. The picker, the locks and the drawing then work without further changes.
 
@@ -241,6 +251,7 @@ Freivalds, Dogrusoz & Kikusts study this approach in *Disconnected Graph Layout 
 - `src/style.css` — styles, linked directly from `index.html`.
 - `src/algorithms/` — step-by-step algorithm simulations: `types.ts` (the `Simulation` / `AlgorithmDefinition` interfaces), `bfs.ts` (`BfsSimulation`, which also exposes `order`, `parent` and `distance`), `index.ts` (the `ALGORITHMS` registry).
 - `src/select-menu.ts` — `SelectMenu`: the styled program picker. It replaces a native `<select>`, whose open list the browser draws and which can't be styled or positioned (on macOS it pops up over the box). It follows the WAI-ARIA "select-only combobox" pattern: mouse, ↑/↓/Home/End/Enter/Space/Esc/Tab, and closes on an outside click. The list drops down below the box, in the page's panel style, with the option text in line with the box's text.
+- `src/queue-view.ts` — `QueueView`: the side panel's animated queue strip. Elements are reused by vertex id, and changes are animated with the FLIP technique (record positions, update, play from the old positions).
 - `src/runner.ts` — `AlgorithmRunner`: the header's picker and Run / Update / Finish / Stop buttons, the locks, and passing each step's highlight to the editor.
 - `src/collapsible.ts` — collapsible cards: a title button (`aria-expanded` / `aria-controls`) shows or hides its card body, and the state is remembered in `localStorage`.
 - `src/favicon.ts` — points the favicon links at the light or dark icon to match the page's colour scheme (`prefers-color-scheme`), and updates them when it changes.

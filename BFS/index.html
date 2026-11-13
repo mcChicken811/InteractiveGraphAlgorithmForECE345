@@ -182,6 +182,27 @@
               </div>
             </div>
           </section>
+          <!-- Shown only while an algorithm with a queue (BFS) runs: src/queue-view.ts. -->
+          <section id="queue-card" class="info-card queue-card" aria-labelledby="queue-title" hidden>
+            <h2 class="card-title" id="queue-title">
+              <button
+                class="card-toggle"
+                type="button"
+                aria-expanded="true"
+                aria-controls="queue-body"
+                data-collapse-key="queue"
+              >
+                <span>Queue</span>
+                <svg class="chevron" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
+            </h2>
+            <div id="queue-body" class="card-body">
+              <div id="queue-strip" class="queue-strip" role="list" aria-label="Queue, front first"></div>
+              <p id="queue-empty" class="queue-empty" hidden>The queue is empty.</p>
+            </div>
+          </section>
         </aside>
 
         <svg id="canvas" role="img" aria-label="Graph editor canvas"></svg>

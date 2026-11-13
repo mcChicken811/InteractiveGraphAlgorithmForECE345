@@ -65,18 +65,21 @@ export class BfsSimulation {
         }
         return true;
     }
+    /** Undiscovered neighbours of the front vertex: what the next step will push, in order. */
+    incoming() {
+        const next = this.queue[0];
+        return next === undefined ? [] : this.view.neighbors(next).filter((w) => !this.discovered.has(w));
+    }
     highlight() {
         const next = this.queue[0] ?? null;
         return {
             current: next,
             done: [...this.popped],
-            activeEdges: next === null
-                ? []
-                : this.view
-                    .neighbors(next)
-                    .filter((w) => !this.discovered.has(w))
-                    .map((w) => [next, w]),
+            activeEdges: next === null ? [] : this.incoming().map((w) => [next, w]),
         };
+    }
+    queueSnapshot() {
+        return { items: [...this.queue], incoming: this.incoming() };
     }
     describe() {
         const queue = `Queue: ${this.queue.length ? this.queue.join(', ') : 'empty'}.`;
