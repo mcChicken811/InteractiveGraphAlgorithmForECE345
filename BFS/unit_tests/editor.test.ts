@@ -450,3 +450,148 @@ describe('GraphEditor auto-layout', () => {
     expect(onMessage).not.toHaveBeenCalled();
   });
 });
+
+describe('GraphEditor directed / undirected mode', () => {
+  beforeEach(() => {
+    addRow(3); // nodes 0, 1, 2 at x = 100, 250, 400 (y = 300)
+    onChange.mockClear();
+  });
+
+  function edgeGroups(): SVGGElement[] {
+    return [...svg.querySelectorAll<SVGGElement>('.edge')];
+  }
+
+  it('starts undirected, with no arrow styling', () => {
+    expect(editor.directed).toBe(false);
+    expect(svg.classList.contains('directed')).toBe(false);
+    expect(svg.querySelector('defs marker#arrow')).not.toBeNull();
+  });
+
+  it('switching mode re-renders, reports a change and explains the mode', () => {
+    editor.setDirected(true);
+    expect(editor.directed).toBe(true);
+    expect(graph.directed).toBe(true);
+    expect(svg.classList.contains('directed')).toBe(true);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(lastMessage()[0]).toContain('Directed');
+    editor.setDirected(true); // no-op
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('clicking A then B stores the arc A → B in either mode', () => {
+    clickNode(2);
+    clickNode(0);
+    expect(graph.getArcs()).toEqual([[2, 0]]);
+    editor.setDirected(true);
+    clickNode(0);
+    clickNode(1);
+    expect(graph.getArcs()).toEqual([
+      [0, 1],
+      [2, 0],
+    ]);
+    expect(lastMessage()[0]).toBe('Added edge 0 → 1.');
+  });
+
+  it('undirected: a single stored arc is drawn as one plain line, centre to centre', () => {
+    clickNode(2);
+    clickNode(0); // arc 2 → 0
+    const [g] = edgeGroups();
+    expect(edgeGroups()).toHaveLength(1);
+    expect(g.dataset.edgeA).toBe('0'); // pair keyed as [min, max]
+    expect(g.dataset.edgeB).toBe('2');
+    expect(g.querySelector('.edge-line')!.getAttribute('x1')).toBe('100');
+    expect(g.querySelector('.edge-line')!.getAttribute('x2')).toBe('400');
+  });
+
+  it('directed: an arc is a line that stops at the target node’s rim', () => {
+    editor.setDirected(true);
+    clickNode(0);
+    clickNode(1);
+    const line = svg.querySelector('[data-edge-a="0"][data-edge-b="1"] .edge-line')!;
+    expect(line.tagName).toBe('line');
+    expect(line.getAttribute('x1')).toBe('100');
+    expect(Number(line.getAttribute('x2'))).toBeCloseTo(250 - NODE_RADIUS - 1);
+  });
+
+  it('directed: arcs both ways are drawn as two separate curves', () => {
+    editor.setDirected(true);
+    clickNode(0);
+    clickNode(1);
+    clickNode(1);
+    clickNode(0);
+    expect(edgeGroups()).toHaveLength(2);
+    const there = svg.querySelector('[data-edge-a="0"][data-edge-b="1"] .edge-line')!;
+    const back = svg.querySelector('[data-edge-a="1"][data-edge-b="0"] .edge-line')!;
+    expect(there.tagName).toBe('path');
+    expect(back.tagName).toBe('path');
+    expect(there.getAttribute('d')).not.toBe(back.getAttribute('d'));
+  });
+
+  it('undirected: arcs both ways collapse into a single edge', () => {
+    editor.setDirected(true);
+    clickNode(0);
+    clickNode(1);
+    clickNode(1);
+    clickNode(0);
+    editor.setDirected(false);
+    expect(edgeGroups()).toHaveLength(1);
+    expect(graph.edgeCount).toBe(1);
+  });
+
+  it('undirected: connecting an already-connected pair the other way is refused', () => {
+    clickNode(0);
+    clickNode(1);
+    clickNode(1);
+    clickNode(0);
+    expect(graph.getArcs()).toEqual([[0, 1]]);
+    expect(lastMessage()).toEqual(['Nodes 1 and 0 are already connected.', 'warn']);
+  });
+
+  it('directed: a duplicate arc is refused, the reverse arc is not', () => {
+    editor.setDirected(true);
+    clickNode(0);
+    clickNode(1);
+    clickNode(0);
+    clickNode(1);
+    expect(lastMessage()).toEqual(['Edge 0 → 1 already exists.', 'warn']);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); // 0 stays selected after a refusal
+    clickNode(1);
+    clickNode(0);
+    expect(graph.getArcs()).toEqual([
+      [0, 1],
+      [1, 0],
+    ]);
+  });
+
+  it('directed: clicking an arc deletes only that arc', () => {
+    editor.setDirected(true);
+    clickNode(0);
+    clickNode(1);
+    clickNode(1);
+    clickNode(0);
+    clickOn(svg.querySelector('[data-edge-a="1"][data-edge-b="0"] .edge-hit')!, 175, 300);
+    expect(graph.getArcs()).toEqual([[0, 1]]);
+    expect(lastMessage()[0]).toBe('Removed edge 1 → 0.');
+  });
+
+  it('undirected: clicking the edge deletes the arcs in both directions', () => {
+    editor.setDirected(true);
+    clickNode(0);
+    clickNode(1);
+    clickNode(1);
+    clickNode(0);
+    editor.setDirected(false);
+    clickOn(svg.querySelector('[data-edge-a="0"][data-edge-b="1"] .edge-hit')!, 175, 300);
+    expect(graph.getArcs()).toEqual([]);
+    expect(lastMessage()[0]).toBe('Removed edge 0 — 1.');
+  });
+
+  it('switching mode does not move any node', () => {
+    clickNode(0);
+    clickNode(1);
+    const before = graph.getNodes().map((n) => ({ ...n }));
+    editor.setDirected(true);
+    editor.setDirected(false);
+    expect(graph.getNodes()).toEqual(before);
+  });
+});

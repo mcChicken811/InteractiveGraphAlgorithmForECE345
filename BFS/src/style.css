@@ -94,11 +94,21 @@ button:focus-visible {
 }
 
 /* Auto-layout toggle, pinned to the canvas's top-left corner. */
-.layout-toggle {
+/* Top-left toolbar on the canvas: Auto-layout toggle + directed/undirected switch. */
+.canvas-toolbar {
   position: absolute;
   top: 12px;
   left: 12px;
   z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  /* Leave room for the ☰ button on the right; wraps onto two lines on phones. */
+  max-width: calc(100% - 74px);
+}
+
+.layout-toggle {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -267,6 +277,14 @@ button:disabled {
   animation: panel-in 0.14s ease-out;
 }
 
+/* On narrow screens the top-left toolbar wraps onto two rows: open the panel below it. */
+@media (max-width: 560px) {
+  .info-panel {
+    top: 104px;
+    max-height: calc(100% - 104px - 64px);
+  }
+}
+
 @keyframes panel-in {
   from {
     opacity: 0;
@@ -278,6 +296,51 @@ button:disabled {
   .info-panel {
     animation: none;
   }
+}
+
+/* Undirected / Directed segmented switch (native radio buttons, visually restyled). */
+.mode-switch {
+  display: flex;
+  gap: 2px;
+  margin: 0;
+  padding: 3px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
+}
+
+.mode-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+
+.mode-switch label {
+  padding: 3px 10px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.mode-switch label:hover {
+  color: var(--text);
+}
+
+.mode-switch input:checked + label {
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.mode-switch input:focus-visible + label {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .info-panel h2 {
@@ -407,6 +470,11 @@ button:disabled {
 
 /* -------------------------------------------------------------- graph */
 
+.edge-hit,
+.edge-line {
+  fill: none;
+}
+
 .edge-hit {
   stroke: transparent;
   stroke-width: 16;
@@ -471,8 +539,42 @@ button:disabled {
 
 #canvas.dragging,
 #canvas.dragging .node,
-#canvas.dragging .edge-hit {
+#canvas.dragging .edge-hit,
+.edge-line {
+  fill: none;
+}
+
+.edge-hit {
   cursor: grabbing;
+}
+
+/* Directed mode: arrowheads, coloured like their edge (red on hover = click to delete). */
+.arrow-head {
+  fill: var(--edge);
+}
+
+.arrow-hover-head {
+  fill: var(--danger);
+}
+
+.arrow-preview-head {
+  fill: var(--accent);
+}
+
+#canvas.directed .edge-line {
+  marker-end: url(#arrow);
+}
+
+#canvas.directed .edge:hover .edge-line {
+  marker-end: url(#arrow-hover);
+}
+
+#canvas.directed .preview-line {
+  marker-end: url(#arrow-preview);
+}
+
+#canvas.dragging.directed .edge:hover .edge-line {
+  marker-end: url(#arrow);
 }
 
 #canvas.dragging .edge:hover .edge-line {

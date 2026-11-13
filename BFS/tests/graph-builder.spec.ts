@@ -456,6 +456,175 @@ test.describe('adjacency list / matrix switch', () => {
   });
 });
 
+test.describe('directed / undirected switch', () => {
+  const undirected = (page: Page) => page.getByRole('radio', { name: 'Undirected', exact: true });
+  const directed = (page: Page) => page.getByRole('radio', { name: 'Directed', exact: true });
+  /** Picks a mode the way a user does: by clicking its visible label (the radio itself is visually hidden). */
+  const choose = (page: Page, mode: 'undirected' | 'directed') => page.locator(`label[for="mode-${mode}"]`).click();
+
+  /** Canvas-local point halfway along an edge's drawn shape (line or curve). */
+  async function edgeMidpoint(a: number, b: number): Promise<[number, number]> {
+    return cv
+      .edge(a, b)
+      .locator('.edge-line')
+      .evaluate((el) => {
+        const shape = el as SVGGeometryElement;
+        const p = shape.getPointAtLength(shape.getTotalLength() / 2);
+        return [p.x, p.y] as [number, number];
+      });
+  }
+
+  async function matrixRows(page: Page): Promise<string[][]> {
+    return page
+      .getByRole('table', { name: 'Adjacency matrix' })
+      .locator('tbody tr')
+      .evaluateAll((rows) => rows.map((r) => [...r.querySelectorAll('td')].map((c) => c.textContent ?? '')));
+  }
+
+  test('sits top-left next to Auto-layout and starts undirected', async ({ page }) => {
+    await expect(undirected(page)).toBeChecked();
+    await expect(directed(page)).not.toBeChecked();
+    const sw = (await page.getByRole('group', { name: 'Edge type' }).boundingBox())!;
+    const auto = (await page.getByRole('button', { name: 'Auto-layout' }).boundingBox())!;
+    const c = (await cv.canvas.boundingBox())!;
+    expect(sw.x).toBeGreaterThan(auto.x + auto.width - 1); // right of Auto-layout
+    expect(Math.abs(sw.y + sw.height / 2 - (auto.y + auto.height / 2))).toBeLessThan(4); // same row
+    expect(sw.x + sw.width).toBeLessThan(c.x + c.width / 2); // still in the left half
+    expect(sw.y - c.y).toBeLessThan(24);
+  });
+
+  test('directed: clicking A then B draws an arrow A → B', async ({ page }) => {
+    await choose(page, 'directed');
+    await expect(page.locator('#message')).toContainText('Directed');
+    await addTriangleNodes();
+    await connect(P.b, P.a); // 1 → 0
+
+    await expect(cv.edge(1, 0)).toHaveCount(1);
+    await expect(cv.edge(0, 1)).toHaveCount(0);
+    await expect(cv.edge(1, 0).locator('.edge-line')).toHaveCSS('marker-end', 'url("#arrow")');
+    await expect(page.locator('#stats')).toHaveText('3 nodes · 1 edge');
+    await expect(page.locator('#adjacency')).toHaveText('0: —\n1: 0\n2: —');
+
+    await page.getByRole('button', { name: 'Help and adjacency list' }).click();
+    await page.getByRole('tab', { name: 'Adjacency matrix' }).click();
+    expect(await matrixRows(page)).toEqual([
+      ['0', '0', '0'],
+      ['1', '0', '0'],
+      ['0', '0', '0'],
+    ]);
+    await expect(page.locator('#matrix-note')).toContainText('need not be symmetric');
+  });
+
+  test('undirected: the same stored arc shows as an undirected edge everywhere', async ({ page }) => {
+    await choose(page, 'directed');
+    await addTriangleNodes();
+    await connect(P.b, P.a); // stored as 1 → 0
+    await choose(page, 'undirected');
+
+    await expect(cv.edge(0, 1)).toHaveCount(1);
+    await expect(cv.edge(0, 1).locator('.edge-line')).toHaveCSS('marker-end', 'none');
+    await expect(page.locator('#stats')).toHaveText('3 nodes · 1 edge');
+    await expect(page.locator('#adjacency')).toHaveText('0: 1\n1: 0\n2: —');
+
+    await page.getByRole('button', { name: 'Help and adjacency list' }).click();
+    await page.getByRole('tab', { name: 'Adjacency matrix' }).click();
+    expect(await matrixRows(page)).toEqual([
+      ['0', '1', '0'],
+      ['1', '0', '0'],
+      ['0', '0', '0'],
+    ]);
+    await expect(page.locator('#matrix-note')).toContainText('symmetric because edges are undirected');
+  });
+
+  test('arcs both ways: two curved arrows when directed, one edge when undirected', async ({ page }) => {
+    await choose(page, 'directed');
+    await addTriangleNodes();
+    await connect(P.a, P.b);
+    await connect(P.b, P.a);
+
+    await expect(cv.edges).toHaveCount(2);
+    await expect(page.locator('#stats')).toHaveText('3 nodes · 2 edges');
+    expect(await cv.edge(0, 1).locator('.edge-line').evaluate((el) => el.tagName)).toBe('path');
+    const there = await edgeMidpoint(0, 1);
+    const back = await edgeMidpoint(1, 0);
+    expect(Math.hypot(there[0] - back[0], there[1] - back[1])).toBeGreaterThan(30); // visibly apart
+
+    await choose(page, 'undirected');
+    await expect(cv.edges).toHaveCount(1);
+    await expect(page.locator('#stats')).toHaveText('3 nodes · 1 edge');
+    await expect(page.locator('#adjacency')).toHaveText('0: 1\n1: 0\n2: —');
+  });
+
+  test('directed: clicking one of two opposite arcs deletes only that one', async ({ page }) => {
+    await choose(page, 'directed');
+    await addTriangleNodes();
+    await connect(P.a, P.b);
+    await connect(P.b, P.a);
+
+    await cv.click(...(await edgeMidpoint(1, 0)));
+    await expect(cv.edge(1, 0)).toHaveCount(0);
+    await expect(cv.edge(0, 1)).toHaveCount(1);
+    await expect(page.locator('#message')).toHaveText('Removed edge 1 → 0.');
+    // The remaining arc straightens out.
+    expect(await cv.edge(0, 1).locator('.edge-line').evaluate((el) => el.tagName)).toBe('line');
+  });
+
+  test('undirected: deleting the edge removes the arcs in both directions', async ({ page }) => {
+    await choose(page, 'directed');
+    await addTriangleNodes();
+    await connect(P.a, P.b);
+    await connect(P.b, P.a);
+    await choose(page, 'undirected');
+
+    await cv.click(...mid(P.a, P.b));
+    await expect(cv.edges).toHaveCount(0);
+    await choose(page, 'directed');
+    await expect(cv.edges).toHaveCount(0); // nothing left hidden in directed mode either
+  });
+
+  test('undirected: connecting the reverse of an existing arc is refused', async ({ page }) => {
+    await addTriangleNodes();
+    await connect(P.a, P.b);
+    await connect(P.b, P.a);
+    await expect(page.locator('#message')).toHaveText('Nodes 1 and 0 are already connected.');
+    await choose(page, 'directed');
+    await expect(cv.edges).toHaveCount(1); // only the one arc 0 → 1 was stored
+    await expect(cv.edge(0, 1)).toHaveCount(1);
+  });
+
+  test('the preview line shows an arrow while picking the target in directed mode', async ({ page }) => {
+    await choose(page, 'directed');
+    await addTriangleNodes();
+    await cv.click(...P.a);
+    await cv.move(380, 300);
+    await expect(cv.canvas.locator('.preview-line')).toHaveCSS('marker-end', 'url("#arrow-preview")');
+  });
+
+  test('switching mode never moves nodes', async ({ page }) => {
+    await addTriangleNodes();
+    await connect(P.a, P.b);
+    const before = await cv.canvas
+      .locator('[data-node-id]')
+      .evaluateAll((els) => els.map((e) => e.getAttribute('transform')));
+    await choose(page, 'directed');
+    await choose(page, 'undirected');
+    const after = await cv.canvas
+      .locator('[data-node-id]')
+      .evaluateAll((els) => els.map((e) => e.getAttribute('transform')));
+    expect(after).toEqual(before);
+  });
+
+  test('is keyboard operable (arrow keys move between the two options)', async ({ page }) => {
+    await undirected(page).focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(directed(page)).toBeChecked();
+    await expect(cv.canvas).toHaveClass(/directed/);
+    await page.keyboard.press('ArrowLeft');
+    await expect(undirected(page)).toBeChecked();
+    await expect(cv.canvas).not.toHaveClass(/directed/);
+  });
+});
+
 test.describe('on a phone-sized screen', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 
@@ -466,18 +635,23 @@ test.describe('on a phone-sized screen', () => {
     expect(overflow).toBe(0);
 
     const box = (await cv.canvas.boundingBox())!;
-    await page.touchscreen.tap(box.x + 80, box.y + 80);
-    await page.touchscreen.tap(box.x + 280, box.y + 200);
+    await page.touchscreen.tap(box.x + 80, box.y + 180); // below the (wrapped) toolbar
+    await page.touchscreen.tap(box.x + 280, box.y + 320);
     await expect(cv.nodes).toHaveCount(2);
 
-    await page.touchscreen.tap(box.x + 80, box.y + 80);
-    await page.touchscreen.tap(box.x + 280, box.y + 200);
+    await page.touchscreen.tap(box.x + 80, box.y + 180); // below the (wrapped) toolbar
+    await page.touchscreen.tap(box.x + 280, box.y + 320);
     await expect(cv.edges).toHaveCount(1);
     // The panel opens within the screen, still floating over the canvas.
     await page.getByRole('button', { name: 'Help and adjacency list' }).tap();
     const panelBox = (await page.getByRole('complementary', { name: 'Help and adjacency list' }).boundingBox())!;
     expect(panelBox.x).toBeGreaterThanOrEqual(0);
     expect(panelBox.x + panelBox.width).toBeLessThanOrEqual(390);
+    // ...and below the (wrapped) toolbar, so the Undirected/Directed switch stays reachable.
+    const toolbar = (await page.locator('.canvas-toolbar').boundingBox())!;
+    expect(panelBox.y).toBeGreaterThanOrEqual(toolbar.y + toolbar.height);
+    await page.locator('label[for="mode-directed"]').tap();
+    await expect(page.getByRole('radio', { name: 'Directed', exact: true })).toBeChecked();
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
   });
 });

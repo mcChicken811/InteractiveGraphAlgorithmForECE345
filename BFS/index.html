@@ -22,17 +22,26 @@
 
     <main class="layout">
       <section class="canvas-wrap">
-        <button
-          id="layout-toggle"
-          class="layout-toggle"
-          type="button"
-          aria-pressed="false"
-          title="Automatically space out the graph (force-directed layout)"
-        >
-          <span class="switch" aria-hidden="true"></span>
-          Auto-layout
-          <span class="state" aria-hidden="true">Off</span>
-        </button>
+        <div class="canvas-toolbar">
+          <button
+            id="layout-toggle"
+            class="layout-toggle"
+            type="button"
+            aria-pressed="false"
+            title="Automatically space out the graph (force-directed layout)"
+          >
+            <span class="switch" aria-hidden="true"></span>
+            Auto-layout
+            <span class="state" aria-hidden="true">Off</span>
+          </button>
+          <!-- How edges are interpreted. They are always stored as directed arcs (first click → second click). -->
+          <fieldset class="mode-switch" aria-label="Edge type">
+            <input type="radio" id="mode-undirected" name="edge-mode" value="undirected" checked />
+            <label for="mode-undirected">Undirected</label>
+            <input type="radio" id="mode-directed" name="edge-mode" value="directed" />
+            <label for="mode-directed">Directed</label>
+          </fieldset>
+        </div>
 
         <!-- Hamburger menu: shows the help and adjacency list floating over the canvas. -->
         <button
@@ -62,6 +71,10 @@
               <li><strong>Right-click a node</strong> (or select it and press Delete) to remove it.</li>
               <li><strong>Esc</strong> or click empty space to cancel a selection.</li>
               <li><strong>Auto-layout</strong> (top left) spaces the graph out automatically.</li>
+              <li>
+                <strong>Undirected / Directed</strong> (top left) sets how edges are read. Clicking A then B
+                always records A → B; undirected mode ignores the direction.
+              </li>
             </ul>
           </section>
           <section>
@@ -91,11 +104,11 @@
             </div>
             <div id="rep-list" class="rep-panel" role="tabpanel" aria-labelledby="tab-list">
               <pre id="adjacency" class="adjacency"></pre>
-              <p class="rep-note">Each node followed by its neighbours.</p>
+              <p id="list-note" class="rep-note">Each node followed by its neighbours.</p>
             </div>
             <div id="rep-matrix" class="rep-panel" role="tabpanel" aria-labelledby="tab-matrix" hidden>
               <div id="adjacency-matrix" class="matrix-scroll"></div>
-              <p class="rep-note">1 marks an edge between the row and column nodes. The matrix is symmetric because edges are undirected.</p>
+              <p id="matrix-note" class="rep-note">1 marks an edge between the row and column nodes. The matrix is symmetric because edges are undirected.</p>
             </div>
           </section>
         </aside>

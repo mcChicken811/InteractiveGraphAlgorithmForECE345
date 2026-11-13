@@ -1,6 +1,6 @@
 # BFS · Graph Builder
 
-Interactive editor for building an undirected, unweighted graph in the browser (TypeScript, no runtime dependencies).
+Interactive editor for building an unweighted graph, viewed as directed or undirected, in the browser (TypeScript, no runtime dependencies).
 
 ## Setup
 
@@ -73,14 +73,30 @@ The image tag in `docker/playwright.Dockerfile` must match the exact `@playwrigh
 | Action | Result |
 | --- | --- |
 | Click empty space | Add a node |
-| Click a node, then another node | Add an edge between them |
+| Click a node, then another node | Add an edge from the first to the second (stored as a directed arc) |
 | Click an edge | Delete the edge |
 | Drag a node | Move it |
 | Right-click a node, or select it and press Delete | Delete the node and its edges |
 | Esc, or click empty space while a node is selected | Cancel the selection |
 | **Auto-layout** button (top-left of the canvas) | Turn automatic spacing on/off |
+| **Undirected / Directed** switch (top-left, next to Auto-layout) | Choose how edges are interpreted (see below) |
 | **☰** button (top-right of the canvas), or Esc to close | Show/hide the help and the live graph representation, floating over the canvas |
 | **Adjacency list / Adjacency matrix** switch (in the ☰ panel; ← / → when focused) | Choose which representation of the graph to show |
+
+## Directed and undirected mode
+
+Edges are always **stored as directed arcs**: clicking A, then B, records A → B. The **Undirected / Directed** switch only changes how the stored arcs are interpreted, so switching never loses data.
+
+| | Directed | Undirected |
+| --- | --- | --- |
+| A → B only | one edge A → B (arrow) | one edge A — B |
+| A → B and B → A | two edges, drawn as two curved arrows | **one** edge A — B |
+| Adjacency list | out-neighbours (the nodes a node points to) | neighbours either way |
+| Adjacency matrix | row A, column B is 1 if A → B; can be asymmetric | symmetric |
+| Click A, then B, when B → A exists | adds A → B | refused: already connected |
+| Click an edge to delete it | removes that one arc | removes the arcs in both directions |
+
+`Graph.directed` holds the mode. `hasEdge`, `neighbors`, `getEdges`, `edgeCount`, `addEdge`, `removeEdge` and the two representations all follow it, while `hasArc`, `getArcs` and `undirectedNeighbors` always see the raw arcs. Auto-layout and `connectedComponents()` always ignore direction (for a directed graph, the components are its weakly connected components), so switching modes never moves nodes.
 
 ## Auto-layout
 
@@ -122,7 +138,7 @@ Freivalds, Dogrusoz & Kikusts study this approach in *Disconnected Graph Layout 
 
 ## Code layout
 
-- `src/graph.ts` — `Graph` model (adjacency list of `Set`s, plus node positions), including BFS-based `connectedComponents()`. `neighbors(id)` returns ids in sorted order, giving BFS a deterministic visiting order.
+- `src/graph.ts` — `Graph` model: arcs stored as out/in adjacency `Set`s, interpreted as directed or undirected via `graph.directed`, plus node positions and BFS-based `connectedComponents()`. `neighbors(id)` returns ids in sorted order, giving BFS a deterministic visiting order.
 - `src/editor.ts` — `GraphEditor`: SVG rendering, pointer/keyboard interaction, and driving the auto-layout animation.
 - `src/layout.ts` — `ForceLayout` (per-component force-directed layout, fitting and packing) and `packRows`; pure, no DOM.
 - `src/main.ts` — wires the editor to the stats, status message, Auto-layout toggle and the ☰ help/adjacency-list panel.

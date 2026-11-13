@@ -283,11 +283,13 @@ export class ForceLayout {
                 addForce(force.get(ids[j]), (-dx / d) * f, (-dy / d) * f);
             }
         }
-        // Attraction along each edge: d² / k.
+        // Attraction along each edge: d² / k. Directions are ignored, so a pair joined by
+        // arcs both ways attracts like one edge and switching directed/undirected mode
+        // never changes the layout.
         for (const a of ids) {
-            for (const b of graph.neighbors(a)) {
+            for (const b of graph.undirectedNeighbors(a)) {
                 if (b < a)
-                    continue; // each edge once
+                    continue; // each pair once
                 const p = pos.get(a);
                 const q = pos.get(b);
                 const dx = p.x - q.x;

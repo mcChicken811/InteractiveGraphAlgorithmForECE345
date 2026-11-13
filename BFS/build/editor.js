@@ -5,6 +5,8 @@ export const NODE_RADIUS = 20;
 const DRAG_THRESHOLD = 4;
 /** Extra space required between two node circles when spawning. */
 const MIN_NODE_GAP = 6;
+/** How far (px) the two arcs between a pair of nodes bow apart in directed mode. */
+const CURVE_OFFSET = 22;
 /**
  * Interactive SVG editor:
  *  - click empty space → add node
@@ -12,6 +14,9 @@ const MIN_NODE_GAP = 6;
  *  - click edge → delete it
  *  - drag node → move it; right-click node (or Delete with it selected) → delete it
  *  - optional auto-layout: a force-directed simulation spaces the nodes out
+ *  - directed / undirected view: edges are stored as arcs (first click → second click);
+ *    directed mode draws arrows (two curved arcs when they go both ways), undirected
+ *    mode draws one plain line per connected pair
  */
 export class GraphEditor {
     svg;
@@ -35,7 +40,7 @@ export class GraphEditor {
         this.edgeLayer = svgEl('g', { class: 'edges' });
         this.previewLine = svgEl('line', { class: 'preview-line' });
         this.nodeLayer = svgEl('g', { class: 'nodes' });
-        svg.append(this.edgeLayer, this.previewLine, this.nodeLayer);
+        svg.append(arrowDefs(), this.edgeLayer, this.previewLine, this.nodeLayer);
         svg.addEventListener('pointerdown', this.onPointerDown);
         svg.addEventListener('pointermove', this.onPointerMove);
         svg.addEventListener('pointerup', this.onPointerUp);
@@ -54,6 +59,23 @@ export class GraphEditor {
         this.render();
         this.changed();
         this.message('Graph cleared. Click empty space to add a node.');
+    }
+    get directed() {
+        return this.graph.directed;
+    }
+    /**
+     * Switches between treating the graph as directed or undirected. The stored arcs never
+     * change; only how they are drawn, counted and represented does.
+     */
+    setDirected(directed) {
+        if (directed === this.graph.directed)
+            return;
+        this.graph.directed = directed;
+        this.render();
+        this.callbacks.onChange?.();
+        this.message(directed
+            ? 'Directed: clicking A then B adds an edge A → B.'
+            : 'Undirected: edge directions are ignored; arcs both ways count as one edge.');
     }
     get autoLayoutEnabled() {
         return this.autoLayout;
@@ -195,7 +217,9 @@ export class GraphEditor {
     handleNodeClick(id) {
         if (this.selected === null) {
             this.select(id);
-            this.message(`Node ${id} selected — click another node to connect it, or empty space to cancel.`);
+            this.message(this.graph.directed
+                ? `Node ${id} selected — click another node to add an edge from ${id} to it, or empty space to cancel.`
+                : `Node ${id} selected — click another node to connect it, or empty space to cancel.`);
             return;
         }
         if (this.selected === id) {
@@ -205,20 +229,26 @@ export class GraphEditor {
         }
         const from = this.selected;
         if (this.graph.hasEdge(from, id)) {
-            this.message(`Nodes ${from} and ${id} are already connected.`, 'warn');
+            this.message(this.graph.directed
+                ? `Edge ${from} → ${id} already exists.`
+                : `Nodes ${from} and ${id} are already connected.`, 'warn');
             return;
         }
-        this.graph.addEdge(from, id);
+        this.graph.addEdge(from, id); // stored as the arc from → id in either mode
         this.select(null);
         this.changed();
-        this.message(`Added edge ${from} — ${id}.`);
+        this.message(`Added edge ${this.edgeLabel(from, id)}.`);
     }
     handleEdgeClick(a, b) {
+        // Undirected mode removes the arcs both ways: they are drawn as one edge.
         if (!this.graph.removeEdge(a, b))
             return;
         this.render();
         this.changed();
-        this.message(`Removed edge ${a} — ${b}.`);
+        this.message(`Removed edge ${this.edgeLabel(a, b)}.`);
+    }
+    edgeLabel(a, b) {
+        return this.graph.directed ? `${a} → ${b}` : `${a} — ${b}`;
     }
     handleBackgroundClick(p) {
         if (this.selected !== null) {
@@ -255,26 +285,36 @@ export class GraphEditor {
     // ------------------------------------------------------------ rendering
     render() {
         // Edges (keyed so DOM elements — and their hover state — survive re-renders).
+        // Undirected: one line per adjacent pair, centre to centre, data-edge-a < data-edge-b.
+        // Directed: one arrow per arc a → b, ending at b's rim; when b → a also exists, both
+        // arcs are drawn as curves bowing to opposite sides so each can be clicked.
+        const directed = this.graph.directed;
+        this.svg.classList.toggle('directed', directed);
         const liveEdges = new Set();
         for (const [a, b] of this.graph.getEdges()) {
-            const key = `${a}-${b}`;
+            const curved = directed && this.graph.hasArc(b, a);
+            const shape = curved ? 'path' : 'line';
+            const key = directed ? `${a}>${b}` : `${a}-${b}`;
             liveEdges.add(key);
             let g = this.edgeEls.get(key);
+            if (g && g.dataset.shape !== shape) {
+                g.remove();
+                g = undefined;
+            }
             if (!g) {
                 g = svgEl('g', { class: 'edge' });
                 g.dataset.edgeA = String(a);
                 g.dataset.edgeB = String(b);
+                g.dataset.shape = shape;
                 const title = svgEl('title', {});
-                title.textContent = `Edge ${a} — ${b} (click to delete)`;
-                g.append(svgEl('line', { class: 'edge-hit' }), svgEl('line', { class: 'edge-line' }), title);
+                title.textContent = `Edge ${this.edgeLabel(a, b)} (click to delete)`;
+                g.append(svgEl(shape, { class: 'edge-hit' }), svgEl(shape, { class: 'edge-line' }), title);
                 this.edgeLayer.append(g);
                 this.edgeEls.set(key, g);
             }
-            const na = this.graph.getNode(a);
-            const nb = this.graph.getNode(b);
-            for (const line of g.querySelectorAll('line')) {
-                setAttrs(line, { x1: na.x, y1: na.y, x2: nb.x, y2: nb.y });
-            }
+            const geometry = this.edgeGeometry(this.graph.getNode(a), this.graph.getNode(b), directed, curved);
+            for (const el of g.querySelectorAll('.edge-hit, .edge-line'))
+                setAttrs(el, geometry);
         }
         for (const [key, g] of this.edgeEls) {
             if (!liveEdges.has(key)) {
@@ -307,6 +347,26 @@ export class GraphEditor {
         }
         this.svg.classList.toggle('has-selection', this.selected !== null);
         this.updatePreview();
+    }
+    /** SVG attributes for an edge from a to b (see render() for the three cases). */
+    edgeGeometry(a, b, directed, curved) {
+        if (!directed)
+            return { x1: a.x, y1: a.y, x2: b.x, y2: b.y };
+        const len = Math.max(distance(a, b), 0.001);
+        const ux = (b.x - a.x) / len;
+        const uy = (b.y - a.y) / len;
+        const rim = NODE_RADIUS + 1; // the arrow's tip sits just outside the target circle
+        if (!curved)
+            return { x1: a.x, y1: a.y, x2: b.x - ux * rim, y2: b.y - uy * rim };
+        // Quadratic curve bowing to the right of a → b (so b → a bows the other way).
+        const c = { x: (a.x + b.x) / 2 - uy * CURVE_OFFSET * 2, y: (a.y + b.y) / 2 + ux * CURVE_OFFSET * 2 };
+        const toward = (from, to, by) => {
+            const d = Math.max(distance(from, to), 0.001);
+            return { x: from.x + ((to.x - from.x) / d) * by, y: from.y + ((to.y - from.y) / d) * by };
+        };
+        const start = toward(a, c, NODE_RADIUS);
+        const end = toward(b, c, rim);
+        return { d: `M ${start.x} ${start.y} Q ${c.x} ${c.y} ${end.x} ${end.y}` };
     }
     /** Dashed line from the selected node to the cursor while choosing an edge target. */
     updatePreview() {
@@ -366,6 +426,25 @@ export class GraphEditor {
     message(text, tone = 'info') {
         this.callbacks.onMessage?.(text, tone);
     }
+}
+/** Arrowhead markers for directed mode: normal, hovered (delete), and the preview line. */
+function arrowDefs() {
+    const defs = svgEl('defs', {});
+    for (const id of ['arrow', 'arrow-hover', 'arrow-preview']) {
+        const marker = svgEl('marker', {
+            id,
+            viewBox: '0 0 10 10',
+            refX: 10,
+            refY: 5,
+            markerWidth: 11,
+            markerHeight: 11,
+            markerUnits: 'userSpaceOnUse',
+            orient: 'auto',
+        });
+        marker.append(svgEl('path', { d: 'M 0 0 L 10 5 L 0 10 z', class: `${id}-head` }));
+        defs.append(marker);
+    }
+    return defs;
 }
 function prefersReducedMotion() {
     return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;

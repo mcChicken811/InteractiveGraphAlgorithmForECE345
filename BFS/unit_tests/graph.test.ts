@@ -136,6 +136,157 @@ describe('Graph', () => {
     });
   });
 
+  describe('directed storage, directed / undirected interpretation', () => {
+    beforeEach(() => {
+      for (let i = 0; i < 3; i++) g.addNode(0, 0);
+    });
+
+    it('defaults to undirected', () => {
+      expect(g.directed).toBe(false);
+    });
+
+    it('always stores an edge as the arc first → second', () => {
+      g.addEdge(1, 0);
+      expect(g.hasArc(1, 0)).toBe(true);
+      expect(g.hasArc(0, 1)).toBe(false);
+      expect(g.getArcs()).toEqual([[1, 0]]);
+    });
+
+    it('undirected: a single arc counts as one edge both ways', () => {
+      g.addEdge(1, 0);
+      expect(g.hasEdge(0, 1)).toBe(true);
+      expect(g.hasEdge(1, 0)).toBe(true);
+      expect(g.getEdges()).toEqual([[0, 1]]);
+      expect(g.edgeCount).toBe(1);
+      expect(g.neighbors(0)).toEqual([1]);
+      expect(g.neighbors(1)).toEqual([0]);
+    });
+
+    it('directed: a single arc is one edge, one way', () => {
+      g.directed = true;
+      g.addEdge(1, 0);
+      expect(g.hasEdge(1, 0)).toBe(true);
+      expect(g.hasEdge(0, 1)).toBe(false);
+      expect(g.getEdges()).toEqual([[1, 0]]);
+      expect(g.neighbors(1)).toEqual([0]);
+      expect(g.neighbors(0)).toEqual([]);
+    });
+
+    it('directed mode allows the reverse arc; undirected treats the pair as one edge', () => {
+      g.directed = true;
+      expect(g.addEdge(0, 1)).toBe(true);
+      expect(g.addEdge(1, 0)).toBe(true);
+      expect(g.addEdge(0, 1)).toBe(false); // duplicate arc
+      expect(g.getEdges()).toEqual([
+        [0, 1],
+        [1, 0],
+      ]);
+      expect(g.edgeCount).toBe(2);
+
+      g.directed = false;
+      expect(g.getEdges()).toEqual([[0, 1]]);
+      expect(g.edgeCount).toBe(1);
+      expect(g.neighbors(0)).toEqual([1]);
+      expect(g.getArcs()).toHaveLength(2); // nothing was lost
+    });
+
+    it('undirected mode rejects the reverse of an existing arc', () => {
+      g.addEdge(0, 1);
+      expect(g.addEdge(1, 0)).toBe(false);
+      expect(g.getArcs()).toEqual([[0, 1]]);
+    });
+
+    it('directed removal deletes one arc; undirected removal deletes both', () => {
+      g.directed = true;
+      g.addEdge(0, 1);
+      g.addEdge(1, 0);
+      expect(g.removeEdge(0, 1)).toBe(true);
+      expect(g.getArcs()).toEqual([[1, 0]]);
+      expect(g.removeEdge(0, 1)).toBe(false);
+
+      g.addEdge(0, 1);
+      g.directed = false;
+      expect(g.removeEdge(0, 1)).toBe(true);
+      expect(g.getArcs()).toEqual([]);
+    });
+
+    it('undirected removal works whichever way round the arc was stored', () => {
+      g.addEdge(1, 0);
+      expect(g.removeEdge(0, 1)).toBe(true);
+      expect(g.getArcs()).toEqual([]);
+    });
+
+    it('switching modes never changes the stored arcs', () => {
+      g.directed = true;
+      g.addEdge(0, 1);
+      g.addEdge(1, 0);
+      g.addEdge(2, 1);
+      const arcs = g.getArcs();
+      g.directed = false;
+      expect(g.getArcs()).toEqual(arcs);
+      g.directed = true;
+      expect(g.getArcs()).toEqual(arcs);
+    });
+
+    it('removing a node removes arcs into and out of it', () => {
+      g.directed = true;
+      g.addEdge(0, 1);
+      g.addEdge(1, 2);
+      g.addEdge(2, 1);
+      g.removeNode(1);
+      expect(g.getArcs()).toEqual([]);
+      expect(g.neighbors(0)).toEqual([]);
+      expect(g.neighbors(2)).toEqual([]);
+    });
+
+    it('representations follow the mode', () => {
+      g.addEdge(0, 1);
+      g.addEdge(2, 1);
+      g.directed = true;
+      expect(g.adjacencyList()).toEqual([
+        { id: 0, neighbors: [1] },
+        { id: 1, neighbors: [] },
+        { id: 2, neighbors: [1] },
+      ]);
+      expect(g.adjacencyMatrix().matrix).toEqual([
+        [0, 1, 0],
+        [0, 0, 0],
+        [0, 1, 0],
+      ]);
+
+      g.directed = false;
+      expect(g.adjacencyList()).toEqual([
+        { id: 0, neighbors: [1] },
+        { id: 1, neighbors: [0, 2] },
+        { id: 2, neighbors: [1] },
+      ]);
+      expect(g.adjacencyMatrix().matrix).toEqual([
+        [0, 1, 0],
+        [1, 0, 1],
+        [0, 1, 0],
+      ]);
+    });
+
+    it('arcs both ways appear once in the undirected matrix (as a single 1 per cell)', () => {
+      g.directed = true;
+      g.addEdge(0, 1);
+      g.addEdge(1, 0);
+      g.directed = false;
+      expect(g.adjacencyMatrix().matrix).toEqual([
+        [0, 1, 0],
+        [1, 0, 0],
+        [0, 0, 0],
+      ]);
+    });
+
+    it('connected components ignore direction (weakly connected)', () => {
+      g.directed = true;
+      g.addEdge(0, 1);
+      g.addEdge(2, 1);
+      expect(g.connectedComponents()).toEqual([[0, 1, 2]]);
+    });
+  });
+
   describe('representations', () => {
     beforeEach(() => {
       for (let i = 0; i < 4; i++) g.addNode(0, 0);

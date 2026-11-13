@@ -8,6 +8,9 @@ const stats = document.querySelector('#stats');
 const messageEl = document.querySelector('#message');
 const adjacencyEl = document.querySelector('#adjacency');
 const matrixEl = document.querySelector('#adjacency-matrix');
+const listNote = document.querySelector('#list-note');
+const matrixNote = document.querySelector('#matrix-note');
+const modeInputs = document.querySelectorAll('input[name="edge-mode"]');
 const clearBtn = document.querySelector('#clear-btn');
 const layoutBtn = document.querySelector('#layout-toggle');
 const layoutState = layoutBtn.querySelector('.state');
@@ -21,6 +24,12 @@ function refreshPanels() {
     clearBtn.disabled = n === 0;
     renderAdjacencyList(adjacencyEl, graph);
     renderAdjacencyMatrix(matrixEl, graph);
+    listNote.textContent = graph.directed
+        ? 'Each node followed by the nodes its edges point to.'
+        : 'Each node followed by its neighbours.';
+    matrixNote.textContent = graph.directed
+        ? 'Row r, column c is 1 when there is an edge r → c, so the matrix need not be symmetric.'
+        : '1 marks an edge between the row and column nodes. The matrix is symmetric because edges are undirected.';
 }
 setupTabs(document.querySelector('.rep-tabs'));
 function showMessage(text, tone = 'info') {
@@ -32,6 +41,13 @@ const editor = new GraphEditor(svg, graph, {
     onMessage: showMessage,
 });
 clearBtn.addEventListener('click', () => editor.clear());
+// Undirected / Directed switch: only changes how the stored arcs are interpreted.
+for (const input of modeInputs) {
+    input.addEventListener('change', () => {
+        if (input.checked)
+            editor.setDirected(input.value === 'directed');
+    });
+}
 layoutBtn.addEventListener('click', () => {
     const enabled = !editor.autoLayoutEnabled;
     editor.setAutoLayout(enabled);
