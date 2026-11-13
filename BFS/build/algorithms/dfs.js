@@ -119,20 +119,23 @@ export class DfsSimulation {
         };
     }
     /**
-     * The depth-first forest G_π (CLRS §20.3: the vertices and the tree edges (v.π, v)),
-     * laid out as on the timestamp chart: each vertex on the row of its depth, above the
-     * middle of its interval [d, f]. Once finished; otherwise null.
+     * The depth-first forest G_π found so far (CLRS §20.3: the discovered vertices and the
+     * tree edges (v.π, v)), laid out as on the timestamp chart: each vertex on the row of
+     * its depth, above the middle of its interval [d, f] — for a vertex still running,
+     * [d, now], as its bar on the chart runs up to the current time. Vertices not
+     * discovered yet go `aside`. Tree edges are highlighted white only once DFS has
+     * finished (until then white is the next step's).
      */
     searchForest() {
-        if (!this.finished)
-            return null;
         return {
             places: [...this.discovery].map(([id, d]) => ({
                 id,
-                column: (d + this.finish.get(id)) / 2,
+                column: (d + (this.finish.get(id) ?? this.time)) / 2,
                 row: this.depth.get(id),
             })),
             spine: this.edges.filter((e) => e.kind === 'tree').map((e) => [e.from, e.to]),
+            aside: this.view.nodeIds().filter((id) => !this.discovery.has(id)),
+            highlightSpine: this.finished,
         };
     }
     /**

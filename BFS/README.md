@@ -232,18 +232,19 @@ When DFS has finished, a **Topological sort** button appears next to **Finish**.
 
 ### Show as forest
 
-When DFS has finished, a **Show as forest** button also appears next to **Finish**, whether or not there is a cycle. It arranges the vertices as the **depth-first forest** G_π (CLRS §20.3): the vertices joined by the tree edges (v.π, v).
+While DFS runs, from Run until Finish or Stop, a **Show as forest** toggle sits next to Update (and next to Finish at the end, whether or not there is a cycle). It arranges the vertices as the **depth-first forest** G_π found so far (CLRS §20.3): the discovered vertices, joined by the tree edges (v.π, v).
 
 - **Layout:** the same as the timestamp chart.
   - **Rows:** each vertex sits on the row of its depth, with the roots on the top row.
-  - **Columns:** each vertex sits above the middle of its [d, f] interval on a time axis, up to 72 px per time unit.
+  - **Columns:** each vertex sits above the middle of its [d, f] interval on a time axis, up to 72 px per time unit. A vertex still running has no f yet, so it uses [d, now], just as its bar on the timestamp chart runs up to the current time. Each running vertex on the stack is therefore a step to the right of its parent.
+  - **Undiscovered vertices:** they wait in a compact group on the right, as in BFS's Show as tree, and the forest is centred in the space to their left. Each Update glides newly discovered vertices into the forest, and the whole forest shifts as the time axis grows.
   - **What follows:** by the parenthesis theorem, a vertex's descendants sit below it within its interval. Siblings and trees run left to right in discovery order, and a single child sits straight below its parent.
   - **Fit:** the forest is centred, shrinks to fit the canvas, and stays clear of the toolbar and the status bar.
 - **Edges:**
-  - **Tree edges** are straight and white.
+  - **Tree edges** are straight. Once DFS has finished they are highlighted white; until then they are plain solid lines, since white still marks the vertex and edge the next Update works on.
   - **Other edges** (backward, forward and crossed, with their tags) curve as flat half ellipses bulging to the left of their direction. A backward edge going up a chain and a forward edge going down it therefore bow out to opposite sides, clear of the vertices between.
-- **Switching views:** **Topological sort** and **Show as forest** switch straight between the two views. The vertices glide over, and each edge's curve blends from its old shape to its new one. The pressed button is marked in the accent colour.
-- **Auto-layout and ending:** as with the topological sort, auto-layout is switched off. Turning it back on leaves the view, but the run goes on, and the button comes back to it. **Finish** or **Stop** ends the run.
+- **Switching views:** once DFS has finished, **Topological sort** and **Show as forest** switch straight between the two views. The vertices glide over, and each edge's curve blends from its old shape to its new one. The pressed button is marked in the accent colour.
+- **Leaving and ending:** as with the topological sort, auto-layout is switched off. Pressing **Show as forest** again leaves the view with the vertices where they are, and so does turning auto-layout back on. The run goes on either way, and the button comes back to the view. **Finish** or **Stop** ends the run.
 
 ### Prim's algorithm
 
@@ -307,8 +308,8 @@ Kruskal's algorithm follows `MST-KRUSKAL(G, w)` in *Introduction to Algorithms* 
      - `crossing: true`: solid grey (edges crossing its cut).
      - `within: true`: dashed green (edges between tree vertices that are not tree edges).
    - Once finished, a simulation can also offer `topologicalSort()`, returning an `ArcDiagram` (`order`, `spine`, `below`) or null. The Topological sort button then appears next to Finish.
-   - Likewise `searchForest()`, returning a `ForestDiagram` (`places`: each vertex's column and row; `spine`: the tree edges), puts the Show as forest button next to Finish.
-   - `searchTree()` (offered for the whole run) returns a `ForestDiagram` too, with `aside` (vertices to group on the right) and `highlightSpine: false`. It puts the Show as tree toggle next to Update, and the runner re-sends it after every step while it is shown.
+   - Likewise `searchForest()` (offered for the whole run), returning a `ForestDiagram` (`places`: each vertex's column and row; `spine`: the tree edges; `aside`: the vertices not in it yet; `highlightSpine`), puts the Show as forest toggle next to Update. The runner re-sends it after every step while it is shown.
+   - `searchTree()` (BFS) works the same way for the Show as tree toggle, with `highlightSpine: false`.
 3. Add it to `ALGORITHMS` in `src/algorithms/index.ts`. The picker, the locks and the drawing then work without further changes.
 
 ## Directed and undirected mode

@@ -194,10 +194,11 @@ export interface Simulation {
    */
   topologicalSort?(): ArcDiagram | null;
   /**
-   * Offered once finished (DFS): the depth-first forest, laid out as on the timestamp
-   * chart. Algorithms without one leave it out, and the button stays hidden.
+   * Offered while running (DFS): the depth-first forest so far, laid out as on the
+   * timestamp chart, with the vertices not discovered yet `aside`. Algorithms without
+   * one leave it out, and the Show as forest button stays hidden.
    */
-  searchForest?(): ForestDiagram | null;
+  searchForest?(): ForestDiagram;
   /**
    * Offered while running (BFS): the search tree so far, as a ForestDiagram (rows by
    * distance), with the vertices not reached yet `aside`. Algorithms without one leave it

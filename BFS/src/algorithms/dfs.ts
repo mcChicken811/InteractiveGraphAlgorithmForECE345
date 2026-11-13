@@ -54,7 +54,7 @@ import type {
  * decreasing finish time — available only when no back edge was found, which by
  * Lemma 20.11 is exactly when the directed graph is acyclic. `searchForest()` gives the
  * depth-first forest G_π (§20.3) — the vertices joined by the tree edges — drawn as trees
- * the way the timestamp chart nests their intervals (always available once finished).
+ * the way the timestamp chart nests their intervals, at any point of the search.
  */
 
 type Color = 'white' | 'gray' | 'black';
@@ -213,19 +213,23 @@ export class DfsSimulation implements Simulation {
   }
 
   /**
-   * The depth-first forest G_π (CLRS §20.3: the vertices and the tree edges (v.π, v)),
-   * laid out as on the timestamp chart: each vertex on the row of its depth, above the
-   * middle of its interval [d, f]. Once finished; otherwise null.
+   * The depth-first forest G_π found so far (CLRS §20.3: the discovered vertices and the
+   * tree edges (v.π, v)), laid out as on the timestamp chart: each vertex on the row of
+   * its depth, above the middle of its interval [d, f] — for a vertex still running,
+   * [d, now], as its bar on the chart runs up to the current time. Vertices not
+   * discovered yet go `aside`. Tree edges are highlighted white only once DFS has
+   * finished (until then white is the next step's).
    */
-  searchForest(): ForestDiagram | null {
-    if (!this.finished) return null;
+  searchForest(): ForestDiagram {
     return {
       places: [...this.discovery].map(([id, d]) => ({
         id,
-        column: (d + this.finish.get(id)!) / 2,
+        column: (d + (this.finish.get(id) ?? this.time)) / 2,
         row: this.depth.get(id)!,
       })),
       spine: this.edges.filter((e) => e.kind === 'tree').map((e): [NodeId, NodeId] => [e.from, e.to]),
+      aside: this.view.nodeIds().filter((id) => !this.discovery.has(id)),
+      highlightSpine: this.finished,
     };
   }
 

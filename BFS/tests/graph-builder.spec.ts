@@ -2411,19 +2411,70 @@ test.describe('algorithm simulation (DFS)', () => {
       const forestBtn = (page: Page) => page.getByRole('button', { name: 'Show as forest' });
       const layoutBtn = (page: Page) => page.getByRole('button', { name: /Auto-layout/ });
 
-      test('appears next to Finish after the last Update, even when there is a cycle', async ({ page }) => {
+      test('is offered at every Update of the run (not before), as a toggle', async ({ page }) => {
         await build(page); // with the back edge 2 → 0
-        await run(page);
-        await steps(page, 12);
         await expect(forestBtn(page)).toBeHidden();
-        await update(page); // the last step
+        await run(page);
         await expect(forestBtn(page)).toBeVisible();
-        await expect(forestBtn(page)).toBeEnabled();
-        await expect(topoBtn(page)).toBeDisabled(); // no topological order, but a forest all the same
+        await expect(forestBtn(page)).toHaveAttribute('aria-pressed', 'false');
+        await steps(page, 13);
+        await expect(forestBtn(page)).toBeVisible(); // still there at the end, cycle or not
+        await expect(topoBtn(page)).toBeDisabled();
         const [b, f] = await Promise.all([forestBtn(page).boundingBox(), finishBtn(page).boundingBox()]);
         expect(b!.x + b!.width).toBeLessThanOrEqual(f!.x);
         expect(Math.abs(b!.y - f!.y)).toBeLessThan(1);
         await expect(message(page)).toContainText('Press Show as forest, or Finish.');
+        await finishBtn(page).click();
+        await expect(forestBtn(page)).toBeHidden();
+      });
+
+      test('mid-search: the forest so far on the left, undiscovered vertices grouped on the right, growing each Update', async ({
+        page,
+      }) => {
+        await build(page);
+        await run(page);
+        await steps(page, 2); // 0 discovered at 1, then 1 at 2 (0 → 1)
+        await forestBtn(page).click();
+        await expect(forestBtn(page)).toHaveAttribute('aria-pressed', 'true');
+        await expect(message(page)).toContainText('Depth-first forest so far: 1 tree, rooted at 0.');
+        await expect(message(page)).toContainText('The 3 not discovered yet wait on the right');
+        let [p0, p1, p2, p3, p4] = await settled([0, 1, 2, 3, 4]);
+        expect(p1.y).toBeGreaterThan(p0.y + 60); // 1 under 0
+        for (const q of [p3, p4]) expect(Math.abs(q.x - p2.x)).toBeLessThan(1); // 2, 3, 4: one column…
+        expect(p2.x).toBeGreaterThan(Math.max(p0.x, p1.x) + 100); // …on the right
+        // While running, white is the next step's: the tree edge 0 → 1 is solid but not white.
+        expect((await edgeShape(0, 1)).spine).toBe(false);
+        await update(page); // 1 → 2: discovers 2
+        [p0, p1, p2, p3, p4] = await settled([0, 1, 2, 3, 4]);
+        expect(p2.y).toBeGreaterThan(p1.y + 60); // 2 joins the tree, a row below 1
+        expect(Math.abs(p2.x - p1.x)).toBeLessThan(60);
+        expect(Math.abs(p4.x - p3.x)).toBeLessThan(1); // 3 and 4 still waiting
+        expect(p3.x).toBeGreaterThan(p2.x + 100);
+        // To the end: everything joins the forest, and the tree edges turn white.
+        await steps(page, 10);
+        [p0, p1, p2, p3, p4] = await settled([0, 1, 2, 3, 4]);
+        expect(Math.abs(p3.y - p0.y)).toBeLessThan(1); // 3 roots the second tree
+        expect(Math.abs(p4.y - p1.y)).toBeLessThan(1);
+        expect((await edgeShape(0, 1)).spine).toBe(true);
+        expect((await edgeShape(0, 1)).stroke).toBe(WHITE);
+      });
+
+      test('pressing it again leaves it, with the vertices where they are', async ({ page }) => {
+        await build(page);
+        await run(page);
+        await steps(page, 3);
+        await forestBtn(page).click();
+        const placed = await settled([0, 1, 2, 3, 4]);
+        await forestBtn(page).click();
+        await expect(forestBtn(page)).toHaveAttribute('aria-pressed', 'false');
+        await expect(message(page)).toContainText('Left the forest');
+        await expect(cv.canvas).not.toHaveClass(/forest-view/);
+        await update(page);
+        const still = await settled([0, 1, 2, 3, 4]);
+        still.forEach((p, i) => {
+          expect(p.x).toBeCloseTo(placed[i].x, 0);
+          expect(p.y).toBeCloseTo(placed[i].y, 0);
+        });
       });
 
       test('arranges the trees as on the timestamp chart: rows by depth, columns by time', async ({ page }) => {

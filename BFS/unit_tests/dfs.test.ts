@@ -383,13 +383,37 @@ describe('topological sort (CLRS §20.4)', () => {
 });
 
 describe('search forest (for "Show as forest")', () => {
-  it('is only offered once DFS has finished, cycle or not', () => {
+  it('grows with the search: running vertices span [d, now]; undiscovered ones wait aside', () => {
     const sim = new DfsSimulation(g.directedView, 0); // has the back edge 2 → 0
-    sim.step();
-    expect(sim.searchForest()).toBeNull();
+    expect(sim.searchForest()).toEqual({ places: [], spine: [], aside: [0, 1, 2, 3, 4], highlightSpine: false });
+    sim.step(); // discovers 0 at time 1
+    sim.step(); // 0 → 1: discovers 1 at time 2
+    expect(sim.searchForest()).toEqual({
+      places: [
+        { id: 0, column: 1.5, row: 0 }, // [1, now = 2]
+        { id: 1, column: 2, row: 1 }, // [2, 2]
+      ],
+      spine: [[0, 1]],
+      aside: [2, 3, 4],
+      highlightSpine: false,
+    });
     runToEnd(sim);
-    expect(sim.hasCycle).toBe(true);
-    expect(sim.searchForest()).not.toBeNull();
+    expect(sim.hasCycle).toBe(true); // a forest all the same
+    expect(sim.searchForest().aside).toEqual([]);
+    expect(sim.searchForest().highlightSpine).toBe(true); // white once finished
+  });
+
+  it('a running vertex always sits within its interval so far, over its descendants', () => {
+    const sim = new DfsSimulation(g.directedView, 0);
+    while (sim.step()) {
+      const forest = sim.searchForest();
+      const at = new Map(forest.places.map((p) => [p.id, p.column]));
+      for (const [u, v] of forest.spine) {
+        const end = sim.finish.get(u) ?? sim.clock;
+        expect(at.get(v)!).toBeGreaterThanOrEqual(sim.discovery.get(u)!);
+        expect(at.get(v)!).toBeLessThanOrEqual(end);
+      }
+    }
   });
 
   it('places each vertex on the row of its depth, above the middle of its [d, f], with the tree edges', () => {
@@ -409,6 +433,8 @@ describe('search forest (for "Show as forest")', () => {
         [1, 2],
         [3, 4],
       ],
+      aside: [],
+      highlightSpine: true,
     });
   });
 
@@ -422,7 +448,7 @@ describe('search forest (for "Show as forest")', () => {
       for (let a = 0; a < 9; a++) for (let b = 0; b < 9; b++) if (a !== b && rand() < 0.2) h.addEdge(a, b);
       const sim = new DfsSimulation(h.directedView, 0);
       runToEnd(sim);
-      const forest = sim.searchForest()!;
+      const forest = sim.searchForest();
       const at = new Map(forest.places.map((p) => [p.id, p]));
       expect(forest.places).toHaveLength(9);
       for (const [u, v] of forest.spine) {

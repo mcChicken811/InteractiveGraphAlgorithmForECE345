@@ -10,10 +10,12 @@ const LOCKED_TITLE = 'Locked while the algorithm runs. Press Stop to change it.'
  *   Topological sort → (DFS, once finished) lines the vertices up in topological order
  *            as an arc diagram; greyed out when the graph has a cycle. The run goes on
  *            until Finish or Stop;
- *   Show as forest → (DFS, once finished) arranges the vertices as the depth-first forest,
- *            laid out like the timestamp chart (rows by depth, columns by time), with the
- *            tree edges white and straight. It and Topological sort switch between each
- *            other; auto-layout leaves either. The run goes on until Finish or Stop;
+ *   Show as forest → (DFS, any time while it runs) a toggle: arranges the vertices as the
+ *            depth-first forest so far, laid out like the timestamp chart (rows by depth,
+ *            columns by time), the vertices not discovered yet grouped on the right; each
+ *            Update then glides them into place. Once DFS has finished, its tree edges are
+ *            white, and it and Topological sort switch between each other. Pressing it
+ *            again, or turning auto-layout on, leaves it. The run goes on until Finish or Stop;
  *   Show as tree → (BFS, any time while it runs) a toggle: arranges the vertices as the
  *            breadth-first tree so far (rows by distance), the vertices not reached yet
  *            grouped on the right; each Update then glides newly reached vertices into the
@@ -40,7 +42,7 @@ export class AlgorithmRunner {
         el.step.addEventListener('click', () => this.step());
         el.stop.addEventListener('click', () => this.stop('Stopped.'));
         el.topo?.addEventListener('click', () => this.topologicalSort());
-        el.forest?.addEventListener('click', () => this.showForest());
+        el.forest?.addEventListener('click', () => this.toggleForest());
         el.tree?.addEventListener('click', () => this.toggleTree());
         this.updateControls();
     }
@@ -87,9 +89,11 @@ export class AlgorithmRunner {
         }
         simulation.step();
         this.show(true);
-        // The tree, if shown, grows: newly reached vertices glide into it.
+        // The tree or forest, if shown, grows: newly reached vertices glide into it.
         if (this.editor.arrangement === 'tree' && simulation.searchTree)
             this.editor.showForest(simulation.searchTree(), 'tree');
+        if (this.editor.arrangement === 'forest' && simulation.searchForest)
+            this.editor.showForest(simulation.searchForest());
     }
     /**
      * Lines the vertices up in the simulation's topological order (DFS on an acyclic graph),
@@ -105,20 +109,41 @@ export class AlgorithmRunner {
             'tree edges in white, forward edges arc above, crossed edges below. Press Finish or Stop to end.');
     }
     /**
-     * Arranges the vertices as the simulation's depth-first forest (DFS), as its timestamp
-     * chart nests them. The run is not over: Finish or Stop ends it.
+     * Arranges the vertices as the simulation's depth-first forest so far (DFS), as its
+     * timestamp chart nests them, or leaves it when it is shown. The run goes on either way.
      */
-    showForest() {
-        const forest = this.simulation?.searchForest?.() ?? null;
-        if (!forest)
+    toggleForest() {
+        const simulation = this.simulation;
+        if (!simulation?.searchForest)
             return;
+        if (this.editor.arrangement === 'forest') {
+            this.editor.showArcDiagram(null); // vertices stay where they are
+            this.updateControls();
+            this.hooks.message('Left the forest: the vertices stay where they are. Press Show as forest to arrange them again.');
+            return;
+        }
+        const forest = simulation.searchForest();
         this.editor.showForest(forest);
         this.updateControls();
         const roots = forest.places.filter((p) => p.row === 0).sort((p, q) => p.column - q.column).map((p) => p.id);
-        const trees = roots.length === 1 ? `1 tree, rooted at ${roots[0]}` : `${roots.length} trees, rooted at ${roots.join(', ')}`;
-        this.hooks.message(`Depth-first forest: ${trees}. As on the timestamp chart, each row is a depth and each vertex ` +
-            'sits above the middle of its [d, f] interval, its descendants below it. Tree edges in white; ' +
-            'the other edges curve. Press Finish or Stop to end.');
+        const trees = roots.length === 0
+            ? 'nothing discovered yet'
+            : roots.length === 1
+                ? `1 tree, rooted at ${roots[0]}`
+                : `${roots.length} trees, rooted at ${roots.join(', ')}`;
+        const waiting = forest.aside?.length ?? 0;
+        if (simulation.finished) {
+            this.hooks.message(`Depth-first forest: ${trees}. As on the timestamp chart, each row is a depth and each vertex ` +
+                'sits above the middle of its [d, f] interval, its descendants below it. Tree edges in white; ' +
+                'the other edges curve. Press Finish or Stop to end.');
+        }
+        else {
+            this.hooks.message(`Depth-first forest so far: ${trees}. As on the timestamp chart, each row is a depth and each vertex ` +
+                'sits above the middle of its [d, f] interval ([d, now] while it runs), its descendants below it. ' +
+                (waiting
+                    ? `The ${waiting} not discovered yet wait on the right; each Update brings the new ones in.`
+                    : 'Every vertex is discovered.'));
+        }
     }
     /**
      * Shows the simulation's search tree so far (BFS), or leaves it when it is shown. The
@@ -240,11 +265,11 @@ export class AlgorithmRunner {
             tree.hidden = !(this.simulation && typeof this.simulation.searchTree === 'function');
             tree.setAttribute('aria-pressed', String(this.editor.arrangement === 'tree'));
         }
-        // Show as forest: next to Finish once the simulation offers a forest.
+        // Show as forest: while the simulation has a search forest (DFS), pressed while it is shown.
         const forest = this.el.forest;
         if (forest) {
             const simulation = this.simulation;
-            forest.hidden = !(simulation?.finished && typeof simulation.searchForest === 'function');
+            forest.hidden = !(simulation && typeof simulation.searchForest === 'function');
             forest.setAttribute('aria-pressed', String(this.editor.arrangement === 'forest'));
         }
     }

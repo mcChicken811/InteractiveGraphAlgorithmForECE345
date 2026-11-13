@@ -48,8 +48,8 @@
         <button id="run-btn" class="primary" type="button">Run</button>
         <!-- DFS, after the last Update: lines the vertices up in topological order (greyed out if there is a cycle). -->
         <button id="topo-btn" type="button" hidden>Topological sort</button>
-        <!-- DFS, after the last Update: arranges the vertices as the depth-first forest, as on the timestamp chart. -->
-        <button id="forest-btn" type="button" hidden>Show as forest</button>
+        <!-- DFS, while it runs: a toggle arranging the vertices as the depth-first forest so far, as on the timestamp chart. -->
+        <button id="forest-btn" type="button" hidden aria-pressed="false">Show as forest</button>
         <!-- BFS, while it runs: a toggle arranging the vertices as the breadth-first tree so far. -->
         <button id="tree-btn" type="button" hidden aria-pressed="false">Show as tree</button>
         <button id="step-btn" class="primary" type="button" hidden>Update</button>
@@ -185,10 +185,11 @@
                   again to come back.
                 </li>
                 <li>
-                  When DFS is done, <strong>Show as forest</strong> arranges the vertices as the depth-first
-                  forest, laid out like the timestamp chart: one row per depth, each vertex above the middle of
-                  its [d, f] interval. Tree edges are white; the other edges curve. Auto-layout leaves this view
-                  too, and the two buttons switch between the views.
+                  While DFS runs, <strong>Show as forest</strong> arranges the vertices as the depth-first
+                  forest so far, laid out like the timestamp chart: one row per depth, each vertex above the
+                  middle of its [d, f] interval ([d, now] while it runs). Vertices not discovered yet wait on
+                  the right, and each Update brings new ones in. Once DFS is done, tree edges turn white and it
+                  switches with Topological sort. Press it again, or turn on Auto-layout, to leave it.
                 </li>
                 <li>
                   While any algorithm runs, <strong>hover the adjacency list or matrix</strong> to see the vertex
