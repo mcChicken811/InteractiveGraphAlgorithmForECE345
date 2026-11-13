@@ -9,10 +9,17 @@
  * from. It depends only on where the vertices are, so the border exists even when no
  * edge crosses the cut, and it always separates the two groups exactly.
  *
+ * Edges can take part too: a segment site is approximated by points sampled along it
+ * (`sampleSegment`), the usual practical stand-in for the exact Voronoi diagram of line
+ * segments (whose borders are partly parabolic). Then the territory of a side holds that
+ * side's edges as well as its vertices.
+ *
  * Each cell is computed exactly: the bounding rectangle clipped by the perpendicular
- * bisector with every other site (Sutherland–Hodgman), remembering which site produced
- * each edge of the cell. O(n²) clips, which is nothing at the sizes drawn here. Pure
- * functions, no DOM.
+ * bisector with other sites (Sutherland–Hodgman), remembering which site produced each
+ * edge of the cell. Nearby sites are found through a grid of buckets, tried in rings
+ * outwards, stopping once the next ring is more than twice as far as the cell's farthest
+ * corner — no farther bisector can reach the cell — so each cell costs about the same
+ * however many sites there are. Pure functions, no DOM.
  */
 /** A cell edge's origin: the index of the neighbouring site whose bisector it lies on, or −1 for the rectangle. */
 const RECT = -1;
@@ -22,6 +29,19 @@ const RECT = -1;
  */
 export function voronoiCells(sites, bounds) {
     const { width: w, height: h } = bounds;
+    // A grid of buckets about one site wide, so each cell only meets nearby sites.
+    const size = Math.max(8, Math.sqrt((Math.max(w, 1) * Math.max(h, 1)) / Math.max(sites.length, 1)));
+    const cols = Math.max(1, Math.ceil(w / size));
+    const rows = Math.max(1, Math.ceil(h / size));
+    const bucketOf = (p) => [
+        Math.min(cols - 1, Math.max(0, Math.floor(p.x / size))),
+        Math.min(rows - 1, Math.max(0, Math.floor(p.y / size))),
+    ];
+    const buckets = Array.from({ length: cols * rows }, () => []);
+    sites.forEach((p, j) => {
+        const [bx, by] = bucketOf(p);
+        buckets[by * cols + bx].push(j);
+    });
     return sites.map((site, i) => {
         let cell = {
             points: [
@@ -32,12 +52,62 @@ export function voronoiCells(sites, bounds) {
             ],
             edge: [RECT, RECT, RECT, RECT],
         };
-        for (let j = 0; j < sites.length && cell.points.length; j++) {
-            if (j !== i)
-                cell = clip(cell, site, sites[j], j);
+        let reach = farthest2(cell.points, site);
+        const [cx, cy] = bucketOf(site);
+        // Rings of buckets around the site's own, nearest first. Every site in ring k + 1 is at
+        // least k bucket widths away; once that is beyond twice the cell's farthest corner, no
+        // bisector with a farther site can reach the cell.
+        for (let k = 0;; k++) {
+            if (k > 0 && ((k - 1) * size) ** 2 > 4 * reach)
+                break;
+            if (cx - k < 0 && cy - k < 0 && cx + k >= cols && cy + k >= rows)
+                break; // past the grid
+            for (let by = cy - k; by <= cy + k; by++) {
+                if (by < 0 || by >= rows)
+                    continue;
+                const edgeRow = by === cy - k || by === cy + k;
+                for (let bx = cx - k; bx <= cx + k; bx += edgeRow ? 1 : 2 * k) {
+                    if (bx >= 0 && bx < cols) {
+                        for (const j of buckets[by * cols + bx]) {
+                            if (j === i)
+                                continue;
+                            const clipped = clip(cell, site, sites[j], j);
+                            if (clipped !== cell) {
+                                cell = clipped;
+                                reach = farthest2(cell.points, site);
+                            }
+                        }
+                    }
+                    if (k === 0)
+                        break;
+                }
+            }
+            if (!cell.points.length)
+                break;
         }
         return cell;
     });
+}
+/** Squared distance from `site` to the farthest of `points`. */
+function farthest2(points, site) {
+    let max = 0;
+    for (const p of points)
+        max = Math.max(max, (p.x - site.x) ** 2 + (p.y - site.y) ** 2);
+    return max;
+}
+/**
+ * Points spaced at most `step` apart strictly between p and q (not p and q themselves),
+ * standing in for the segment p–q as Voronoi sites.
+ */
+export function sampleSegment(p, q, step) {
+    const len = Math.hypot(q.x - p.x, q.y - p.y);
+    const parts = Math.ceil(len / step);
+    const points = [];
+    for (let k = 1; k < parts; k++) {
+        const t = k / parts;
+        points.push({ x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t });
+    }
+    return points;
 }
 /** Keeps the part of `cell` at least as close to `a` as to `b`; new edges get origin `label`. */
 function clip(cell, a, b, label) {
@@ -110,6 +180,51 @@ export function polygonsPath(polygons) {
 }
 export function segmentsPath(segments) {
     return segments.map(([p, q]) => `M ${round(p.x)} ${round(p.y)} L ${round(q.x)} ${round(q.y)}`).join(' ');
+}
+/**
+ * Joins segments that share endpoints into polylines, so a dashed stroke flows along the
+ * border instead of restarting its pattern at every short piece.
+ */
+export function chainSegments(segments) {
+    const key = (p) => `${Math.round(p.x * 10)},${Math.round(p.y * 10)}`;
+    const at = new Map();
+    segments.forEach(([p, q], i) => {
+        for (const k of [key(p), key(q)]) {
+            const list = at.get(k);
+            if (list)
+                list.push(i);
+            else
+                at.set(k, [i]);
+        }
+    });
+    const used = new Uint8Array(segments.length);
+    /** Extends `line` from its last point while an unused segment continues it. */
+    const extend = (line) => {
+        for (;;) {
+            const end = line[line.length - 1];
+            const next = (at.get(key(end)) ?? []).find((i) => !used[i]);
+            if (next === undefined)
+                return;
+            used[next] = 1;
+            const [p, q] = segments[next];
+            line.push(key(p) === key(end) ? q : p);
+        }
+    };
+    const lines = [];
+    segments.forEach(([p, q], i) => {
+        if (used[i])
+            return;
+        used[i] = 1;
+        const line = [p, q];
+        extend(line);
+        line.reverse();
+        extend(line);
+        lines.push(line);
+    });
+    return lines;
+}
+export function polylinesPath(lines) {
+    return lines.map((ps) => `M ${ps.map((p) => `${round(p.x)} ${round(p.y)}`).join(' L ')}`).join(' ');
 }
 function round(v) {
     return Math.round(v * 100) / 100;

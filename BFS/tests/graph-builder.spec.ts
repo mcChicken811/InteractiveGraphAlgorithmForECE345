@@ -2655,6 +2655,62 @@ test.describe("algorithm simulation (Prim's minimum spanning tree)", () => {
     expect(await inTerritory(page)).toEqual([true, true, true, false, false]);
   });
 
+  test('edges that do not cross the cut stay on their own side of the border; only crossing edges cross it', async ({
+    page,
+  }) => {
+    await build(page);
+    await run(page);
+    /** For each edge: does it stay within one territory, and which side are its ends on? */
+    const sides = () =>
+      page.evaluate(() => {
+        const region = document.querySelector<SVGPathElement>('#canvas .cut-region')!;
+        return [...document.querySelectorAll<SVGGElement>('#canvas .edge')].map((g) => {
+          const line = g.querySelector<SVGLineElement>('.edge-line')!;
+          const [x1, y1, x2, y2] = [line.x1, line.y1, line.x2, line.y2].map((l) => l.baseVal.value);
+          // Sample along the edge, staying clear of the vertex circles at its ends.
+          const len = Math.hypot(x2 - x1, y2 - y1);
+          const inside: boolean[] = [];
+          for (let d = 24; d <= len - 24; d += 4) {
+            const t = d / len;
+            inside.push(region.isPointInFill(new DOMPoint(x1 + (x2 - x1) * t, y1 + (y2 - y1) * t)));
+          }
+          const changes = inside.filter((v, i) => i > 0 && v !== inside[i - 1]).length;
+          return { edge: `${g.dataset.edgeA}-${g.dataset.edgeB}`, crossing: g.classList.contains('sim-crossing') || g.classList.contains('sim-active'), changes, first: inside[0] };
+        });
+      });
+    for (const n of [1, 2, 3, 4]) {
+      await update(page);
+      for (const e of await sides()) {
+        if (e.crossing) expect(e.changes, `${e.edge} after ${n} updates`).toBeGreaterThanOrEqual(1);
+        else expect(e.changes, `${e.edge} after ${n} updates`).toBe(0);
+      }
+    }
+    await page.getByRole('button', { name: 'Stop', exact: true }).click();
+    await page.getByRole('button', { name: 'Clear graph' }).click();
+
+    // A long edge between two queued vertices passing just below the tree's only vertex:
+    // by vertices alone, its middle is nearest to 0 and the edge would cut through the
+    // tree's territory. As a non-crossing edge, it keeps to its own side.
+    const spots: Array<[number, number]> = [
+      [400, 260],
+      [180, 400],
+      [620, 400],
+    ];
+    await build(page, {
+      spots,
+      edges: [
+        [0, 1, 1],
+        [1, 2, 1],
+      ],
+    });
+    await run(page);
+    await update(page); // tree {0}: 0 — 1 crosses the cut, 1 — 2 does not
+    const [crossing, below] = await sides();
+    expect(crossing).toMatchObject({ edge: '0-1', crossing: true });
+    expect(crossing.changes).toBeGreaterThanOrEqual(1);
+    expect(below).toMatchObject({ edge: '1-2', crossing: false, changes: 0, first: false });
+  });
+
   test('the border is there even when no edge crosses the cut', async ({ page }) => {
     const spots: Array<[number, number]> = [...S, [200, 520]];
     await build(page, { spots }); // vertex 5 has no edges

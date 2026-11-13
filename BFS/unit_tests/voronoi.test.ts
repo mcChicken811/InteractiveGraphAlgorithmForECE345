@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { polygonsPath, segmentsPath, territory, voronoiCells, type Point } from '../src/voronoi.js';
+import {
+  chainSegments,
+  polygonsPath,
+  polylinesPath,
+  sampleSegment,
+  segmentsPath,
+  territory,
+  voronoiCells,
+  type Point,
+} from '../src/voronoi.js';
 
 const BOUNDS = { width: 800, height: 600 };
 
@@ -147,5 +156,96 @@ describe('path helpers', () => {
       ]),
     ).toBe('M 0 0 L 1.23 0 L 1 1 Z');
     expect(segmentsPath([[{ x: 0, y: 0 }, { x: 2, y: 3 }]])).toBe('M 0 0 L 2 3');
+  });
+});
+
+describe('pruning (sites tried nearest first, stopping early)', () => {
+  it('still tiles the rectangle and assigns every point to its nearest site, with many sites', () => {
+    const sites = randomSites(400, 77);
+    const cells = voronoiCells(sites, BOUNDS);
+    expect(cells.reduce((sum, c) => sum + area(c.points), 0)).toBeCloseTo(800 * 600, 2);
+    for (const p of randomSites(400, 5)) {
+      const nearest = sites.reduce((best, s, i) => (dist(p, s) < dist(p, sites[best]) ? i : best), 0);
+      expect(inside(cells[nearest].points, p)).toBe(true);
+    }
+  });
+});
+
+describe('sampleSegment', () => {
+  it('spaces points at most `step` apart, strictly between the ends', () => {
+    const pts = sampleSegment({ x: 0, y: 0 }, { x: 100, y: 0 }, 14);
+    expect(pts).toHaveLength(7); // 8 parts of 12.5
+    expect(pts[0].x).toBeCloseTo(12.5);
+    expect(pts[6].x).toBeCloseTo(87.5);
+    expect(sampleSegment({ x: 0, y: 0 }, { x: 10, y: 0 }, 14)).toEqual([]);
+  });
+});
+
+describe('edges as sites (territory of vertices and the edges within each side)', () => {
+  /** Distance from p to the segment a–b. */
+  function toSegment(p: Point, a: Point, b: Point): number {
+    const [dx, dy] = [b.x - a.x, b.y - a.y];
+    const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy || 1)));
+    return dist(p, { x: a.x + dx * t, y: a.y + dy * t });
+  }
+
+  it('keeps every non-crossing edge inside its own side’s territory', () => {
+    const STEP = 14;
+    for (let seed = 1; seed <= 12; seed++) {
+      const verts = randomSites(9, seed * 31);
+      const side = new Set([0, 1, 2, 3].map((k) => (k * 2 + seed) % 9));
+      // A few random edges, crossing or not.
+      const pairs: Array<[number, number]> = [];
+      let r = seed;
+      for (let k = 0; k < 10; k++) {
+        r = (r * 16807) % 2147483647;
+        const a = r % 9;
+        r = (r * 16807) % 2147483647;
+        const b = r % 9;
+        if (a !== b) pairs.push([a, b]);
+      }
+      const nonCrossing = pairs.filter(([a, b]) => side.has(a) === side.has(b));
+      const sites = [...verts];
+      const inSet = new Set([...side]);
+      for (const [a, b] of nonCrossing) {
+        for (const p of sampleSegment(verts[a], verts[b], STEP)) {
+          if (side.has(a)) inSet.add(sites.length);
+          sites.push(p);
+        }
+      }
+      const { region } = territory(sites, inSet, BOUNDS);
+      const inRegion = (p: Point) => region.some((poly) => inside(poly, p));
+      // True distance to each side's features (its vertices and its edges).
+      const near = (p: Point, own: boolean) =>
+        Math.min(
+          ...verts.filter((_, i) => side.has(i) === own).map((v) => dist(p, v)),
+          ...nonCrossing.filter(([a]) => side.has(a) === own).map(([a, b]) => toSegment(p, verts[a], verts[b])),
+        );
+      for (const [a, b] of nonCrossing) {
+        const own = side.has(a);
+        for (let t = 0.02; t < 1; t += 0.02) {
+          const p = { x: verts[a].x + (verts[b].x - verts[a].x) * t, y: verts[a].y + (verts[b].y - verts[a].y) * t };
+          // Away from places where the other side's features come within a sampling step.
+          if (near(p, !own) < STEP) continue;
+          expect(inRegion(p)).toBe(own);
+        }
+      }
+    }
+  });
+});
+
+describe('chainSegments', () => {
+  it('joins segments that meet end to end into polylines, whatever their direction', () => {
+    const lines = chainSegments([
+      [{ x: 0, y: 0 }, { x: 10, y: 0 }],
+      [{ x: 20, y: 5 }, { x: 10, y: 0 }], // reversed
+      [{ x: 20, y: 5 }, { x: 30, y: 5 }],
+      [{ x: 100, y: 100 }, { x: 110, y: 100 }], // separate
+    ]);
+    expect(lines).toHaveLength(2);
+    const long = lines.find((l) => l.length === 4)!;
+    const xs = long.map((p) => p.x);
+    expect(xs[0] === 0 ? xs : [...xs].reverse()).toEqual([0, 10, 20, 30]);
+    expect(polylinesPath([long.length && xs[0] === 0 ? long : [...long].reverse()])).toBe('M 0 0 L 10 0 L 20 5 L 30 5');
   });
 });

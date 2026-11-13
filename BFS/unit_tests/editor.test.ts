@@ -879,23 +879,59 @@ describe('GraphEditor lock and algorithm highlight', () => {
   });
 
   it('draws a cut as one side’s Voronoi territory and its border', () => {
-    // The fixture: 0, 1, 2 in a row at x = 100, 250, 400 (y = 300); the canvas is 800 × 600.
+    // The fixture: 0, 1, 2 in a row at x = 100, 250, 400 (y = 300), joined 0 — 1 — 2; the
+    // canvas is 800 × 600.
     const region = svg.querySelector('.cut-region')!;
     const border = svg.querySelector('.cut-border')!;
+    /** The border's x coordinates (it is a vertical line here) and its vertical extent. */
+    const borderXs = () => {
+      const nums = [...border.getAttribute('d')!.matchAll(/(-?[\d.]+) (-?[\d.]+)/g)].map((m) => [Number(m[1]), Number(m[2])]);
+      return { xs: [...new Set(nums.map(([x]) => x))], ys: nums.map(([, y]) => y).sort((a, b) => a - b) };
+    };
     editor.setHighlight({ current: 1, done: [0], activeEdges: [], cut: [0] });
     expect(svg.classList.contains('has-cut')).toBe(true);
-    // 0's cell is everything left of the bisector with 1, x = 175.
+    // 0's territory is everything left of the bisector with 1, x = 175 (1 — 2 is on the
+    // other side, and farther away).
+    expect(borderXs()).toEqual({ xs: [175], ys: [0, 600] });
     expect(region.getAttribute('d')).toBe('M 0 0 L 175 0 L 175 600 L 0 600 Z');
-    expect(border.getAttribute('d')).toBe('M 175 0 L 175 600');
 
     editor.setHighlight({ current: 2, done: [0, 1], activeEdges: [], cut: [0, 1] });
-    expect(border.getAttribute('d')).toBe('M 325 0 L 325 600'); // between 1 and 2 now
+    expect(borderXs().xs).toEqual([325]); // between 1 and 2 now
 
     // The border follows a dragged vertex.
     pointer(nodeEl(2).querySelector('circle')!, 'pointerdown', 400, 300);
     pointer(svg, 'pointermove', 500, 300);
     pointer(svg, 'pointerup', 500, 300);
-    expect(border.getAttribute('d')).toBe('M 375 0 L 375 600');
+    expect(borderXs().xs).toEqual([375]);
+
+    // Non-crossing edges belong to their side: with 0 alone on its side, the edge 1 — 2
+    // (dragged down out of line) still keeps 0's territory from reaching it.
+    pointer(nodeEl(2).querySelector('circle')!, 'pointerdown', 500, 300);
+    pointer(svg, 'pointermove', 100, 500);
+    pointer(svg, 'pointerup', 100, 500);
+    editor.setHighlight({ current: 1, done: [0], activeEdges: [], cut: [0] });
+    /** Is p inside 0's territory (the region path's convex polygons)? */
+    const inTerritory = (p: { x: number; y: number }) =>
+      region
+        .getAttribute('d')!
+        .split('Z')
+        .filter((part) => part.trim())
+        .some((part) => {
+          const ps = [...part.matchAll(/(-?[\d.]+) (-?[\d.]+)/g)].map((m) => ({ x: Number(m[1]), y: Number(m[2]) }));
+          let sign = 0;
+          return ps.every((a, i) => {
+            const b = ps[(i + 1) % ps.length];
+            const cross = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+            if (Math.abs(cross) < 1e-9) return true;
+            if (!sign) sign = Math.sign(cross);
+            return Math.sign(cross) === sign;
+          });
+        });
+    // (150, 380): its nearest vertex is 0 (94 px; 1 and 2 are 128 and 130 px away), so by
+    // vertices alone it would be 0's. But the edge 1 — 2, from (250, 300) to (100, 500), is
+    // only 32 px away, and that edge does not cross the cut: the point is on its side.
+    expect(inTerritory({ x: 150, y: 380 })).toBe(false);
+    expect(inTerritory({ x: 110, y: 310 })).toBe(true); // right next to 0
 
     editor.setHighlight({ current: null, done: [0, 1, 2], activeEdges: [], cut: [0, 1, 2] }); // one side empty
     expect(svg.classList.contains('has-cut')).toBe(false);
