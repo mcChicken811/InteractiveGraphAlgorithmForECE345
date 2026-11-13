@@ -45,6 +45,7 @@ npm run test:e2e:local  # browser tests directly on this machine (uses installed
 
 Pass Playwright options after `--`, e.g. `npm run test:e2e -- --grep "edge"`.
 
+- `unit_tests/bfs.test.ts`: the BFS simulation (order, steps, highlights, messages, unreachable vertices, directed vs. undirected).
 - `unit_tests/graph.test.ts`: the `Graph` model (ids, edges, neighbors, removal).
 - `unit_tests/editor.test.ts`: `GraphEditor` interactions driven by synthetic pointer and keyboard events in a simulated DOM, including auto-layout with manually stepped animation frames.
 - `unit_tests/layout.test.ts`: `ForceLayout` behaviour:
@@ -84,7 +85,34 @@ The image tag in `docker/playwright.Dockerfile` must match the exact `@playwrigh
 | Weighted mode: **scroll over an edge** (or its weight label) | Change its weight: 15 per page of scrolling, up = more |
 | **☰** button (top-right of the canvas), or Esc to close | Show/hide two cards floating over the canvas: **How to use** (top) and **Graph representation** (below) |
 | Click a card's **title** | Collapse/expand that card; remembered in this browser |
+| **Algorithm picker + Run** (header, top right) | Start a step-by-step simulation (see below); **Update** steps, **Stop** / **Finish** end it |
 | **Adjacency list / Adjacency matrix** switch (in the ☰ panel; ← / → when focused) | Choose which representation of the graph to show |
+
+## Algorithm simulation
+
+The header's picker lists the available algorithms; for now there is one, **Breadth-first search**.
+
+- **Run** starts the simulation from the **selected node**, or from the lowest id if none is selected.
+- **Run** turns into **Update** and **Stop**. **Update** takes one step; after the last step it becomes **Finish**.
+- **Finish** and **Stop** both end the run: they clear the highlighting and release every lock.
+- **While running, the graph is locked:**
+  - **Edits are blocked:** you can't add, connect, delete or re-weight anything, and Clear is disabled. Dragging nodes and auto-layout still work.
+  - **Undirected / Directed** is locked.
+  - **Weighting:** the weighting the algorithm needs is forced and its switch is greyed out. BFS forces **Unweighted**, and Stop / Finish restore your previous choice.
+
+**BFS steps.** Each Update:
+
+1. the previous vertex is marked finished, with a **green** stroke;
+2. the next vertex from the queue becomes current, with a **white** stroke, and the edges BFS explores from it turn **white**: all of its edges when undirected, its outgoing edges when directed;
+3. its undiscovered neighbours join the queue, in ascending id order.
+
+The status message narrates each step, for example "Visiting 3: discovered 4. Queue: 2, 4." BFS runs from a single source, so vertices it can't reach stay uncoloured, and the final message counts them. On the light theme, white highlights get a thin dark outline so they stay visible.
+
+### Adding another algorithm
+
+1. Implement `Simulation` (in `src/algorithms/types.ts`). It works on a read-only `GraphView`, takes one step per `step()`, and reports `highlight()` (current vertex, finished vertices, active edges) and `describe()` (the status message).
+2. Export an `AlgorithmDefinition` from its own file: `id`, `name`, `requires` (e.g. `{ weighted: true }` for Dijkstra), and `create(view, start)`.
+3. Add it to `ALGORITHMS` in `src/algorithms/index.ts`. The picker, the locks and the drawing then work without further changes.
 
 ## Directed and undirected mode
 
@@ -209,6 +237,8 @@ Freivalds, Dogrusoz & Kikusts study this approach in *Disconnected Graph Layout 
 - `src/main.ts` — wires the editor to the stats, status message, Auto-layout toggle and the ☰ help/adjacency-list panel.
 - `src/representations.ts` — renders the adjacency list (a column of vertex boxes, then each vertex's neighbours as a joined strip of boxes) and the adjacency matrix, and the list/matrix switch (ARIA tabs). The data comes from `Graph.adjacencyList()` and `Graph.adjacencyMatrix()`.
 - `src/style.css` — styles, linked directly from `index.html`.
+- `src/algorithms/` — step-by-step algorithm simulations: `types.ts` (the `Simulation` / `AlgorithmDefinition` interfaces), `bfs.ts` (`BfsSimulation`, which also exposes `order`, `parent` and `distance`), `index.ts` (the `ALGORITHMS` registry).
+- `src/runner.ts` — `AlgorithmRunner`: the header's picker and Run / Update / Finish / Stop buttons, the locks, and passing each step's highlight to the editor.
 - `src/collapsible.ts` — collapsible cards: a title button (`aria-expanded` / `aria-controls`) shows or hides its card body, and the state is remembered in `localStorage`.
 - `src/favicon.ts` — points the favicon links at the light or dark icon to match the page's colour scheme (`prefers-color-scheme`), and updates them when it changes.
 - `icons/` — the favicon: a graph node without its number, in the page's light and dark palettes (`favicon-{light,dark}.svg`), plus 64×64 PNG fallbacks for browsers without SVG favicons (e.g. Safari). After editing an SVG, run `npm run icons` (`scripts/render-favicons.mjs`, uses the installed Chrome) to re-render the PNGs.

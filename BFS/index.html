@@ -19,6 +19,13 @@
       <h1>BFS · Graph Builder</h1>
       <span id="stats" class="stats"></span>
       <button id="clear-btn" type="button">Clear graph</button>
+      <!-- Algorithm simulation: pick a program, then Run → Update (one step) … Finish, or Stop. -->
+      <div class="run-controls" role="group" aria-label="Algorithm simulation">
+        <select id="algorithm" aria-label="Algorithm"></select>
+        <button id="run-btn" class="primary" type="button">Run</button>
+        <button id="step-btn" class="primary" type="button" hidden>Update</button>
+        <button id="stop-btn" type="button" hidden>Stop</button>
+      </div>
     </header>
 
     <main class="layout">
@@ -36,14 +43,14 @@
             <span class="state" aria-hidden="true">Off</span>
           </button>
           <!-- How edges are interpreted. They are always stored as directed arcs (first click → second click). -->
-          <fieldset class="mode-switch" aria-label="Edge type">
+          <fieldset id="direction-switch" class="mode-switch" aria-label="Edge type">
             <input type="radio" id="mode-undirected" name="edge-mode" value="undirected" checked />
             <label for="mode-undirected">Undirected</label>
             <input type="radio" id="mode-directed" name="edge-mode" value="directed" />
             <label for="mode-directed">Directed</label>
           </fieldset>
           <!-- How weights are shown. Edges always store a weight (default 0); unweighted mode hides them. -->
-          <fieldset class="mode-switch" aria-label="Edge weights">
+          <fieldset id="weight-switch" class="mode-switch" aria-label="Edge weights">
             <input type="radio" id="weights-off" name="weight-mode" value="unweighted" checked />
             <label for="weights-off">Unweighted</label>
             <input type="radio" id="weights-on" name="weight-mode" value="weighted" />
@@ -101,6 +108,11 @@
                 <li>
                   <strong>Unweighted / Weighted</strong> (top left) shows or hides edge weights (default 0). In
                   weighted mode, <strong>scroll over an edge</strong> to change its weight (up = more).
+                </li>
+                <li>
+                  <strong>Run</strong> (top right) simulates the chosen algorithm, starting from the selected
+                  node (or node 0). <strong>Update</strong> takes one step; <strong>Stop</strong> or
+                  <strong>Finish</strong> ends it. The graph is locked while it runs.
                 </li>
               </ul>
             </div>

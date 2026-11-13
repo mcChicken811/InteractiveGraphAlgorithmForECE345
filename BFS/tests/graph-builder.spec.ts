@@ -1082,6 +1082,190 @@ test.describe('favicon', () => {
   });
 });
 
+test.describe('algorithm simulation (BFS)', () => {
+  const runBtn = (page: Page) => page.getByRole('button', { name: 'Run', exact: true });
+  const updateBtn = (page: Page) => page.getByRole('button', { name: 'Update', exact: true });
+  const finishBtn = (page: Page) => page.getByRole('button', { name: 'Finish', exact: true });
+  const stopBtn = (page: Page) => page.getByRole('button', { name: 'Stop', exact: true });
+  const picker = (page: Page) => page.getByRole('combobox', { name: 'Algorithm' });
+  const weightSwitch = (page: Page) => page.getByRole('group', { name: 'Edge weights' });
+  // Playwright's toBeDisabled checks form controls, so check the radios in each switch.
+  const weightRadios = (page: Page) => weightSwitch(page).getByRole('radio');
+  const directionRadios = (page: Page) => page.getByRole('group', { name: 'Edge type' }).getByRole('radio');
+
+  /** Which nodes are current / finished, and which edges are highlighted. */
+  async function simState(page: Page) {
+    return page.evaluate(() => {
+      const ids = (sel: string) => [...document.querySelectorAll(sel)].map((e) => Number((e as HTMLElement).dataset.nodeId));
+      const edges = [...document.querySelectorAll<SVGGElement>('.edge.sim-active')].map(
+        (e) => `${e.dataset.edgeA}-${e.dataset.edgeB}`,
+      );
+      return { current: ids('.node.sim-current'), done: ids('.node.sim-done').sort(), edges: edges.sort() };
+    });
+  }
+
+  const strokeOf = (id: number) =>
+    cv.node(id).locator('circle').evaluate((c) => getComputedStyle(c).stroke);
+
+  /** Path 0 — 1 — 2 plus an isolated node 3. */
+  async function buildPathAndIsland(): Promise<void> {
+    await addTriangleNodes();
+    await cv.click(...P.d);
+    await connect(P.a, P.b);
+    await connect(P.b, P.c);
+  }
+
+  test('the header has the program picker, then Run, on the right', async ({ page }) => {
+    await expect(picker(page)).toBeVisible();
+    await expect(picker(page).locator('option')).toHaveText(['Breadth-first search']);
+    await expect(runBtn(page)).toBeVisible();
+    await expect(updateBtn(page)).toBeHidden();
+    await expect(stopBtn(page)).toBeHidden();
+    const sel = (await picker(page).boundingBox())!;
+    const run = (await runBtn(page).boundingBox())!;
+    expect(sel.x + sel.width).toBeLessThanOrEqual(run.x); // picker left of Run
+    expect(run.x + run.width).toBeGreaterThan(page.viewportSize()!.width - 40); // at the right edge
+  });
+
+  test('Run is disabled on an empty graph', async ({ page }) => {
+    await expect(runBtn(page)).toBeDisabled();
+    await cv.click(...P.a);
+    await expect(runBtn(page)).toBeEnabled();
+  });
+
+  test('Run replaces itself with Update and Stop, and locks the graph', async ({ page }) => {
+    await page.locator('label[for="weights-on"]').click(); // weighted before running
+    await buildPathAndIsland();
+    await runBtn(page).click();
+
+    await expect(runBtn(page)).toBeHidden();
+    await expect(updateBtn(page)).toBeVisible();
+    await expect(stopBtn(page)).toBeVisible();
+    await expect(picker(page)).toBeDisabled();
+    await expect(page.locator('#message')).toHaveText('BFS from 0: press Update to take the first step.');
+
+    // Forced unweighted, shown by the greyed-out switch.
+    for (const radio of await weightRadios(page).all()) await expect(radio).toBeDisabled();
+    await expect(page.getByRole('radio', { name: 'Unweighted', exact: true })).toBeChecked();
+    expect(Number(await weightSwitch(page).evaluate((el) => getComputedStyle(el).opacity))).toBeLessThan(0.6);
+    await expect(cv.edge(0, 1).locator('.edge-weight')).toBeHidden();
+    // The direction switch and Clear are locked too.
+    for (const radio of await directionRadios(page).all()) await expect(radio).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Clear graph' })).toBeDisabled();
+  });
+
+  test('Update steps through BFS: current white with its edges, finished green', async ({ page }) => {
+    await buildPathAndIsland();
+    await runBtn(page).click();
+
+    await updateBtn(page).click();
+    expect(await simState(page)).toEqual({ current: [0], done: [], edges: ['0-1'] });
+    await expect(page.locator('#message')).toHaveText('Visiting 0: discovered 1. Queue: 1.');
+    expect(await strokeOf(0)).toBe('rgb(255, 255, 255)');
+    await expect(cv.edge(0, 1).locator('.edge-line')).toHaveCSS('stroke', 'rgb(255, 255, 255)');
+
+    await updateBtn(page).click();
+    expect(await simState(page)).toEqual({ current: [1], done: [0], edges: ['0-1', '1-2'] });
+    expect(await strokeOf(0)).toBe('rgb(47, 158, 68)'); // green
+    expect(await strokeOf(1)).toBe('rgb(255, 255, 255)');
+
+    await updateBtn(page).click();
+    expect(await simState(page)).toEqual({ current: [2], done: [0, 1], edges: ['1-2'] });
+    await expect(cv.edge(0, 1).locator('.edge-line')).not.toHaveCSS('stroke', 'rgb(255, 255, 255)');
+  });
+
+  test('after the last step, Update becomes Finish; Finish ends the run and unlocks', async ({ page }) => {
+    await page.locator('label[for="weights-on"]').click();
+    await buildPathAndIsland();
+    await runBtn(page).click();
+    for (let i = 0; i < 3; i++) await updateBtn(page).click();
+    await expect(updateBtn(page)).toBeVisible();
+    await updateBtn(page).click(); // finishes vertex 2: nothing left
+
+    await expect(finishBtn(page)).toBeVisible();
+    await expect(updateBtn(page)).toBeHidden();
+    expect(await simState(page)).toEqual({ current: [], done: [0, 1, 2], edges: [] });
+    await expect(page.locator('#message')).toHaveText(
+      'BFS finished: visited 3 of 4 vertices (order 0, 1, 2). 1 not reachable from 0. Press Finish.',
+    );
+
+    await finishBtn(page).click();
+    await expect(runBtn(page)).toBeVisible();
+    await expect(finishBtn(page)).toBeHidden();
+    await expect(stopBtn(page)).toBeHidden();
+    expect(await simState(page)).toEqual({ current: [], done: [], edges: [] });
+    for (const radio of await weightRadios(page).all()) await expect(radio).toBeEnabled();
+    await expect(page.getByRole('radio', { name: 'Weighted', exact: true })).toBeChecked(); // restored
+    await expect(cv.edge(0, 1).locator('.edge-weight')).toBeVisible();
+    for (const radio of await directionRadios(page).all()) await expect(radio).toBeEnabled();
+    await expect(picker(page)).toBeEnabled();
+    await expect(page.locator('#message')).toHaveText('Finished. The graph can be edited again.');
+  });
+
+  test('Stop ends the run part-way and releases the locks', async ({ page }) => {
+    await buildPathAndIsland();
+    await runBtn(page).click();
+    await updateBtn(page).click();
+    await stopBtn(page).click();
+    await expect(runBtn(page)).toBeVisible();
+    expect(await simState(page)).toEqual({ current: [], done: [], edges: [] });
+    await expect(page.locator('#message')).toHaveText('Stopped. The graph can be edited again.');
+
+    // Editing works again.
+    await cv.click(700, 600);
+    await expect(cv.nodes).toHaveCount(5);
+  });
+
+  test('while running, clicks do not edit the graph, but nodes can be dragged', async ({ page }) => {
+    await buildPathAndIsland();
+    await runBtn(page).click();
+    await cv.click(700, 600);
+    await expect(cv.nodes).toHaveCount(4);
+    await expect(page.locator('#message')).toContainText('locked');
+    await cv.click(...mid(P.a, P.b)); // clicking an edge does not delete it
+    await expect(cv.edges).toHaveCount(2);
+    await cv.click(...P.d, 'right'); // nor does right-clicking a node
+    await expect(cv.nodes).toHaveCount(4);
+
+    await cv.drag(P.d, [700, 600]);
+    await expect(cv.node(3)).toHaveAttribute('transform', 'translate(700 600)');
+  });
+
+  test('starts from the selected node', async ({ page }) => {
+    await buildPathAndIsland();
+    await cv.click(...P.c); // select node 2
+    await runBtn(page).click();
+    await expect(page.locator('#message')).toHaveText('BFS from 2: press Update to take the first step.');
+    await updateBtn(page).click();
+    expect((await simState(page)).current).toEqual([2]);
+  });
+
+  test('directed: explores and highlights only outgoing edges', async ({ page }) => {
+    await page.locator('label[for="mode-directed"]').click();
+    await addTriangleNodes();
+    await connect(P.a, P.b); // 0 → 1
+    await connect(P.c, P.b); // 2 → 1 (cannot be followed from 1)
+    await runBtn(page).click();
+    await updateBtn(page).click(); // 0
+    expect(await simState(page)).toEqual({ current: [0], done: [], edges: ['0-1'] });
+    await expect(cv.edge(0, 1).locator('.edge-line')).toHaveCSS('marker-end', 'url("#arrow-active")');
+    await updateBtn(page).click(); // 1 — has no outgoing edges
+    expect(await simState(page)).toEqual({ current: [1], done: [0], edges: [] });
+    await updateBtn(page).click();
+    await expect(finishBtn(page)).toBeVisible();
+    await expect(page.locator('#message')).toContainText('visited 2 of 3 vertices');
+  });
+
+  test('the panel shows the unweighted representation while running', async ({ page }) => {
+    await page.locator('label[for="weights-on"]').click();
+    await buildPathAndIsland();
+    await page.getByRole('button', { name: 'Help and adjacency list' }).click();
+    await expect(page.locator('#adjacency .adj-weight')).not.toHaveCount(0);
+    await runBtn(page).click();
+    await expect(page.locator('#adjacency .adj-weight')).toHaveCount(0);
+  });
+});
+
 test.describe('on a phone-sized screen', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 

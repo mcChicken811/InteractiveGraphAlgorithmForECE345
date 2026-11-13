@@ -5,6 +5,7 @@ import { GraphEditor } from './editor.js';
 import { renderAdjacencyList, renderAdjacencyMatrix, setupTabs } from './representations.js';
 import { followColorScheme } from './favicon.js';
 import { setupCollapsible } from './collapsible.js';
+import { AlgorithmRunner } from './runner.js';
 followColorScheme();
 const svg = document.querySelector('#canvas');
 const stats = document.querySelector('#stats');
@@ -22,11 +23,13 @@ const layoutState = layoutBtn.querySelector('.state');
 const panelBtn = document.querySelector('#panel-toggle');
 const panel = document.querySelector('#info-panel');
 const graph = new Graph();
+let runner;
 function refreshPanels() {
     const n = graph.nodeCount;
     const m = graph.edgeCount;
     stats.textContent = `${n} node${n === 1 ? '' : 's'} · ${m} edge${m === 1 ? '' : 's'}`;
-    clearBtn.disabled = n === 0;
+    clearBtn.disabled = n === 0 || (runner?.running ?? false);
+    runner?.refresh();
     // The panel shows whichever reading of the graph the Undirected/Directed switch selects.
     renderAdjacencyList(adjacencyEl, graph.currentView);
     renderAdjacencyMatrix(matrixEl, graph.currentView);
@@ -65,6 +68,16 @@ const editor = new GraphEditor(svg, graph, {
     onMessage: showMessage,
 });
 clearBtn.addEventListener('click', () => editor.clear());
+// Algorithm simulation (header, top right). `runner` is declared above so refreshPanels,
+// which can run before this point, can check it.
+runner = new AlgorithmRunner(graph, editor, {
+    select: document.querySelector('#algorithm'),
+    run: document.querySelector('#run-btn'),
+    step: document.querySelector('#step-btn'),
+    stop: document.querySelector('#stop-btn'),
+    weightSwitch: document.querySelector('#weight-switch'),
+    directionSwitch: document.querySelector('#direction-switch'),
+}, { message: (text) => showMessage(text), onStateChange: refreshPanels });
 // Undirected / Directed switch: only changes how the stored arcs are interpreted.
 for (const input of modeInputs) {
     input.addEventListener('change', () => {

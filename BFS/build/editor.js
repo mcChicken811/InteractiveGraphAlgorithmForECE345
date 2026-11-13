@@ -29,6 +29,10 @@ export class GraphEditor {
     graph;
     callbacks;
     selected = null;
+    /** While an algorithm runs: no structural edits (dragging nodes is still allowed). */
+    locked = false;
+    /** Algorithm state to draw (current vertex, finished vertices, active edges). */
+    highlight = null;
     pending = null;
     cursor = null;
     /** Edge the wheel last adjusted, and the fractional weight change not yet applied to it. */
@@ -69,6 +73,30 @@ export class GraphEditor {
         this.render();
         this.changed();
         this.message('Graph cleared. Click empty space to add a node.');
+    }
+    /** The selected node, if any (e.g. the start vertex for an algorithm). */
+    get selectedNode() {
+        return this.selected;
+    }
+    get isLocked() {
+        return this.locked;
+    }
+    /**
+     * Locks the graph while an algorithm runs: clicks no longer add, connect, select or
+     * delete anything, and weights cannot be scrolled. Nodes can still be dragged.
+     */
+    setLocked(locked) {
+        if (locked === this.locked)
+            return;
+        this.locked = locked;
+        this.selected = null;
+        this.svg.classList.toggle('locked', locked);
+        this.render();
+    }
+    /** Draws an algorithm's state on the graph, or clears it with null. */
+    setHighlight(highlight) {
+        this.highlight = highlight;
+        this.render();
     }
     get directed() {
         return this.graph.directed;
@@ -185,6 +213,11 @@ export class GraphEditor {
             return;
         const p = this.toLocal(e);
         const moved = distance(p, pending.start) > DRAG_THRESHOLD;
+        if (this.locked && !(pending.kind === 'node' && pending.dragging)) {
+            if (!moved)
+                this.message('The graph is locked while the algorithm runs. Press Stop to edit it.', 'warn');
+            return;
+        }
         switch (pending.kind) {
             case 'node':
                 if (pending.dragging) {
@@ -218,7 +251,7 @@ export class GraphEditor {
      * carried over to the next wheel event on the same edge.
      */
     onWheel = (e) => {
-        if (!this.graph.weighted || e.ctrlKey)
+        if (this.locked || !this.graph.weighted || e.ctrlKey)
             return; // ctrl+wheel is the browser's zoom
         const edgeEl = e.target.closest('[data-edge-a]');
         if (!edgeEl)
@@ -261,6 +294,10 @@ export class GraphEditor {
         if (!nodeEl)
             return;
         e.preventDefault();
+        if (this.locked) {
+            this.message('The graph is locked while the algorithm runs. Press Stop to edit it.', 'warn');
+            return;
+        }
         this.deleteNode(Number(nodeEl.dataset.nodeId));
     };
     onKeyDown = (e) => {
@@ -382,6 +419,7 @@ export class GraphEditor {
                 this.edgeEls.set(key, g);
             }
             const { attrs, mid } = this.edgeGeometry(this.graph.getNode(a), this.graph.getNode(b), directed, curved);
+            g.classList.toggle('sim-active', this.isActiveEdge(a, b, directed));
             for (const el of g.querySelectorAll('.edge-hit, .edge-line'))
                 setAttrs(el, attrs);
             const weight = view.weight(a, b);
@@ -417,6 +455,8 @@ export class GraphEditor {
             }
             g.setAttribute('transform', `translate(${node.x} ${node.y})`);
             g.classList.toggle('selected', node.id === this.selected);
+            g.classList.toggle('sim-current', this.highlight?.current === node.id);
+            g.classList.toggle('sim-done', this.highlight?.done.includes(node.id) ?? false);
         }
         for (const [id, g] of this.nodeEls) {
             if (!liveNodes.has(id)) {
@@ -426,6 +466,10 @@ export class GraphEditor {
         }
         this.svg.classList.toggle('has-selection', this.selected !== null);
         this.updatePreview();
+    }
+    /** Is the edge a → b (undirected: between a and b) one the algorithm highlights? */
+    isActiveEdge(a, b, directed) {
+        return (this.highlight?.activeEdges ?? []).some(([x, y]) => (x === a && y === b) || (!directed && x === b && y === a));
     }
     /**
      * SVG attributes for an edge from a to b (see render() for the three cases), and the
@@ -512,10 +556,10 @@ export class GraphEditor {
         this.callbacks.onMessage?.(text, tone);
     }
 }
-/** Arrowhead markers for directed mode: normal, hovered (delete), and the preview line. */
+/** Arrowhead markers for directed mode: normal, hovered (delete), the preview line, and algorithm-highlighted edges. */
 function arrowDefs() {
     const defs = svgEl('defs', {});
-    for (const id of ['arrow', 'arrow-hover', 'arrow-preview']) {
+    for (const id of ['arrow', 'arrow-hover', 'arrow-preview', 'arrow-active']) {
         const marker = svgEl('marker', {
             id,
             viewBox: '0 0 10 10',

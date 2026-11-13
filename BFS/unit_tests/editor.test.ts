@@ -745,3 +745,88 @@ describe('GraphEditor weighted mode', () => {
     expect(graph.getNodes()).toEqual(nodes);
   });
 });
+
+describe('GraphEditor lock and algorithm highlight', () => {
+  beforeEach(() => {
+    addRow(3); // 0, 1, 2 at x = 100, 250, 400
+    clickNode(0);
+    clickNode(1);
+    clickNode(1);
+    clickNode(2);
+    onChange.mockClear();
+  });
+
+  it('locking clears the selection and marks the canvas', () => {
+    clickNode(0);
+    expect(editor.selectedNode).toBe(0);
+    editor.setLocked(true);
+    expect(editor.isLocked).toBe(true);
+    expect(editor.selectedNode).toBeNull();
+    expect(svg.classList.contains('locked')).toBe(true);
+  });
+
+  it('while locked, clicks add, select, connect and delete nothing', () => {
+    editor.setLocked(true);
+    clickBackground(600, 500);
+    clickNode(0);
+    clickNode(2);
+    clickOn(svg.querySelector('[data-edge-a="0"][data-edge-b="1"] .edge-hit')!, 175, 300);
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    nodeEl(2).querySelector('circle')!.dispatchEvent(event);
+
+    expect(graph.nodeCount).toBe(3);
+    expect(graph.getEdges()).toEqual([
+      [0, 1],
+      [1, 2],
+    ]);
+    expect(editor.selectedNode).toBeNull();
+    expect(event.defaultPrevented).toBe(true); // no browser menu either
+    expect(onChange).not.toHaveBeenCalled();
+    expect(lastMessage()).toEqual(['The graph is locked while the algorithm runs. Press Stop to edit it.', 'warn']);
+  });
+
+  it('while locked, nodes can still be dragged', () => {
+    editor.setLocked(true);
+    pointer(nodeEl(0).querySelector('circle')!, 'pointerdown', 100, 300);
+    pointer(svg, 'pointermove', 160, 200);
+    pointer(svg, 'pointerup', 160, 200);
+    expect(graph.getNode(0)).toMatchObject({ x: 160, y: 200 });
+  });
+
+  it('while locked, weights cannot be scrolled', () => {
+    editor.setWeighted(true);
+    editor.setLocked(true);
+    const event = new WheelEvent('wheel', { deltaY: -window.innerHeight, bubbles: true, cancelable: true });
+    svg.querySelector('[data-edge-a="0"][data-edge-b="1"] .edge-hit')!.dispatchEvent(event);
+    expect(graph.arcWeight(0, 1)).toBe(0);
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it('unlocking restores editing', () => {
+    editor.setLocked(true);
+    editor.setLocked(false);
+    clickBackground(600, 500);
+    expect(graph.nodeCount).toBe(4);
+    expect(svg.classList.contains('locked')).toBe(false);
+  });
+
+  it('draws the highlight: current, finished vertices and active edges', () => {
+    editor.setHighlight({ current: 1, done: [0], activeEdges: [[1, 0]] }); // [1,0] = the 0—1 edge (undirected)
+    expect(nodeEl(1).classList.contains('sim-current')).toBe(true);
+    expect(nodeEl(0).classList.contains('sim-done')).toBe(true);
+    expect(nodeEl(2).classList.contains('sim-current') || nodeEl(2).classList.contains('sim-done')).toBe(false);
+    expect(svg.querySelector('[data-edge-a="0"][data-edge-b="1"]')!.classList.contains('sim-active')).toBe(true);
+    expect(svg.querySelector('[data-edge-a="1"][data-edge-b="2"]')!.classList.contains('sim-active')).toBe(false);
+
+    editor.setHighlight(null);
+    expect(svg.querySelectorAll('.sim-current, .sim-done, .sim-active')).toHaveLength(0);
+  });
+
+  it('directed highlight matches the exact arc only', () => {
+    editor.setDirected(true);
+    editor.setHighlight({ current: 1, done: [], activeEdges: [[1, 0]] }); // no arc 1 → 0 exists
+    expect(svg.querySelectorAll('.sim-active')).toHaveLength(0);
+    editor.setHighlight({ current: 0, done: [], activeEdges: [[0, 1]] });
+    expect(svg.querySelector('[data-edge-a="0"][data-edge-b="1"]')!.classList.contains('sim-active')).toBe(true);
+  });
+});

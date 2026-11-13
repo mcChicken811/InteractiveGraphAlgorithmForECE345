@@ -11,6 +11,10 @@
   --edge: #7d8698;
   --danger: #e03131;
   --warn: #b35c00;
+  --sim-done: #2f9e44;
+  /* Algorithm highlight: white, with a dark outline so it stays visible on the light canvas. */
+  --sim-current: #ffffff;
+  --sim-outline: rgb(20 24 33 / 0.9);
   color-scheme: light;
 }
 
@@ -28,6 +32,9 @@
     --edge: #8a93a6;
     --danger: #ff6b6b;
     --warn: #ffb04d;
+    --sim-done: #69db7c;
+    --sim-current: #ffffff;
+    --sim-outline: rgb(0 0 0 / 0.6);
     color-scheme: dark;
   }
 }
@@ -54,6 +61,7 @@ body {
 
 .topbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 16px;
   padding: 10px 16px;
@@ -81,6 +89,37 @@ button {
   background: var(--bg);
   color: var(--text);
   cursor: pointer;
+}
+
+/* Algorithm simulation controls (header, right). */
+.run-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.run-controls select {
+  font: inherit;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.run-controls select:disabled {
+  opacity: 0.6;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 600;
+}
+
+button.primary:hover:not(:disabled) {
+  filter: brightness(1.08);
 }
 
 #clear-btn:hover:not(:disabled) {
@@ -382,6 +421,15 @@ button:disabled {
   border-radius: 8px;
   background: var(--panel);
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
+}
+
+/* Locked while an algorithm runs (e.g. BFS forces Unweighted): greyed out. */
+.mode-switch:disabled {
+  opacity: 0.45;
+}
+
+.mode-switch:disabled label {
+  cursor: not-allowed;
 }
 
 .mode-switch input {
@@ -762,4 +810,65 @@ button:disabled {
 #canvas.dragging .edge:hover .edge-line {
   stroke: var(--edge);
   stroke-dasharray: none;
+}
+
+/* ------------------------------------------------- algorithm simulation */
+
+/* Finished vertices: green stroke. */
+.node.sim-done circle {
+  stroke: var(--sim-done);
+  stroke-width: 4;
+}
+
+/* The vertex being processed: white stroke (outlined so it shows on the light canvas). */
+.node.sim-current circle {
+  stroke: var(--sim-current);
+  stroke-width: 4.5;
+  filter: drop-shadow(0 0 2px var(--sim-outline));
+}
+
+/* The edges explored from the current vertex: white. */
+.edge.sim-active .edge-line {
+  stroke: var(--sim-current);
+  stroke-width: 4;
+  stroke-dasharray: none;
+  filter: drop-shadow(0 0 1.2px var(--sim-outline));
+}
+
+.arrow-active-head {
+  fill: var(--sim-current);
+}
+
+#canvas.directed .edge.sim-active .edge-line {
+  marker-end: url(#arrow-active);
+}
+
+/* Locked: no "click to delete" hover cue on edges, and no add-node crosshair. */
+#canvas.locked {
+  cursor: default;
+}
+
+#canvas.locked .edge-hit {
+  cursor: default;
+}
+
+#canvas.locked .edge:not(.sim-active):hover .edge-line {
+  stroke: var(--edge);
+  stroke-dasharray: none;
+}
+
+#canvas.locked .edge.sim-active:hover .edge-line {
+  stroke: var(--sim-current);
+}
+
+#canvas.directed.locked .edge:not(.sim-active):hover .edge-line {
+  marker-end: url(#arrow);
+}
+
+#canvas.directed.locked .edge.sim-active:hover .edge-line {
+  marker-end: url(#arrow-active);
+}
+
+#canvas.locked .node {
+  cursor: grab;
 }

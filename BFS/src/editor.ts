@@ -1,5 +1,6 @@
 import { Graph, type NodeId } from './graph.js';
 import { ForceLayout } from './layout.js';
+import type { Highlight } from './algorithms/types.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 export const NODE_RADIUS = 20;
@@ -47,6 +48,10 @@ export interface EditorCallbacks {
  */
 export class GraphEditor {
   private selected: NodeId | null = null;
+  /** While an algorithm runs: no structural edits (dragging nodes is still allowed). */
+  private locked = false;
+  /** Algorithm state to draw (current vertex, finished vertices, active edges). */
+  private highlight: Highlight | null = null;
   private pending: Pending | null = null;
   private cursor: Point | null = null;
 
@@ -95,6 +100,33 @@ export class GraphEditor {
     this.render();
     this.changed();
     this.message('Graph cleared. Click empty space to add a node.');
+  }
+
+  /** The selected node, if any (e.g. the start vertex for an algorithm). */
+  get selectedNode(): NodeId | null {
+    return this.selected;
+  }
+
+  get isLocked(): boolean {
+    return this.locked;
+  }
+
+  /**
+   * Locks the graph while an algorithm runs: clicks no longer add, connect, select or
+   * delete anything, and weights cannot be scrolled. Nodes can still be dragged.
+   */
+  setLocked(locked: boolean): void {
+    if (locked === this.locked) return;
+    this.locked = locked;
+    this.selected = null;
+    this.svg.classList.toggle('locked', locked);
+    this.render();
+  }
+
+  /** Draws an algorithm's state on the graph, or clears it with null. */
+  setHighlight(highlight: Highlight | null): void {
+    this.highlight = highlight;
+    this.render();
   }
 
   get directed(): boolean {
@@ -222,6 +254,11 @@ export class GraphEditor {
     const p = this.toLocal(e);
     const moved = distance(p, pending.start) > DRAG_THRESHOLD;
 
+    if (this.locked && !(pending.kind === 'node' && pending.dragging)) {
+      if (!moved) this.message('The graph is locked while the algorithm runs. Press Stop to edit it.', 'warn');
+      return;
+    }
+
     switch (pending.kind) {
       case 'node':
         if (pending.dragging) {
@@ -254,7 +291,7 @@ export class GraphEditor {
    * carried over to the next wheel event on the same edge.
    */
   private onWheel = (e: WheelEvent): void => {
-    if (!this.graph.weighted || e.ctrlKey) return; // ctrl+wheel is the browser's zoom
+    if (this.locked || !this.graph.weighted || e.ctrlKey) return; // ctrl+wheel is the browser's zoom
     const edgeEl = (e.target as Element).closest<SVGGElement>('[data-edge-a]');
     if (!edgeEl) return;
     e.preventDefault();
@@ -297,6 +334,10 @@ export class GraphEditor {
     const nodeEl = (e.target as Element).closest<SVGGElement>('[data-node-id]');
     if (!nodeEl) return;
     e.preventDefault();
+    if (this.locked) {
+      this.message('The graph is locked while the algorithm runs. Press Stop to edit it.', 'warn');
+      return;
+    }
     this.deleteNode(Number(nodeEl.dataset.nodeId));
   };
 
@@ -433,6 +474,7 @@ export class GraphEditor {
         this.edgeEls.set(key, g);
       }
       const { attrs, mid } = this.edgeGeometry(this.graph.getNode(a)!, this.graph.getNode(b)!, directed, curved);
+      g.classList.toggle('sim-active', this.isActiveEdge(a, b, directed));
       for (const el of g.querySelectorAll('.edge-hit, .edge-line')) setAttrs(el, attrs);
 
       const weight = view.weight(a, b)!;
@@ -469,6 +511,8 @@ export class GraphEditor {
       }
       g.setAttribute('transform', `translate(${node.x} ${node.y})`);
       g.classList.toggle('selected', node.id === this.selected);
+      g.classList.toggle('sim-current', this.highlight?.current === node.id);
+      g.classList.toggle('sim-done', this.highlight?.done.includes(node.id) ?? false);
     }
     for (const [id, g] of this.nodeEls) {
       if (!liveNodes.has(id)) {
@@ -479,6 +523,13 @@ export class GraphEditor {
 
     this.svg.classList.toggle('has-selection', this.selected !== null);
     this.updatePreview();
+  }
+
+  /** Is the edge a → b (undirected: between a and b) one the algorithm highlights? */
+  private isActiveEdge(a: NodeId, b: NodeId, directed: boolean): boolean {
+    return (this.highlight?.activeEdges ?? []).some(
+      ([x, y]) => (x === a && y === b) || (!directed && x === b && y === a),
+    );
   }
 
   /**
@@ -578,10 +629,10 @@ export class GraphEditor {
   }
 }
 
-/** Arrowhead markers for directed mode: normal, hovered (delete), and the preview line. */
+/** Arrowhead markers for directed mode: normal, hovered (delete), the preview line, and algorithm-highlighted edges. */
 function arrowDefs(): SVGDefsElement {
   const defs = svgEl('defs', {});
-  for (const id of ['arrow', 'arrow-hover', 'arrow-preview']) {
+  for (const id of ['arrow', 'arrow-hover', 'arrow-preview', 'arrow-active']) {
     const marker = svgEl('marker', {
       id,
       viewBox: '0 0 10 10',
