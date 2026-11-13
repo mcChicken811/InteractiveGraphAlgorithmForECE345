@@ -878,6 +878,21 @@ describe('GraphEditor lock and algorithm highlight', () => {
     expect(svg.querySelectorAll('.sim-tree')).toHaveLength(0);
   });
 
+  it('crossing edges (e.g. Prim’s cut) are marked so they draw solid grey', () => {
+    const edge = (a: number, b: number) => svg.querySelector<SVGGElement>(`[data-edge-a="${a}"][data-edge-b="${b}"]`)!;
+    editor.setHighlight({
+      current: 1,
+      done: [0],
+      activeEdges: [],
+      exploredEdges: [{ from: 0, to: 1, crossing: true }],
+    });
+    expect(edge(0, 1).classList.contains('sim-crossing')).toBe(true);
+    expect(edge(0, 1).classList.contains('sim-unexplored')).toBe(false);
+    expect(edge(1, 2).classList.contains('sim-unexplored')).toBe(true); // not crossing: dashed
+    editor.setHighlight(null);
+    expect(svg.querySelectorAll('.sim-crossing')).toHaveLength(0);
+  });
+
   it('explored directed edges match the exact arc', () => {
     editor.setDirected(true);
     editor.setHighlight({ current: 0, done: [], activeEdges: [], exploredEdges: [{ from: 1, to: 0, label: 'x' }] });

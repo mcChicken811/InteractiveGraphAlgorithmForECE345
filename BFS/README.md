@@ -48,7 +48,7 @@ Pass Playwright options after `--`, e.g. `npm run test:e2e -- --grep "edge"`.
 - `unit_tests/status-bar.test.ts`: when the status bar hides and reappears (fake timers).
 - `unit_tests/queue-view.test.ts`: the queue and stack strips' contents, order, arrows, labels, reuse of elements, empty state.
 - `unit_tests/dfs.test.ts`: the DFS simulation against CLRS: discovery and finish times, edge classes, every step's message, stack snapshots, the outer loop over all vertices, and (on random graphs) the parenthesis theorem and each class's time rules. Also the topological sort: decreasing finish times, and (checked against Kahn's algorithm on random graphs) offered exactly when the graph is acyclic, with every edge pointing forward.
-- `unit_tests/prim.test.ts`: Prim's algorithm against CLRS: keys, every step's message, the tree, tie-breaking, negative weights, the unweighted view, graphs that are not connected, and (on random graphs) the same total weight as an independent Kruskal implementation.
+- `unit_tests/prim.test.ts`: Prim's algorithm against CLRS: keys, every step's message, the tree, tie-breaking, negative weights, the unweighted view, graphs that are not connected. On random graphs it checks the crossing edges against brute force, that the white edge is always a light edge, and that the total weight matches an independent Kruskal implementation.
 - `unit_tests/label-fit.test.ts`: label font shrinking.
 - `unit_tests/timeline-view.test.ts`: the timestamp chart's bars, rows, axis and now line, and expanding into the dialog and back (button, Esc, backdrop click).
 - `unit_tests/arc-diagram.test.ts`: the topological sort's row layout (centring, wrapping, room for arcs) and half-circle geometry.
@@ -222,11 +222,13 @@ A graph with *n* vertices takes exactly *n* Updates.
 
 - **Undirected only:** CLRS defines the minimum-spanning-tree problem for a connected, *undirected*, weighted graph (Chapter 21), so Run forces **Undirected** and locks it. Where arcs run both ways with different weights, the undirected edge has the smaller one.
 - **Weights:** in weighted mode Prim uses the edge weights (negative ones are fine). In unweighted mode every edge counts as 1, so any spanning tree is minimum and the result is simply a spanning tree.
+- **The cut:** between Updates, the tree's vertices *S* and the queue's vertices *V* − *S* form a cut (*S*, *V* − *S*) (CLRS §21.1). An edge *crosses* the cut when it has one end on each side, and a crossing edge of minimum weight is a *light edge*. Each queued vertex's key is the weight of its lightest edge into the tree, so the next vertex's joining edge is always a light edge. The status message counts the crossing edges and names the light edge.
 - **Colours:** the canvas always shows what the next Update will do.
-  - **White:** the vertex it will extract, and the edge that will join it to the tree.
+  - **White:** the vertex it will extract, and the light edge that will join it to the tree.
+  - **Grey (solid):** the other edges crossing the cut.
   - **Green:** vertices in the tree, and the tree's edges.
   - **Yellow:** vertices still in the queue with a finite key (an edge joins them to the tree).
-  - **Dashed:** every edge not in the tree.
+  - **Dashed:** edges with both ends outside the tree, or both inside it but not in the tree.
 - **Keys:** each vertex shows its key, ∞ until some edge reaches it from the tree. Unlike BFS and DFS, unreached vertices are not blank: every vertex is in the queue from the start, and ∞ is the value that orders it.
 - **Priority queue card:** a **Priority queue** card appears at the bottom of the ☰ panel, listing the queue as `← min  (smallest key) … (largest key)`. The front vertex has the white ring, and vertices with a finite key the yellow one. On Update the extracted vertex turns green and slides out, and vertices whose keys dropped glide to their new places. Hovering or focusing the strip shows the vertex numbers, on the canvas too.
 - **Graphs that are not connected:** CLRS assumes a connected graph, but the pseudocode still terminates. When only keys of ∞ are left, the extracted vertex has no joining edge and starts a new tree, so the result is a minimum spanning forest, one tree per connected part. The final message says so.
@@ -237,7 +239,7 @@ A graph with *n* vertices takes exactly *n* Updates.
 2. Export an `AlgorithmDefinition` from its own file: `id`, `name`, `requires` (e.g. `{ weighted: true }` for Dijkstra; DFS uses `{ weighted: false, directed: true }`; Prim uses `{ directed: false }`), and `create(view, start)`. An algorithm that reads weights but accepts either weighting sets `usesWeights: true`, which locks the weight switch at the user's choice without forcing it. By convention `highlight()` previews the *next* step: `current` is what it will process and `activeEdges` what it will travel. It may also return:
    - `labels` (vertex → text) to draw inside the vertices instead of their ids, as BFS does with distances and DFS with times; Dijkstra could do the same with tentative distances.
    - `running` (vertices drawn yellow).
-   - `exploredEdges` (`{ from, to, label?, done? }`). When present, every other edge is drawn dashed, as DFS does. `done: true` draws the edge green, as Prim does for tree edges.
+   - `exploredEdges` (`{ from, to, label?, done?, crossing? }`). When present, every other edge is drawn dashed, as DFS does. `done: true` draws the edge green, as Prim does for tree edges, and `crossing: true` draws it solid grey, as Prim does for edges crossing its cut.
    - Once finished, a simulation can also offer `topologicalSort()`, returning an `ArcDiagram` (`order`, `spine`, `below`) or null. The Topological sort button then appears next to Finish.
 3. Add it to `ALGORITHMS` in `src/algorithms/index.ts`. The picker, the locks and the drawing then work without further changes.
 

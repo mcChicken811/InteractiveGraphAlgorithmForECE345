@@ -2505,14 +2505,22 @@ test.describe("algorithm simulation (Prim's minimum spanning tree)", () => {
   const labels = (page: Page) =>
     page.locator('#canvas [data-node-id]').evaluateAll((nodes) => nodes.map((g) => g.querySelector('.sim-label')!.textContent));
 
-  /** Edge "a-b" → 'tree' (in the tree), 'next' (about to join) or 'dashed' (the rest). */
+  /** Edge "a-b" → 'tree' (in the tree), 'next' (the white light edge), 'crossing' (grey) or 'dashed' (the rest). */
   const edgeLook = (page: Page) =>
     page.locator('#canvas .edge').evaluateAll((edges) =>
       Object.fromEntries(
         edges.map((e) => {
           const g = e as SVGGElement;
           const dashed = getComputedStyle(g.querySelector('.edge-line')!).strokeDasharray !== 'none';
-          const look = g.classList.contains('sim-tree') ? 'tree' : g.classList.contains('sim-active') ? 'next' : dashed ? 'dashed' : 'plain';
+          const look = g.classList.contains('sim-tree')
+            ? 'tree'
+            : g.classList.contains('sim-active')
+              ? 'next'
+              : g.classList.contains('sim-crossing')
+                ? 'crossing'
+                : dashed
+                  ? 'dashed'
+                  : 'plain';
           return [`${g.dataset.edgeA}-${g.dataset.edgeB}`, look];
         }),
       ),
@@ -2558,7 +2566,10 @@ test.describe("algorithm simulation (Prim's minimum spanning tree)", () => {
     expect(await labels(page)).toEqual(['0', '4', '8', '∞', '∞']);
     await update(page); // 1 joins: 2 drops to 2, 3 gets 5
     expect(await labels(page)).toEqual(['0', '4', '2', '5', '∞']);
-    await expect(message(page)).toHaveText('Added 1 by edge 0 — 1 (weight 4). Lowered keys: 2 to 2, 3 to 5. Tree weight 4.');
+    await expect(message(page)).toHaveText(
+      'Added 1 by edge 0 — 1 (weight 4). Lowered keys: 2 to 2, 3 to 5. ' +
+        '3 edges cross the cut; the light edge is 1 — 2 (weight 2). Tree weight 4.',
+    );
   });
 
   test('white marks the next vertex and the edge that will join it; the tree is green, other edges dashed', async ({ page }) => {
@@ -2572,15 +2583,42 @@ test.describe("algorithm simulation (Prim's minimum spanning tree)", () => {
     expect(await strokeOf(1)).toBe(WHITE);
     expect(await strokeOf(2)).toBe(YELLOW); // has a key, still in the queue
     expect(await strokeOf(3)).not.toBe(YELLOW); // key ∞
-    expect(await edgeLook(page)).toMatchObject({ '0-1': 'next', '0-2': 'dashed', '1-2': 'dashed' });
+    expect(await edgeLook(page)).toMatchObject({ '0-1': 'next', '0-2': 'crossing', '1-2': 'dashed' });
 
     await update(page); // 1 in the tree → next: 2, by 1—2 (lighter than 0—2)
-    expect(await edgeLook(page)).toMatchObject({ '0-1': 'tree', '1-2': 'next', '0-2': 'dashed', '1-3': 'dashed' });
+    expect(await edgeLook(page)).toMatchObject({ '0-1': 'tree', '1-2': 'next', '0-2': 'crossing', '1-3': 'crossing' });
     await expect(cv.edge(0, 1).locator('.edge-line')).toHaveCSS('stroke', GREEN); // tree edges: green, solid
     await expect(cv.edge(0, 1).locator('.edge-line')).toHaveCSS('stroke-dasharray', 'none');
     await expect(cv.edge(1, 2).locator('.edge-line')).toHaveCSS('stroke', WHITE);
     expect(await strokeOf(2)).toBe(WHITE);
     expect(await strokeOf(3)).toBe(YELLOW);
+  });
+
+  test('between updates, edges crossing the cut are solid grey; the white one is the lightest of them', async ({ page }) => {
+    const GREY = 'rgb(134, 142, 150)';
+    await build(page);
+    await run(page);
+    await expect(cv.canvas.locator('.edge.sim-crossing')).toHaveCount(0); // nothing in the tree yet
+    await update(page); // tree {0}: 0—1 (4) and 0—2 (8) cross
+    await steps(page, 1); // tree {0, 1}: 0—2 (8), 1—2 (2), 1—3 (5) cross; 1—2 is the light edge
+    expect(await edgeLook(page)).toEqual({
+      '0-1': 'tree',
+      '0-2': 'crossing',
+      '1-2': 'next',
+      '1-3': 'crossing',
+      '2-3': 'dashed', // both ends outside the tree
+      '3-4': 'dashed',
+    });
+    for (const [a, b] of [
+      [0, 2],
+      [1, 3],
+    ]) {
+      await expect(cv.edge(a, b).locator('.edge-line')).toHaveCSS('stroke', GREY);
+      await expect(cv.edge(a, b).locator('.edge-line')).toHaveCSS('stroke-dasharray', 'none');
+      await expect(cv.edge(a, b).locator('.edge-line')).toHaveCSS('opacity', '1');
+    }
+    await expect(cv.edge(1, 2).locator('.edge-line')).toHaveCSS('stroke', WHITE);
+    await expect(cv.edge(2, 3).locator('.edge-line')).not.toHaveCSS('stroke-dasharray', 'none');
   });
 
   test('finishes with the minimum spanning tree and its total weight', async ({ page }) => {

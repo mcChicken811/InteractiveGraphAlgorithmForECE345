@@ -37,6 +37,19 @@ export class PrimSimulation {
             return ka === kb ? a - b : ka < kb ? -1 : 1; // (∞ − ∞ is NaN, so compare, don't subtract)
         });
     }
+    /**
+     * The edges crossing the cut (S, V − S): one end in the tree, the other still in the
+     * queue, as [tree end, queue end], in extraction order of the tree end, then by id.
+     */
+    crossingEdges() {
+        const crossing = [];
+        for (const u of this.order) {
+            for (const v of this.view.neighbors(u))
+                if (this.inQueue.has(v))
+                    crossing.push([u, v]);
+        }
+        return crossing;
+    }
     /** Sum of the tree edges' weights so far. */
     get totalWeight() {
         return this.treeEdges.reduce((sum, e) => sum + e.weight, 0);
@@ -77,7 +90,10 @@ export class PrimSimulation {
             running: queue.filter((v) => Number.isFinite(this.key.get(v))),
             activeEdges: next !== null && via !== null ? [[via, next]] : [],
             labels: Object.fromEntries([...this.key].map(([id, k]) => [id, formatKey(k)])),
-            exploredEdges: this.treeEdges.map(({ from, to }) => ({ from, to, done: true })),
+            exploredEdges: [
+                ...this.treeEdges.map(({ from, to }) => ({ from, to, done: true })),
+                ...this.crossingEdges().map(([from, to]) => ({ from, to, crossing: true })),
+            ],
         };
     }
     priorityQueueSnapshot() {
@@ -108,7 +124,17 @@ export class PrimSimulation {
         const keys = lowered.length
             ? `Lowered keys: ${lowered.map(([v, k]) => `${v} to ${k}`).join(', ')}.`
             : 'No key changed.';
-        return `${added} ${keys} Tree weight ${this.totalWeight}.`;
+        return `${added} ${keys} ${this.describeCut()} Tree weight ${this.totalWeight}.`;
+    }
+    /** The cut after this step: how many edges cross it, and the light edge (white) among them. */
+    describeCut() {
+        const crossing = this.crossingEdges().length;
+        const next = this.queued[0];
+        const via = this.parent.get(next);
+        if (crossing === 0 || via === null)
+            return `No edge crosses the cut, so ${next} will start a new tree.`;
+        const count = crossing === 1 ? '1 edge crosses' : `${crossing} edges cross`;
+        return `${count} the cut; the light edge is ${via} — ${next} (weight ${this.key.get(next)}).`;
     }
 }
 function formatKey(key) {

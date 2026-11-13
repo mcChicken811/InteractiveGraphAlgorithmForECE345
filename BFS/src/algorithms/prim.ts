@@ -34,10 +34,17 @@ import type { AlgorithmDefinition, ExploredEdge, Highlight, QueueSnapshot, Simul
  * when only keys of ∞ are left, the extracted vertex has π = NIL and starts a new tree,
  * so the result is a minimum spanning forest, one tree per connected component.
  *
+ * Between steps, the tree's vertices S and the queue's vertices V − S form a cut
+ * (S, V − S) (CLRS §21.1). An edge crosses the cut when one end is in S and the other in
+ * V − S; a crossing edge of minimum weight is a light edge. Prim's invariant — each queued
+ * vertex's key is the weight of its lightest edge into S — makes the next vertex's joining
+ * edge (v.π, v) a light edge.
+ *
  * The display shows what the next step will do: white is the vertex it will extract and
- * the edge that will join it to the tree. Vertices in the tree are green, as are the
- * tree's edges; every other edge is dashed. Vertices still in the queue with a finite key
- * (they touch the tree) are yellow. Each vertex is labelled with its key.
+ * its joining edge — the light edge. The other crossing edges are solid grey. Vertices in
+ * the tree are green, as are the tree's edges; every other edge is dashed. Vertices still
+ * in the queue with a finite key (they touch the tree) are yellow. Each vertex is labelled
+ * with its key.
  */
 export interface TreeEdge {
   from: NodeId;
@@ -95,6 +102,18 @@ export class PrimSimulation implements Simulation {
     });
   }
 
+  /**
+   * The edges crossing the cut (S, V − S): one end in the tree, the other still in the
+   * queue, as [tree end, queue end], in extraction order of the tree end, then by id.
+   */
+  crossingEdges(): Array<[NodeId, NodeId]> {
+    const crossing: Array<[NodeId, NodeId]> = [];
+    for (const u of this.order) {
+      for (const v of this.view.neighbors(u)) if (this.inQueue.has(v)) crossing.push([u, v]);
+    }
+    return crossing;
+  }
+
   /** Sum of the tree edges' weights so far. */
   get totalWeight(): number {
     return this.treeEdges.reduce((sum, e) => sum + e.weight, 0);
@@ -134,7 +153,10 @@ export class PrimSimulation implements Simulation {
       running: queue.filter((v) => Number.isFinite(this.key.get(v)!)),
       activeEdges: next !== null && via !== null ? [[via, next]] : [],
       labels: Object.fromEntries([...this.key].map(([id, k]) => [id, formatKey(k)])),
-      exploredEdges: this.treeEdges.map(({ from, to }): ExploredEdge => ({ from, to, done: true })),
+      exploredEdges: [
+        ...this.treeEdges.map(({ from, to }): ExploredEdge => ({ from, to, done: true })),
+        ...this.crossingEdges().map(([from, to]): ExploredEdge => ({ from, to, crossing: true })),
+      ],
     };
   }
 
@@ -164,7 +186,17 @@ export class PrimSimulation implements Simulation {
     const keys = lowered.length
       ? `Lowered keys: ${lowered.map(([v, k]) => `${v} to ${k}`).join(', ')}.`
       : 'No key changed.';
-    return `${added} ${keys} Tree weight ${this.totalWeight}.`;
+    return `${added} ${keys} ${this.describeCut()} Tree weight ${this.totalWeight}.`;
+  }
+
+  /** The cut after this step: how many edges cross it, and the light edge (white) among them. */
+  private describeCut(): string {
+    const crossing = this.crossingEdges().length;
+    const next = this.queued[0];
+    const via = this.parent.get(next)!;
+    if (crossing === 0 || via === null) return `No edge crosses the cut, so ${next} will start a new tree.`;
+    const count = crossing === 1 ? '1 edge crosses' : `${crossing} edges cross`;
+    return `${count} the cut; the light edge is ${via} — ${next} (weight ${this.key.get(next)}).`;
   }
 }
 

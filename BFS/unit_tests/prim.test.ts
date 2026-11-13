@@ -75,10 +75,13 @@ describe('PrimSimulation (weighted, CLRS MST-PRIM)', () => {
     const trace: string[] = [];
     while (sim.step()) trace.push(sim.describe());
     expect(trace).toEqual([
-      'Added 0 as the root of the tree. Lowered keys: 1 to 4, 2 to 8. Tree weight 0.',
-      'Added 1 by edge 0 — 1 (weight 4). Lowered keys: 2 to 2, 3 to 5. Tree weight 4.',
-      'Added 2 by edge 1 — 2 (weight 2). No key changed. Tree weight 6.', // 2—3 (9) is no better than 5
-      'Added 3 by edge 1 — 3 (weight 5). Lowered keys: 4 to 3. Tree weight 11.',
+      'Added 0 as the root of the tree. Lowered keys: 1 to 4, 2 to 8. ' +
+        '2 edges cross the cut; the light edge is 0 — 1 (weight 4). Tree weight 0.',
+      'Added 1 by edge 0 — 1 (weight 4). Lowered keys: 2 to 2, 3 to 5. ' +
+        '3 edges cross the cut; the light edge is 1 — 2 (weight 2). Tree weight 4.',
+      // 2—3 (9) is no better than 5
+      'Added 2 by edge 1 — 2 (weight 2). No key changed. 2 edges cross the cut; the light edge is 1 — 3 (weight 5). Tree weight 6.',
+      'Added 3 by edge 1 — 3 (weight 5). Lowered keys: 4 to 3. 1 edge crosses the cut; the light edge is 3 — 4 (weight 3). Tree weight 11.',
       'Prim finished: a minimum spanning tree of 4 edges, total weight 14. Press Finish.',
     ]);
   });
@@ -107,7 +110,10 @@ describe('PrimSimulation (weighted, CLRS MST-PRIM)', () => {
       running: [1, 2], // 3 and 4 still have key ∞
       activeEdges: [[0, 1]],
       labels: { 0: '0', 1: '4', 2: '8', 3: '∞', 4: '∞' },
-      exploredEdges: [],
+      exploredEdges: [
+        { from: 0, to: 1, crossing: true }, // the white one is a crossing edge too
+        { from: 0, to: 2, crossing: true },
+      ],
     });
     sim.step(); // 1 joins; 2's key drops to 2, so 2 is next, by 1—2 (not 0—2)
     expect(sim.highlight()).toMatchObject({
@@ -116,11 +122,37 @@ describe('PrimSimulation (weighted, CLRS MST-PRIM)', () => {
       running: [2, 3],
       activeEdges: [[1, 2]],
       labels: { 0: '0', 1: '4', 2: '2', 3: '5', 4: '∞' },
-      exploredEdges: [{ from: 0, to: 1, done: true }],
+      exploredEdges: [
+        { from: 0, to: 1, done: true },
+        { from: 0, to: 2, crossing: true },
+        { from: 1, to: 2, crossing: true },
+        { from: 1, to: 3, crossing: true },
+      ],
     });
     runToEnd(sim);
     expect(sim.highlight()).toMatchObject({ current: null, done: [0, 1, 2, 3, 4], running: [], activeEdges: [] });
-    expect(sim.highlight().exploredEdges).toHaveLength(4);
+    expect(sim.highlight().exploredEdges).toHaveLength(4); // the tree; nothing crosses an empty cut
+    expect(sim.highlight().exploredEdges!.every((e) => e.done)).toBe(true);
+  });
+
+  it('crossing edges are exactly those with one end in the tree; none before the first step', () => {
+    expect(sim.crossingEdges()).toEqual([]); // S is empty
+    sim.step();
+    expect(sim.crossingEdges()).toEqual([
+      [0, 1],
+      [0, 2],
+    ]);
+    sim.step();
+    expect(sim.crossingEdges()).toEqual([
+      [0, 2],
+      [1, 2],
+      [1, 3],
+    ]);
+    sim.step(); // 2 joins: 0—2 and 1—2 are now inside the tree side; 2—3 crosses
+    expect(sim.crossingEdges()).toEqual([
+      [1, 3],
+      [2, 3],
+    ]);
   });
 
   it('priority queue snapshot: smallest key first, re-ordered as keys drop', () => {
@@ -194,11 +226,15 @@ describe('PrimSimulation on a graph that is not connected', () => {
     g.addNode(70, 0); // 7, on its own
     g.addEdge(5, 6, 1);
     const sim = new PrimSimulation(weighted(g), 0);
-    for (let i = 0; i < 5; i++) sim.step(); // the first tree
+    for (let i = 0; i < 4; i++) sim.step();
+    sim.step(); // the first tree is complete
+    expect(sim.describe()).toContain('No edge crosses the cut, so 5 will start a new tree.');
+    expect(sim.crossingEdges()).toEqual([]);
     expect(sim.highlight()).toMatchObject({ current: 5, activeEdges: [], running: [] }); // key ∞: joins by no edge
     sim.step();
     expect(sim.describe()).toBe(
-      '5 has key ∞: no edge joins it to the tree, so it starts a new tree. Lowered keys: 6 to 1. Tree weight 14.',
+      '5 has key ∞: no edge joins it to the tree, so it starts a new tree. Lowered keys: 6 to 1. ' +
+        '1 edge crosses the cut; the light edge is 5 — 6 (weight 1). Tree weight 14.',
     );
     runToEnd(sim);
     expect(sim.roots).toEqual([0, 5, 7]);
@@ -221,13 +257,51 @@ describe('PrimSimulation (unweighted view)', () => {
   it('treats every edge as weight 1', () => {
     const sim = new PrimSimulation(g.undirectedView, 0);
     sim.step();
-    expect(sim.describe()).toBe('Added 0 as the root of the tree. Lowered keys: 1 to 1, 2 to 1. Tree weight 0.');
+    expect(sim.describe()).toBe(
+      'Added 0 as the root of the tree. Lowered keys: 1 to 1, 2 to 1. ' +
+        '2 edges cross the cut; the light edge is 0 — 1 (weight 1). Tree weight 0.',
+    );
     runToEnd(sim);
     expect(sim.treeEdges.every((e) => e.weight === 1)).toBe(true);
     expect(sim.totalWeight).toBe(4);
     expect(sim.describe()).toBe(
       'Prim finished: a minimum spanning tree of 4 edges, total weight 4 (every edge counts as 1). Press Finish.',
     );
+  });
+});
+
+describe('the cut (S, V − S) on random graphs', () => {
+  it('crossing edges match a brute-force check, and the white edge is always a light edge', () => {
+    let seed = 9;
+    const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let trial = 0; trial < 40; trial++) {
+      const r = new Graph();
+      const n = 2 + Math.floor(rand() * 8);
+      for (let i = 0; i < n; i++) r.addNode(i * 10, 0);
+      for (let a = 0; a < n; a++)
+        for (let b = a + 1; b < n; b++) if (rand() < 0.4) r.addEdge(a, b, Math.floor(rand() * 12) - 2);
+      const view = weighted(r);
+      const s = new PrimSimulation(view, 0);
+      do {
+        const tree = new Set(s.order);
+        const brute = view
+          .edges()
+          .filter(([a, b]) => tree.has(a) !== tree.has(b))
+          .map(([a, b]) => (tree.has(a) ? `${a}-${b}` : `${b}-${a}`))
+          .sort();
+        const crossing = s.crossingEdges();
+        expect(crossing.map(([a, b]) => `${a}-${b}`).sort()).toEqual(brute);
+        const h = s.highlight();
+        const lightest = Math.min(...crossing.map(([a, b]) => view.weight(a, b)!));
+        if (h.activeEdges.length) {
+          const [[a, b]] = h.activeEdges;
+          expect(tree.has(a) && !tree.has(b)).toBe(true); // it crosses the cut…
+          expect(view.weight(a, b)).toBe(lightest); // …with the least weight
+        } else if (tree.size > 0 && !s.finished) {
+          expect(crossing).toEqual([]); // no white edge only when nothing crosses
+        }
+      } while (s.step());
+    }
   });
 });
 

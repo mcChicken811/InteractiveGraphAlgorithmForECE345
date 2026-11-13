@@ -44,6 +44,11 @@ export interface ExploredEdge {
   label?: string;
   /** Draw the edge in the finished (green) colour, like a finished vertex (Prim: a tree edge). */
   done?: boolean;
+  /**
+   * Draw the edge solid grey: it crosses the algorithm's cut (Prim: one end in the tree,
+   * the other still in the queue). The white `activeEdges` entry may be one of these.
+   */
+  crossing?: boolean;
 }
 
 /** A queue-like structure for the side panel (BFS's queue). */

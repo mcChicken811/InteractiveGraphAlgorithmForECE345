@@ -16,6 +16,8 @@
   --sim-done: #2f9e44;
   /* Started but not finished (DFS: on the recursion stack). */
   --sim-running: #f2a900;
+  /* Edges crossing an algorithm's cut (Prim): solid grey. */
+  --sim-crossing: #868e96;
   /* Algorithm highlight: white, with a dark outline so it stays visible on the light canvas. */
   --sim-current: #ffffff;
   --sim-outline: rgb(20 24 33 / 0.9);
@@ -38,6 +40,7 @@
     --warn: #ffb04d;
     --sim-done: #69db7c;
     --sim-running: #ffd43b;
+    --sim-crossing: #868e96;
     --sim-current: #ffffff;
     --sim-outline: rgb(0 0 0 / 0.6);
     color-scheme: dark;
@@ -1071,6 +1074,13 @@ button:disabled {
   marker-end: url(#arrow-done);
 }
 
+/* Edges crossing the algorithm's cut (Prim: tree to queue): solid grey, full strength.
+   The lightest one is the white active edge, which keeps its own style. */
+.edge.sim-crossing:not(.sim-active) .edge-line {
+  stroke: var(--sim-crossing);
+  stroke-width: 3.5;
+}
+
 /* Algorithms that track explored edges (DFS): edges stay dashed and faded until explored. */
 .edge.sim-unexplored:not(.sim-active) .edge-line {
   stroke-dasharray: 7 6;
@@ -1124,6 +1134,10 @@ button:disabled {
 
 #canvas.locked .edge.sim-tree:not(.sim-active, .sim-spine):hover .edge-line {
   stroke: var(--sim-done);
+}
+
+#canvas.locked .edge.sim-crossing:not(.sim-active, .sim-spine):hover .edge-line {
+  stroke: var(--sim-crossing);
 }
 
 #canvas.directed.locked .edge.sim-tree:not(.sim-active, .sim-spine):hover .edge-line {
