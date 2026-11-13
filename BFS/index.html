@@ -46,7 +46,7 @@
           <ul id="algorithm-list" class="select-list" role="listbox" aria-label="Algorithm" hidden></ul>
         </span>
         <button id="run-btn" class="primary" type="button">Run</button>
-        <!-- DFS, after the last Update: lines the vertices up in topological order (greyed out if there is a cycle). -->
+        <!-- DFS, after the last Update: lines the vertices up in topological order (with a cycle: backward edges in red). -->
         <button id="topo-btn" type="button" hidden>Topological sort</button>
         <!-- DFS, while it runs: a toggle arranging the vertices as the depth-first forest so far, as on the timestamp chart. -->
         <button id="forest-btn" type="button" hidden aria-pressed="false">Show as forest</button>
@@ -179,10 +179,11 @@
                   edges</strong> to see which set (tree) each vertex belongs to.
                 </li>
                 <li>
-                  When DFS is done and found no backward edge (no cycle), <strong>Topological sort</strong> lines
-                  the vertices up by decreasing finish time. Tree edges run along the line in white; the other
-                  edges arc above (forward) or below (crossed). Auto-layout leaves this view; press the button
-                  again to come back.
+                  When DFS is done, <strong>Topological sort</strong> lines the vertices up by decreasing finish
+                  time. Tree edges run along the line in white; the other edges arc above (forward) or below
+                  (crossed). If DFS found a cycle there is no topological order: the backward edges, pointing
+                  right to left, arc below in red. Auto-layout leaves this view; press the button again to come
+                  back.
                 </li>
                 <li>
                   While DFS runs, <strong>Show as forest</strong> arranges the vertices as the depth-first

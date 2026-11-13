@@ -98,7 +98,7 @@ export interface StackSnapshot {
 
 /**
  * A left-to-right arrangement of the vertices with its edges drawn as an arc diagram
- * (DFS's topological sort). Edges are expected to run left to right.
+ * (DFS's topological sort). Edges are expected to run left to right, except `backward` ones.
  */
 export interface ArcDiagram {
   /** The vertices, left to right (wrapping into rows when they don't fit). */
@@ -110,6 +110,11 @@ export interface ArcDiagram {
   spine: Array<[NodeId, NodeId]>;
   /** Edges that arc below the line (DFS: cross edges); all other edges arc above. */
   below: Array<[NodeId, NodeId]>;
+  /**
+   * Edges running right to left (DFS on a cyclic graph: back edges, each closing a cycle):
+   * drawn red, arcing below the line.
+   */
+  backward?: Array<[NodeId, NodeId]>;
 }
 
 /**
@@ -194,9 +199,10 @@ export interface Simulation {
   /** The algorithm's timestamps, if it keeps them; shown as a chart in the side panel while running. */
   timestamps?(): TimestampSnapshot;
   /**
-   * Offered once finished (DFS): the vertices in topological order, as an arc diagram,
-   * or null when there is none (the graph has a cycle). Algorithms without a
-   * topological sort leave it out, and the button stays hidden.
+   * Offered once finished (DFS): the vertices in topological order, as an arc diagram
+   * (on a cyclic graph, the same line-up, with the edges that close cycles `backward`),
+   * or null when there is none to show yet. Algorithms without a topological sort leave
+   * it out, and the button stays hidden.
    */
   topologicalSort?(): ArcDiagram | null;
   /**

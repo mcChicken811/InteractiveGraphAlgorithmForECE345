@@ -47,7 +47,7 @@ Pass Playwright options after `--`, e.g. `npm run test:e2e -- --grep "edge"`.
 
 - `unit_tests/status-bar.test.ts`: when the status bar hides and reappears (fake timers).
 - `unit_tests/queue-view.test.ts`: the queue and stack strips' contents, order, arrows, labels, reuse of elements, empty state.
-- `unit_tests/dfs.test.ts`: the DFS simulation against CLRS: discovery and finish times, edge classes, every step's message, stack snapshots, the outer loop over all vertices, and (on random graphs) the parenthesis theorem and each class's time rules. Also the topological sort: decreasing finish times, and (checked against Kahn's algorithm on random graphs) offered exactly when the graph is acyclic, with every edge pointing forward.
+- `unit_tests/dfs.test.ts`: the DFS simulation against CLRS: discovery and finish times, edge classes, every step's message, stack snapshots, the outer loop over all vertices, and (on random graphs) the parenthesis theorem and each class's time rules. Also the topological sort: decreasing finish times, and (checked against Kahn's algorithm on random graphs) no backward edges exactly when the graph is acyclic, with exactly the backward edges pointing backwards.
 - `unit_tests/prim.test.ts`: Prim's algorithm against CLRS: keys, every step's message, the tree, tie-breaking, negative weights, the unweighted view, graphs that are not connected. On random graphs it checks the crossing edges against brute force, that the white edge is always a light edge, and that the total weight matches an independent Kruskal implementation.
 - `unit_tests/voronoi.test.ts`: the cut's border lies halfway between the two groups' features (within a pixel), each side holds its own vertices and non-crossing edges, contours close, and empty or full cuts behave. While moving between cuts, every step changes only a little of the territory, the territory only grows when a vertex joins, nearer points change sides sooner, a first cut grows from its vertex, and a full one floods the canvas.
 - `unit_tests/kruskal.test.ts`: the disjoint-set forest against CLRS §19.3 (union by rank, path compression). Kruskal's algorithm against CLRS: sorting, every step's message, added and skipped edges, the cut and its crossing edges, the edge list, forests and unweighted graphs. On random graphs, every added edge is a light edge crossing its cut, and the total weight matches Prim's.
@@ -219,12 +219,14 @@ A graph with *n* vertices, *m* edges and *t* trees takes *n* + *m* + *t* Updates
 
 ### Topological sort
 
-When DFS has finished, a **Topological sort** button appears next to **Finish**. CLRS's TOPOLOGICAL-SORT (§20.4) is DFS followed by listing the vertices by **decreasing finish time**. A directed graph has a topological order exactly when DFS finds no back edge (Lemma 20.11), so the button is greyed out when a backward edge was found, and its tooltip and the final message say why.
+When DFS has finished, a **Topological sort** button appears next to **Finish**. CLRS's TOPOLOGICAL-SORT (§20.4) is DFS followed by listing the vertices by **decreasing finish time**. A directed graph has a topological order exactly when DFS finds no back edge (Lemma 20.11).
+
+- **Cyclic graphs:** the button is offered all the same. It lines the vertices up the same way, by decreasing finish time. Then exactly the **backward edges** point right to left, each closing a cycle. They are drawn **red** (with red arrowheads and tags), as half circles **below** the line. A forward edge and a backward edge can join the same two vertices, but then they arc on opposite sides. The tooltip and the messages say that there is no topological order.
 
 - **Line-up:** pressing it glides the vertices into a line, left to right in that order and centred. If they don't fit across the canvas, about 88 px apart at the closest, the line continues on the next row down, like text. The line stays clear of the canvas toolbar and the status bar.
-- **Edges:** every edge now points left to right.
+- **Edges:** every edge now points left to right (on a cyclic graph, all but the red backward edges).
   - **Tree edges** are highlighted white. Between neighbouring vertices they lie straight on the centre line. A tree edge that skips over other vertices would run behind them, so it arcs above instead (still white).
-  - **Other edges** are half circles whose diameter runs from one vertex to the other: forward edges above the line, crossed edges below. Two such arcs only overlap if they join the same two vertices, which can't happen. Arcs are flattened into half ellipses where a full half circle would leave the canvas or reach the next row.
+  - **Other edges** are half circles whose diameter runs from one vertex to the other: forward edges above the line, crossed (and backward) edges below. Two such arcs only overlap if they join the same two vertices, which can't happen. Arcs are flattened into half ellipses where a full half circle would leave the canvas or reach the next row.
   - **Transitions:** edges bend smoothly from straight lines into arcs while the vertices glide into place.
 - **Auto-layout:** it is switched off, since it would move the vertices. Switching it back on leaves the line-up (the edges straighten out), but the run goes on, and pressing **Topological sort** again comes back.
 - **Ending:** the run is not over until **Finish** or **Stop**. Ending it straightens the edges and leaves the vertices where they are.
@@ -310,7 +312,7 @@ Kruskal's algorithm follows `MST-KRUSKAL(G, w)` in *Introduction to Algorithms* 
      - `done: true`: solid green (tree edges).
      - `crossing: true`: solid grey (edges crossing its cut).
      - `within: true`: dashed green (edges between tree vertices that are not tree edges).
-   - Once finished, a simulation can also offer `topologicalSort()`, returning an `ArcDiagram` (`order`, `spine`, `below`) or null. The Topological sort button then appears next to Finish.
+   - Once finished, a simulation can also offer `topologicalSort()`, returning an `ArcDiagram` (`order`, `spine`, `below`, and `backward`: right-to-left edges, drawn red) or null. The Topological sort button then appears next to Finish.
    - Likewise `searchForest()` (offered for the whole run), returning a `ForestDiagram` (`places`: each vertex's column and row; `spine`: the tree edges; `aside`: the vertices not in it yet; `highlightSpine`), puts the Show as forest toggle next to Update. The runner re-sends it after every step while it is shown.
    - `searchTree()` (BFS) works the same way for the Show as tree toggle, with `highlightSpine: false`.
 3. Add it to `ALGORITHMS` in `src/algorithms/index.ts`. The picker, the locks and the drawing then work without further changes.

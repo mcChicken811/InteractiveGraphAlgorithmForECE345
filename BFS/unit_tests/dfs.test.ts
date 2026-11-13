@@ -86,7 +86,7 @@ describe('DfsSimulation (directed, CLRS)', () => {
       '3 → 4 is a tree edge: discovered 4 at time 8. Stack: 4, 3 (top first).',
       'Finished 4 at time 9. Stack: 3 (top first).',
       'DFS finished at time 10: 5 vertices in 2 trees; 3 tree, 1 backward, 1 forward, 1 crossed edges. ' +
-        'A backward edge means a cycle, so there is no topological order. Press Show as forest, or Finish.',
+        'A backward edge means a cycle, so there is no topological order. Press Topological sort (backward edges in red), Show as forest, or Finish.',
     ]);
   });
 
@@ -334,17 +334,32 @@ describe('topological sort (CLRS §20.4)', () => {
         [3, 4],
       ],
       below: [[3, 1]],
+      backward: [],
     });
   });
 
-  it('is not available when DFS found a back edge (a cycle)', () => {
+  it('on a cyclic graph: the same line-up, with the back edges (right to left) as backward', () => {
     const sim = new DfsSimulation(g.directedView, 0); // has 2 → 0
+    sim.step();
+    expect(sim.topologicalSort()).toBeNull(); // still only once finished
     runToEnd(sim);
     expect(sim.hasCycle).toBe(true);
-    expect(sim.topologicalSort()).toBeNull();
+    expect(sim.topologicalSort()).toEqual({
+      order: [3, 4, 0, 1, 2],
+      spine: [
+        [0, 1],
+        [1, 2],
+        [3, 4],
+      ],
+      below: [[3, 1]],
+      backward: [[2, 0]],
+    });
+    expect(sim.describe()).toContain(
+      'A backward edge means a cycle, so there is no topological order. Press Topological sort (backward edges in red), Show as forest, or Finish.',
+    );
   });
 
-  it('on random graphs: exists exactly when the graph is acyclic, and every edge then points forward', () => {
+  it('on random graphs: no backward edge exactly when the graph is acyclic; exactly the backward edges point backwards', () => {
     let seed = 11;
     const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
     let acyclicSeen = 0;
@@ -370,15 +385,17 @@ describe('topological sort (CLRS §20.4)', () => {
         }
       }
       const acyclic = removed === n;
-      const sort = s.topologicalSort();
-      expect(sort !== null).toBe(acyclic); // Lemma 20.11
-      if (!sort) continue;
-      acyclicSeen++;
+      const sort = s.topologicalSort()!;
+      expect(sort.backward!.length === 0).toBe(acyclic); // Lemma 20.11
+      if (acyclic) acyclicSeen++;
       expect([...sort.order].sort((x, y) => x - y)).toEqual(r.directedView.nodeIds());
       const rank = new Map(sort.order.map((v, i) => [v, i]));
-      for (const [a, b] of r.directedView.edges()) expect(rank.get(a)!).toBeLessThan(rank.get(b)!); // Theorem 20.12
+      const backward = new Set(sort.backward!.map(([a, b]) => `${a}>${b}`));
+      // Theorem 20.12, and on a cyclic graph: an edge points right to left exactly when it is a back edge.
+      for (const [a, b] of r.directedView.edges()) expect(rank.get(a)! > rank.get(b)!).toBe(backward.has(`${a}>${b}`));
     }
     expect(acyclicSeen).toBeGreaterThan(5);
+    expect(acyclicSeen).toBeLessThan(60);
   });
 });
 

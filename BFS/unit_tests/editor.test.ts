@@ -1238,6 +1238,30 @@ describe('GraphEditor arc diagram (topological sort)', () => {
     expect(Math.max(...pathYs(3, 2))).toBeGreaterThan(rowY + 50);
   });
 
+  it('on a cyclic graph, backward edges are red and arc below the line, pointing right to left', () => {
+    clickNode(2);
+    clickNode(0); // 2 → 0 closes the cycle 0 → 1 → 2 → 0
+    editor.showArcDiagram({ ...DIAGRAM, backward: [[2, 0]] });
+    flush();
+    const rowY = graph.getNode(0)!.y;
+    const back = edgeEl(2, 0)!;
+    expect(back.classList.contains('sim-backward')).toBe(true);
+    expect(back.dataset.shape).toBe('path');
+    // Below the line, like the cross edge, though it runs the other way…
+    expect(Math.min(...pathYs(2, 0))).toBeGreaterThanOrEqual(rowY - 0.01);
+    expect(Math.max(...pathYs(2, 0))).toBeGreaterThan(rowY + 50);
+    // …from 2 (on the right) to 0 (on the left): the path starts right and ends left.
+    const d = back.querySelector('.edge-line')!.getAttribute('d')!;
+    const pathXs = [...d.matchAll(/(-?[\d.]+) (-?[\d.]+)/g)].map((m) => Number(m[1]));
+    expect(pathXs[0]).toBeGreaterThan(pathXs[pathXs.length - 1]);
+    // 0 → 2 (forward) still arcs above, and nothing else is red.
+    expect(Math.max(...pathYs(0, 2))).toBeLessThanOrEqual(rowY + 0.01);
+    expect(svg.querySelectorAll('.sim-backward')).toHaveLength(1);
+    // Leaving the line-up drops the red at once.
+    editor.showArcDiagram(null);
+    expect(svg.querySelectorAll('.sim-backward')).toHaveLength(0);
+  });
+
   it('a spine edge that skips over a vertex arcs (still highlighted) instead of running behind it', () => {
     editor.showArcDiagram({ ...DIAGRAM, spine: [...DIAGRAM.spine, [0, 2]] });
     flush();

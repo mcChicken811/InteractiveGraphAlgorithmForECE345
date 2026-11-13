@@ -50,8 +50,8 @@ const LOCKED_TITLE = 'Locked while the algorithm runs. Press Stop to change it.'
  *            weighting left as chosen but locked), then starts the simulation;
  *   Update → advances one step; after the last step it turns into Finish;
  *   Topological sort → (DFS, once finished) lines the vertices up in topological order
- *            as an arc diagram; greyed out when the graph has a cycle. The run goes on
- *            until Finish or Stop;
+ *            as an arc diagram (on a cyclic graph, the same line-up with the backward
+ *            edges in red). The run goes on until Finish or Stop;
  *   Show as forest → (DFS, any time while it runs) a toggle: arranges the vertices as the
  *            depth-first forest so far, laid out like the timestamp chart (rows by depth,
  *            columns by time), the vertices not discovered yet grouped on the right; each
@@ -144,17 +144,24 @@ export class AlgorithmRunner {
   }
 
   /**
-   * Lines the vertices up in the simulation's topological order (DFS on an acyclic graph),
-   * left to right by decreasing finish time. The run is not over: Finish or Stop ends it.
+   * Lines the vertices up in the simulation's topological order (DFS), left to right by
+   * decreasing finish time. On a cyclic graph the line-up is the same, and the backward
+   * edges, which point right to left, are red. The run is not over: Finish or Stop ends it.
    */
   topologicalSort(): void {
     const diagram = this.simulation?.topologicalSort?.() ?? null;
     if (!diagram) return;
     this.editor.showArcDiagram(diagram);
     this.updateControls();
+    const backward = diagram.backward?.length ?? 0;
     this.hooks.message(
-      `Topological order (decreasing finish time): ${diagram.order.join(', ')}. Every edge points left to right: ` +
-        'tree edges in white, forward edges arc above, crossed edges below. Press Finish or Stop to end.',
+      backward === 0
+        ? `Topological order (decreasing finish time): ${diagram.order.join(', ')}. Every edge points left to right: ` +
+            'tree edges in white, forward edges arc above, crossed edges below. Press Finish or Stop to end.'
+        : `By decreasing finish time: ${diagram.order.join(', ')}. No topological order: ` +
+            `${backward === 1 ? 'the backward edge (red) points' : `the ${backward} backward edges (red) point`} right to left, ` +
+            `${backward === 1 ? 'closing a cycle' : 'each closing a cycle'}. The rest point left to right: tree edges in white, ` +
+            'forward edges arc above, crossed and backward edges below. Press Finish or Stop to end.',
     );
   }
 
@@ -292,16 +299,15 @@ export class AlgorithmRunner {
     this.el.step.textContent = this.simulation?.finished ? 'Finish' : 'Update';
     this.el.select.disabled = running;
 
-    // Topological sort: next to Finish once the simulation offers one; greyed out (with
-    // the reason) when there is none.
+    // Topological sort: next to Finish once the simulation offers one (on a cyclic graph
+    // too: the line-up shows the backward edges in red), with a tooltip saying so.
     const topo = this.el.topo;
     if (topo) {
       const simulation = this.simulation;
-      const offered = !!simulation?.finished && typeof simulation.topologicalSort === 'function';
-      const available = offered && simulation!.topologicalSort!() !== null;
-      topo.hidden = !offered;
-      topo.disabled = offered && !available;
-      if (offered && !available) topo.title = 'No topological order: a backward edge means the graph has a cycle.';
+      const diagram = simulation?.finished ? (simulation.topologicalSort?.() ?? null) : null;
+      topo.hidden = diagram === null;
+      if (diagram?.backward?.length)
+        topo.title = 'No topological order (a backward edge means a cycle): lines the vertices up by decreasing finish time, backward edges in red.';
       else topo.removeAttribute('title');
       topo.setAttribute('aria-pressed', String(this.editor.arrangement === 'line'));
     }

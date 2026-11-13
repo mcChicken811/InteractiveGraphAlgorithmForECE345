@@ -1120,6 +1120,29 @@ button:disabled {
   marker-end: url(#arrow-done);
 }
 
+/* The topological sort's backward edges (on a cyclic graph): red, pointing right to left. */
+.edge.sim-backward .edge-line {
+  stroke: var(--danger);
+  stroke-width: 3;
+  stroke-dasharray: none;
+}
+
+.arrow-backward-head {
+  fill: var(--danger);
+}
+
+#canvas.directed .edge.sim-backward .edge-line {
+  marker-end: url(#arrow-backward);
+}
+
+.edge.sim-backward .edge-tag rect {
+  stroke: var(--danger);
+}
+
+.edge.sim-backward .edge-tag text {
+  fill: var(--danger);
+}
+
 /* An algorithm's cut (Prim: the tree and the rest), under the graph: the tree side's
    territory (its vertices' Voronoi cells) faintly green, and the border with the rest. */
 .cut {
@@ -1810,4 +1833,14 @@ button:disabled {
   .q-node > span {
     transition: none;
   }
+}
+
+/* Backward edges stay red when hovered on the locked canvas (after the hover rules above). */
+#canvas.locked .edge.sim-backward:hover .edge-line {
+  stroke: var(--danger);
+  stroke-dasharray: none;
+}
+
+#canvas.directed.locked .edge.sim-backward:hover .edge-line {
+  marker-end: url(#arrow-backward);
 }

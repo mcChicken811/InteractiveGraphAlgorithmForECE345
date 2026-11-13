@@ -197,18 +197,22 @@ export class DfsSimulation implements Simulation {
   }
 
   /**
-   * CLRS TOPOLOGICAL-SORT: once DFS is finished and found no back edge, the vertices by
-   * decreasing finish time (each finished vertex goes to the front of the list), with
-   * the tree edges as the white spine and cross edges arcing below. Otherwise null.
+   * CLRS TOPOLOGICAL-SORT: once DFS is finished, the vertices by decreasing finish time
+   * (each finished vertex goes to the front of the list), with the tree edges as the
+   * white spine and cross edges arcing below. With no back edge this is a topological
+   * order (every edge points left to right). On a cyclic graph it is the same line-up,
+   * and exactly the back edges point right to left (`backward`, drawn red). Null until
+   * DFS has finished.
    */
   topologicalSort(): ArcDiagram | null {
-    if (!this.finished || this.hasCycle || !this.view.directed) return null;
+    if (!this.finished || !this.view.directed) return null;
     const pairs = (kind: EdgeClass) =>
       this.edges.filter((e) => e.kind === kind).map((e): [NodeId, NodeId] => [e.from, e.to]);
     return {
       order: [...this.finish.keys()].sort((a, b) => this.finish.get(b)! - this.finish.get(a)!),
       spine: pairs('tree'),
       below: pairs('cross'),
+      backward: pairs('back'),
     };
   }
 
@@ -275,7 +279,8 @@ export class DfsSimulation implements Simulation {
         `${trees} ${trees === 1 ? 'tree' : 'trees'}; ${count('tree')} tree, ${count('back')} backward, ` +
         `${count('forward')} forward, ${count('cross')} crossed edges. ` +
         (this.hasCycle
-          ? 'A backward edge means a cycle, so there is no topological order. Press Show as forest, or Finish.'
+          ? 'A backward edge means a cycle, so there is no topological order. ' +
+            'Press Topological sort (backward edges in red), Show as forest, or Finish.'
           : 'No backward edge, so the graph is acyclic: press Topological sort, Show as forest, or Finish.')
       );
     }

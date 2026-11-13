@@ -2173,7 +2173,7 @@ test.describe('algorithm simulation (DFS)', () => {
     await expect(cv.canvas.locator('.edge-tag:visible')).toHaveText(['forward', 'backward', 'crossed']);
     await expect(message(page)).toHaveText(
       'DFS finished at time 10: 5 vertices in 2 trees; 3 tree, 1 backward, 1 forward, 1 crossed edges. ' +
-        'A backward edge means a cycle, so there is no topological order. Press Show as forest, or Finish.',
+        'A backward edge means a cycle, so there is no topological order. Press Topological sort (backward edges in red), Show as forest, or Finish.',
     );
   });
 
@@ -2281,12 +2281,54 @@ test.describe('algorithm simulation (DFS)', () => {
       await expect(message(page)).toContainText('No backward edge, so the graph is acyclic: press Topological sort, Show as forest, or Finish.');
     });
 
-    test('is greyed out when DFS found a backward edge (a cycle)', async ({ page }) => {
-      await runToEnd(page, ARCS, 13);
+    test('on a cyclic graph: lines the vertices up all the same, the backward edge red and below, pointing left', async ({ page }) => {
+      await runToEnd(page, ARCS, 13); // with the back edge 2 → 0
       await expect(topoBtn(page)).toBeVisible();
-      await expect(topoBtn(page)).toBeDisabled();
-      await expect(topoBtn(page)).toHaveAttribute('title', /cycle/);
-      expect(Number(await topoBtn(page).evaluate((el) => getComputedStyle(el).opacity))).toBeLessThan(0.7);
+      await expect(topoBtn(page)).toBeEnabled();
+      await expect(topoBtn(page)).toHaveAttribute('title', /backward edges in red/);
+      await topoBtn(page).click();
+      await expect(topoBtn(page)).toHaveAttribute('aria-pressed', 'true');
+      const after = await settled([3, 4, 0, 1, 2]); // decreasing finish time, as without the cycle
+      for (let i = 1; i < after.length; i++) {
+        expect(after[i].x).toBeGreaterThan(after[i - 1].x + 40);
+        expect(after[i].y).toBeCloseTo(after[0].y, 0);
+      }
+      await expect(message(page)).toHaveText(
+        'By decreasing finish time: 3, 4, 0, 1, 2. No topological order: the backward edge (red) points right to left, ' +
+          'closing a cycle. The rest point left to right: tree edges in white, forward edges arc above, ' +
+          'crossed and backward edges below. Press Finish or Stop to end.',
+      );
+      const rowY = after[0].y - (await cv.canvas.boundingBox())!.y;
+      const red = await page.evaluate(() => {
+        const probe = document.createElement('div');
+        probe.style.color = 'var(--danger)';
+        document.body.append(probe);
+        const colour = getComputedStyle(probe).color;
+        probe.remove();
+        return colour;
+      });
+      // 2 → 0: red, a half circle below the line, with its arrowhead on 0 (the left end).
+      const back = await edgeShape(2, 0);
+      expect(back).toMatchObject({ tag: 'path', spine: false, stroke: red });
+      expect(back.top).toBeGreaterThanOrEqual(rowY - 1);
+      expect(back.bottom).toBeGreaterThan(rowY + 40);
+      const ends = await cv.edge(2, 0).evaluate((g) => {
+        const d = g.querySelector('.edge-line')!.getAttribute('d')!;
+        const xs = [...d.matchAll(/(-?[\d.]+) (-?[\d.]+)/g)].map((m) => Number(m[1]));
+        return { first: xs[0], last: xs[xs.length - 1], marker: getComputedStyle(g.querySelector('.edge-line')!).markerEnd };
+      });
+      expect(ends.first).toBeGreaterThan(ends.last);
+      expect(ends.marker).toContain('arrow-backward');
+      // Its tag reads "backward", in red too.
+      await expect(cv.edge(2, 0).locator('.edge-tag text')).toHaveText('backward');
+      // 0 → 2 (forward) stays above and not red; nothing else is red.
+      const forward = await edgeShape(0, 2);
+      expect(forward.bottom).toBeLessThanOrEqual(rowY + 1);
+      expect(forward.stroke).not.toBe(red);
+      await expect(cv.canvas.locator('.edge.sim-backward')).toHaveCount(1);
+      // Leaving (pressing it again… or here, Finish) drops the red.
+      await finishBtn(page).click();
+      await expect(cv.canvas.locator('.edge.sim-backward')).toHaveCount(0);
     });
 
     test('glides the vertices into a line by decreasing finish time and turns auto-layout off', async ({ page }) => {
@@ -2419,11 +2461,11 @@ test.describe('algorithm simulation (DFS)', () => {
         await expect(forestBtn(page)).toHaveAttribute('aria-pressed', 'false');
         await steps(page, 13);
         await expect(forestBtn(page)).toBeVisible(); // still there at the end, cycle or not
-        await expect(topoBtn(page)).toBeDisabled();
+        await expect(topoBtn(page)).toBeEnabled(); // offered on a cyclic graph too
         const [b, f] = await Promise.all([forestBtn(page).boundingBox(), finishBtn(page).boundingBox()]);
         expect(b!.x + b!.width).toBeLessThanOrEqual(f!.x);
         expect(Math.abs(b!.y - f!.y)).toBeLessThan(1);
-        await expect(message(page)).toContainText('Press Show as forest, or Finish.');
+        await expect(message(page)).toContainText('Show as forest, or Finish.');
         await finishBtn(page).click();
         await expect(forestBtn(page)).toBeHidden();
       });

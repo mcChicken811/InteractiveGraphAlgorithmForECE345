@@ -72,6 +72,8 @@ interface ArcState {
   aside: Set<NodeId>;
   spine: Set<string>;
   below: Set<string>;
+  /** line: edges pointing right to left (DFS: back edges, closing cycles), drawn red. */
+  backward: Set<string>;
   /** How far arcs may bulge before running into a neighbouring row or the canvas edge. */
   maxBulge: number;
   /** Exiting: edges are straightening out; the state is dropped once they are straight. */
@@ -384,9 +386,10 @@ export class GraphEditor {
   /**
    * Shows `diagram`: the vertices glide into `order`, left to right and centred (wrapping
    * into rows, top to bottom, when they don't fit), and the edges bend into half circles
-   * whose diameter runs between their ends — above the line, or below for `diagram.below`.
-   * `spine` edges are highlighted white, and lie straight on the centre line where they join
-   * neighbouring vertices. Auto-layout is turned off, since it would move the vertices.
+   * whose diameter runs between their ends — above the line, or below for `diagram.below`
+   * and `diagram.backward` (red, pointing right to left). `spine` edges are highlighted
+   * white, and lie straight on the centre line where they join neighbouring vertices.
+   * Auto-layout is turned off, since it would move the vertices.
    *
    * null leaves the diagram: edges straighten out again, and the vertices stay where they
    * are. Turning auto-layout back on does the same.
@@ -406,7 +409,8 @@ export class GraphEditor {
       rank: new Map(diagram.order.map((id, i) => [id, i])),
       aside: new Set(),
       spine: keys(diagram.spine),
-      below: keys(diagram.below),
+      below: keys([...diagram.below, ...(diagram.backward ?? [])]),
+      backward: keys(diagram.backward ?? []),
       maxBulge: 0,
       leaving: false,
     });
@@ -436,6 +440,7 @@ export class GraphEditor {
       aside: new Set(forest.aside ?? []),
       spine: keys(forest.spine),
       below: new Set(),
+      backward: new Set(),
       maxBulge: FOREST_MAX_BULGE,
       leaving: false,
     });
@@ -867,6 +872,7 @@ export class GraphEditor {
         : this.edgeGeometry(this.graph.getNode(a)!, this.graph.getNode(b)!, directed, curved);
       g.classList.toggle('sim-active', this.isActiveEdge(a, b, directed));
       g.classList.toggle('sim-spine', arc !== null && !arc.leaving && arc.highlightSpine && arc.spine.has(key));
+      g.classList.toggle('sim-backward', arc !== null && !arc.leaving && arc.backward.has(key));
       g.classList.toggle('sim-unexplored', explored !== null && !explored.has(key));
       g.classList.toggle('sim-explored', explored?.has(key) ?? false);
       g.classList.toggle('sim-tree', explored?.get(key)?.done ?? false);
@@ -1080,7 +1086,8 @@ export class GraphEditor {
    * How far an edge bulges in an arrangement (left of its direction; negative: right), for
    * an edge `radius` (half its length) long.
    *  - line: a half circle (flattened to fit maxBulge), above the line, or below for
-   *    `below`; spine edges between neighbouring vertices lie straight on the line;
+   *    `below` (which includes the backward edges, whichever way they point); spine
+   *    edges between neighbouring vertices lie straight on the line;
    *  - forest / tree: tree edges straight; the others a flat half ellipse to the left,
    *    except edges from the tree to the vertices set aside, which only sag a little
    *    (below the line between them, so they clear the vertices of the row they leave),
@@ -1098,7 +1105,9 @@ export class GraphEditor {
       return bulge;
     }
     if (this.straightSpine(arc, a, b, key)) return 0;
-    return (arc.below.has(key) ? -1 : 1) * Math.min(radius, arc.maxBulge);
+    // Positive bulges to the left of a → b: up for an edge pointing right, down for one pointing left.
+    const rightward = (arc.rank.get(a) ?? 0) <= (arc.rank.get(b) ?? 0);
+    return (arc.below.has(key) === rightward ? -1 : 1) * Math.min(radius, arc.maxBulge);
   }
 
   /** Line arrangement: a spine edge between neighbouring vertices, which lies on the line. */
@@ -1172,10 +1181,13 @@ export class GraphEditor {
   }
 }
 
-/** Arrowhead markers for directed mode: normal, hovered (delete), the preview line, and algorithm-highlighted edges. */
+/**
+ * Arrowhead markers for directed mode: normal, hovered (delete), the preview line,
+ * algorithm-highlighted edges, and the topological sort's backward edges.
+ */
 function arrowDefs(): SVGDefsElement {
   const defs = svgEl('defs', {});
-  for (const id of ['arrow', 'arrow-hover', 'arrow-preview', 'arrow-active', 'arrow-done']) {
+  for (const id of ['arrow', 'arrow-hover', 'arrow-preview', 'arrow-active', 'arrow-done', 'arrow-backward']) {
     const marker = svgEl('marker', {
       id,
       viewBox: '0 0 10 10',
