@@ -45,6 +45,7 @@ npm run test:e2e:local  # browser tests directly on this machine (uses installed
 
 Pass Playwright options after `--`, e.g. `npm run test:e2e -- --grep "edge"`.
 
+- `unit_tests/status-bar.test.ts`: when the status bar hides and reappears (fake timers).
 - `unit_tests/queue-view.test.ts`: the queue strip's contents, order, labels, reuse of elements, empty state.
 - `unit_tests/select-menu.test.ts`: the picker's mouse and keyboard behaviour, disabling, and outside clicks.
 - `unit_tests/bfs.test.ts`: the BFS simulation (order, steps, highlights, messages, unreachable vertices, directed vs. undirected).
@@ -254,6 +255,11 @@ Freivalds, Dogrusoz & Kikusts study this approach in *Disconnected Graph Layout 
 - `src/algorithms/` — step-by-step algorithm simulations: `types.ts` (the `Simulation` / `AlgorithmDefinition` interfaces), `bfs.ts` (`BfsSimulation`, which also exposes `order`, `parent` and `distance`), `index.ts` (the `ALGORITHMS` registry).
 - `src/select-menu.ts` — `SelectMenu`: the styled program picker. It replaces a native `<select>`, whose open list the browser draws and which can't be styled or positioned (on macOS it pops up over the box). It follows the WAI-ARIA "select-only combobox" pattern: mouse, ↑/↓/Home/End/Enter/Space/Esc/Tab, and closes on an outside click. The list drops down below the box, in the page's panel style, with the option text in line with the box's text.
 - `src/queue-view.ts` — `QueueView`: the side panel's animated queue strip. Elements are reused by vertex id, and changes are animated with the FLIP technique (record positions, update, play from the old positions).
+- `src/status-bar.ts` — `StatusBar`: every status message goes through `show(text, tone)`.
+  - **Hiding:** 5 s after the last message, with the pointer neither on the bar nor near it, the bar slides slowly down out of view.
+  - **Revealing:** a new message, or the pointer coming near the bottom edge where the bar hides (or a tap there), slides it quickly back.
+  - **Staying up:** it stays up while hovered or approached.
+  - **Reduced motion:** with "reduce motion" on, it hides and shows instantly.
 - `src/runner.ts` — `AlgorithmRunner`: the header's picker and Run / Update / Finish / Stop buttons, the locks, and passing each step's highlight to the editor.
 - `src/collapsible.ts` — collapsible cards: a title button (`aria-expanded` / `aria-controls`) shows or hides its card body, and the state is remembered in `localStorage`.
 - `src/favicon.ts` — points the favicon links at the light or dark icon to match the page's colour scheme (`prefers-color-scheme`), and updates them when it changes.

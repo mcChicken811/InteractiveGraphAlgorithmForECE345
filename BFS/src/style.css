@@ -354,6 +354,8 @@ button:disabled {
   position: relative;
   flex: 1;
   min-width: 0;
+  /* The status bar slides out of view below the bottom edge. */
+  overflow: hidden;
   background-color: var(--bg);
   background-image: radial-gradient(var(--grid) 1px, transparent 1px);
   background-size: 24px 24px;
@@ -382,8 +384,23 @@ button:disabled {
   border: 1px solid var(--border);
   color: var(--muted);
   font-size: 14px;
-  pointer-events: none;
   text-align: center;
+  /* Shown/hidden by src/status-bar.ts. Revealing is quick… */
+  translate: 0 0;
+  transition: translate 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* …hiding is a slow, smooth slide down past the bottom edge. */
+.message.is-hidden {
+  translate: 0 calc(100% + 24px);
+  transition: translate 0.9s cubic-bezier(0.45, 0, 0.55, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message,
+  .message.is-hidden {
+    transition: none;
+  }
 }
 
 .message[data-tone='warn'] {

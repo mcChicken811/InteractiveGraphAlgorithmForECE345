@@ -8,6 +8,7 @@ import { setupCollapsible } from './collapsible.js';
 import { AlgorithmRunner } from './runner.js';
 import { SelectMenu } from './select-menu.js';
 import { QueueView } from './queue-view.js';
+import { StatusBar } from './status-bar.js';
 followColorScheme();
 const svg = document.querySelector('#canvas');
 const stats = document.querySelector('#stats');
@@ -61,9 +62,11 @@ function placePanel() {
 }
 window.addEventListener('resize', placePanel);
 setupTabs(document.querySelector('.rep-tabs'));
+// Every status message goes through the status bar, which also slides itself out of view
+// when idle and back in when needed.
+const statusBar = new StatusBar(messageEl, document.querySelector('.canvas-wrap'));
 function showMessage(text, tone = 'info') {
-    messageEl.textContent = text;
-    messageEl.dataset.tone = tone;
+    statusBar.show(text, tone);
 }
 const editor = new GraphEditor(svg, graph, {
     onChange: refreshPanels,

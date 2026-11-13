@@ -1693,6 +1693,110 @@ test.describe('BFS distance labels', () => {
   });
 });
 
+test.describe('status bar (auto-hiding message box)', () => {
+  const bar = (page: Page) => page.locator('#message');
+
+  /** Where the bar is relative to the canvas: 'shown' (fully inside), 'hidden' (fully below), or 'moving'. */
+  const position = (page: Page) =>
+    page.evaluate(() => {
+      const b = document.querySelector('#message')!.getBoundingClientRect();
+      const c = document.querySelector('#canvas')!.getBoundingClientRect();
+      if (b.bottom <= c.bottom - 8) return 'shown';
+      if (b.top >= c.bottom) return 'hidden';
+      return 'moving';
+    });
+
+  test.beforeEach(async ({ page }) => {
+    // Control the 5 s countdown; the slide animations still run in real time.
+    await page.clock.install();
+    await page.goto('index.html');
+  });
+
+  test('slides down out of view after 5 s without a new message', async ({ page }) => {
+    await expect.poll(() => position(page)).toBe('shown');
+    await page.clock.runFor(4900);
+    await expect.poll(() => position(page)).toBe('shown');
+    await page.clock.runFor(200);
+    await expect(bar(page)).toHaveClass(/is-hidden/);
+    await expect.poll(() => position(page), { timeout: 3000 }).toBe('hidden');
+    // Out of view, without making the page scroll.
+    expect(await page.evaluate(() => document.documentElement.scrollHeight - document.documentElement.clientHeight)).toBe(0);
+    await expect(bar(page)).toHaveText('Click empty space to add a node.'); // the text is kept
+  });
+
+  test('hides slowly and reappears quickly', async ({ page }) => {
+    const durations = await bar(page).evaluate((el) => {
+      const shown = getComputedStyle(el).transitionDuration;
+      el.classList.add('is-hidden');
+      const hiding = getComputedStyle(el).transitionDuration;
+      el.classList.remove('is-hidden');
+      return { shown: parseFloat(shown), hiding: parseFloat(hiding) };
+    });
+    expect(durations.hiding).toBeGreaterThanOrEqual(0.6); // slow…
+    expect(durations.shown).toBeLessThanOrEqual(0.3); // …quick back
+    expect(await bar(page).evaluate((el) => getComputedStyle(el).transitionTimingFunction)).toContain('cubic-bezier');
+  });
+
+  test('a new message brings it back', async ({ page }) => {
+    await page.clock.runFor(5100);
+    await expect.poll(() => position(page), { timeout: 3000 }).toBe('hidden');
+    await cv.click(...P.a);
+    await expect(bar(page)).toHaveText('Added node 0.');
+    await expect(bar(page)).not.toHaveClass(/is-hidden/);
+    await expect.poll(() => position(page), { timeout: 1000 }).toBe('shown');
+  });
+
+  test('moving the mouse near where it hid brings it back, and it stays while the mouse is near', async ({ page }) => {
+    await page.clock.runFor(5100);
+    await expect.poll(() => position(page), { timeout: 3000 }).toBe('hidden');
+
+    await cv.move(300, 300); // far from the bottom: nothing happens
+    await expect(bar(page)).toHaveClass(/is-hidden/);
+
+    const c = (await cv.canvas.boundingBox())!;
+    await page.mouse.move(c.x + c.width / 2, c.y + c.height - 10); // just above where it hid
+    await expect(bar(page)).not.toHaveClass(/is-hidden/);
+    await expect.poll(() => position(page), { timeout: 1000 }).toBe('shown');
+
+    await page.clock.runFor(10_000); // still near: stays up
+    await expect(bar(page)).not.toHaveClass(/is-hidden/);
+
+    await cv.move(300, 300); // move away: hides 5 s later
+    await page.clock.runFor(5100);
+    await expect(bar(page)).toHaveClass(/is-hidden/);
+  });
+
+  test('stays up while hovered, and hides 5 s after the mouse leaves', async ({ page }) => {
+    await bar(page).hover();
+    await page.clock.runFor(15_000);
+    await expect(bar(page)).not.toHaveClass(/is-hidden/);
+    await cv.move(300, 300);
+    await page.clock.runFor(4900);
+    await expect(bar(page)).not.toHaveClass(/is-hidden/);
+    await page.clock.runFor(200);
+    await expect(bar(page)).toHaveClass(/is-hidden/);
+  });
+
+  test('every part of the app reports through it (e.g. BFS steps)', async ({ page }) => {
+    await cv.click(...P.a);
+    await page.clock.runFor(5100);
+    await expect(bar(page)).toHaveClass(/is-hidden/);
+    await page.getByRole('button', { name: 'Run', exact: true }).click();
+    await expect(bar(page)).toHaveText('BFS from 0. Queue: 0. Press Update to pop 0.');
+    await expect(bar(page)).not.toHaveClass(/is-hidden/);
+  });
+
+  test.describe('with reduced motion', () => {
+    test.use({ reducedMotion: 'reduce' });
+
+    test('hides and shows without sliding', async ({ page }) => {
+      expect(await bar(page).evaluate((el) => getComputedStyle(el).transitionDuration)).toBe('0s');
+      await page.clock.runFor(5100);
+      await expect.poll(() => position(page)).toBe('hidden');
+    });
+  });
+});
+
 test.describe('on a phone-sized screen', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 
