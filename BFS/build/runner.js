@@ -14,6 +14,10 @@ const LOCKED_TITLE = 'Locked while the algorithm runs. Press Stop to change it.'
  *            laid out like the timestamp chart (rows by depth, columns by time), with the
  *            tree edges white and straight. It and Topological sort switch between each
  *            other; auto-layout leaves either. The run goes on until Finish or Stop;
+ *   Show as tree → (BFS, any time while it runs) a toggle: arranges the vertices as the
+ *            breadth-first tree so far (rows by distance), the vertices not reached yet
+ *            grouped on the right; each Update then glides newly reached vertices into the
+ *            tree. Pressing it again, or turning auto-layout on, leaves it;
  *   Stop / Finish → ends the run, clears the highlighting and releases every lock
  *            (restoring the weighting and direction that were selected before).
  */
@@ -37,6 +41,7 @@ export class AlgorithmRunner {
         el.stop.addEventListener('click', () => this.stop('Stopped.'));
         el.topo?.addEventListener('click', () => this.topologicalSort());
         el.forest?.addEventListener('click', () => this.showForest());
+        el.tree?.addEventListener('click', () => this.toggleTree());
         this.updateControls();
     }
     get running() {
@@ -82,6 +87,9 @@ export class AlgorithmRunner {
         }
         simulation.step();
         this.show(true);
+        // The tree, if shown, grows: newly reached vertices glide into it.
+        if (this.editor.arrangement === 'tree' && simulation.searchTree)
+            this.editor.showForest(simulation.searchTree(), 'tree');
     }
     /**
      * Lines the vertices up in the simulation's topological order (DFS on an acyclic graph),
@@ -111,6 +119,28 @@ export class AlgorithmRunner {
         this.hooks.message(`Depth-first forest: ${trees}. As on the timestamp chart, each row is a depth and each vertex ` +
             'sits above the middle of its [d, f] interval, its descendants below it. Tree edges in white; ' +
             'the other edges curve. Press Finish or Stop to end.');
+    }
+    /**
+     * Shows the simulation's search tree so far (BFS), or leaves it when it is shown. The
+     * run goes on either way.
+     */
+    toggleTree() {
+        const simulation = this.simulation;
+        if (!simulation?.searchTree)
+            return;
+        if (this.editor.arrangement === 'tree') {
+            this.editor.showArcDiagram(null); // vertices stay where they are
+            this.updateControls();
+            this.hooks.message('Left the tree: the vertices stay where they are. Press Show as tree to arrange them again.');
+            return;
+        }
+        const tree = simulation.searchTree();
+        this.editor.showForest(tree, 'tree');
+        this.updateControls();
+        const waiting = tree.aside?.length ?? 0;
+        this.hooks.message('Breadth-first tree so far: each row is a distance from the start, which is on top; each vertex hangs ' +
+            'from the vertex it was discovered from. ' +
+            (waiting ? `The ${waiting} not reached yet wait on the right; each Update brings the new ones into the tree.` : 'Every vertex is in it.'));
     }
     /** Ends the run and releases every lock. */
     stop(message = 'Stopped.') {
@@ -203,6 +233,12 @@ export class AlgorithmRunner {
             else
                 topo.removeAttribute('title');
             topo.setAttribute('aria-pressed', String(this.editor.arrangement === 'line'));
+        }
+        // Show as tree: while the simulation has a search tree (BFS), pressed while it is shown.
+        const tree = this.el.tree;
+        if (tree) {
+            tree.hidden = !(this.simulation && typeof this.simulation.searchTree === 'function');
+            tree.setAttribute('aria-pressed', String(this.editor.arrangement === 'tree'));
         }
         // Show as forest: next to Finish once the simulation offers a forest.
         const forest = this.el.forest;

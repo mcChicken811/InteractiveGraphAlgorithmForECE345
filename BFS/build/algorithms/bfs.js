@@ -16,6 +16,11 @@
  * Vertices are labelled with their shortest-path length from the source as soon as they
  * are discovered (BFS discovers every vertex at its final distance).
  *
+ * `searchTree()` gives the breadth-first tree found so far, for "Show as tree": each
+ * vertex on the row of its distance, laid out as a tidy tree (children left to right in
+ * discovery order, each parent centred over its children), and the vertices not reached
+ * yet set aside.
+ *
  * Right after creation the source is the only vertex in the queue, so it is already
  * white. A source with n reachable vertices finishes after exactly n steps; vertices not
  * reachable from it are never discovered.
@@ -89,6 +94,44 @@ export class BfsSimulation {
             exploredEdges: [...this.parent]
                 .filter((entry) => entry[1] !== null)
                 .map(([v, u]) => ({ from: u, to: v })),
+        };
+    }
+    /**
+     * The breadth-first tree G_π so far (CLRS §20.2), as a tidy tree: rows by distance from
+     * the source; leaves two column units apart, in the order a depth-first walk of the tree
+     * meets them (children in discovery order); each parent centred over its first and last
+     * child. Undiscovered vertices go `aside`. Tree edges are not highlighted white (white
+     * is the next step's), but are straight; every other edge curves.
+     */
+    searchTree() {
+        const children = new Map();
+        for (const [v, u] of this.parent) {
+            if (u === null)
+                continue;
+            children.set(u, [...(children.get(u) ?? []), v]);
+        }
+        const places = [];
+        let slot = 0;
+        const place = (v) => {
+            const kids = children.get(v) ?? [];
+            let column;
+            if (kids.length === 0)
+                column = 2 * slot++;
+            else {
+                const cols = kids.map(place);
+                column = (cols[0] + cols[cols.length - 1]) / 2;
+            }
+            places.push({ id: v, column, row: this.distance.get(v) });
+            return column;
+        };
+        place(this.source);
+        return {
+            places,
+            spine: [...this.parent]
+                .filter((entry) => entry[1] !== null)
+                .map(([v, u]) => [u, v]),
+            aside: this.view.nodeIds().filter((id) => !this.discovered.has(id)),
+            highlightSpine: false,
         };
     }
     queueSnapshot() {

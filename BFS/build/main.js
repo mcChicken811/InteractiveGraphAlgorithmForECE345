@@ -130,6 +130,7 @@ runner = new AlgorithmRunner(graph, editor, {
     stop: document.querySelector('#stop-btn'),
     topo: document.querySelector('#topo-btn'),
     forest: document.querySelector('#forest-btn'),
+    tree: document.querySelector('#tree-btn'),
     weightSwitch: document.querySelector('#weight-switch'),
     directionSwitch: document.querySelector('#direction-switch'),
     queueCard: document.querySelector('#queue-card'),
@@ -167,6 +168,9 @@ layoutBtn.addEventListener('click', () => {
     }
     else if (leaving === 'forest') {
         showMessage('Auto-layout on: left the forest. Press Show as forest to arrange the vertices as trees again.');
+    }
+    else if (leaving === 'tree') {
+        showMessage('Auto-layout on: left the tree. Press Show as tree to arrange the vertices as a tree again.');
     }
 });
 // Hamburger menu. The panel floats over the canvas and stays open while editing, so the

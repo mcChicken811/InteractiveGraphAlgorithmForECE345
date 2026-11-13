@@ -71,6 +71,9 @@ export interface ForestLayoutOptions {
   maxUnit: number;
   /** Tallest a row may be (px). */
   maxRowHeight: number;
+  /** The x range the vertex centres may use (default: padX in from each side). */
+  left?: number;
+  right?: number;
 }
 
 export const FOREST_DEFAULTS: ForestLayoutOptions = { padX: 56, padTop: 80, padBottom: 96, maxUnit: 72, maxRowHeight: 120 };
@@ -93,16 +96,53 @@ export function forestLayout(places: readonly ForestPlace[], bounds: Bounds, opt
   const columns = places.map((p) => p.column);
   const [first, last] = [Math.min(...columns), Math.max(...columns)];
   const rows = Math.max(...places.map((p) => p.row)) + 1;
-  const usableX = Math.max(0, bounds.width - 2 * o.padX);
+  const left = o.left ?? o.padX;
+  const right = o.right ?? bounds.width - o.padX;
+  const usableX = Math.max(0, right - left);
   const unit = last > first ? Math.min(o.maxUnit, usableX / (last - first)) : 0;
   const usableY = Math.max(0, bounds.height - o.padTop - o.padBottom);
   const rowHeight = Math.min(o.maxRowHeight, usableY / rows);
   const top = o.padTop + (usableY - rowHeight * rows) / 2;
   const centre = (first + last) / 2;
   return places.map((p) => ({
-    x: bounds.width / 2 + (p.column - centre) * unit,
+    x: (left + right) / 2 + (p.column - centre) * unit,
     y: top + rowHeight * (p.row + 0.5),
   }));
+}
+
+/** Space between the vertices of the group set aside (centre to centre), and before it. */
+export const ASIDE_GAP = 64;
+export const ASIDE_MARGIN = 56;
+
+/**
+ * A tree (laid out as forestLayout does) on the left, and the vertices `aside` (BFS: not
+ * reached yet) in a compact group on the right: a grid, column by column, at ASIDE_GAP
+ * px, vertically centred. With nothing aside, the tree has the whole width.
+ */
+export function treeLayout(
+  places: readonly ForestPlace[],
+  aside: number,
+  bounds: Bounds,
+  options: Partial<ForestLayoutOptions> = {},
+): { tree: Point[]; aside: Point[] } {
+  const o = { ...FOREST_DEFAULTS, ...options };
+  if (aside === 0) return { tree: forestLayout(places, bounds, o), aside: [] };
+  const usableY = Math.max(0, bounds.height - o.padTop - o.padBottom);
+  const perColumn = Math.max(1, Math.floor(usableY / ASIDE_GAP) + 1);
+  const columns = Math.ceil(aside / perColumn);
+  const rows = Math.min(aside, perColumn);
+  // The group's columns, rightmost at the right pad; never more than half the width.
+  const right = bounds.width - o.padX;
+  const groupLeft = Math.max(bounds.width / 2, right - (columns - 1) * ASIDE_GAP);
+  const gapX = columns > 1 ? (right - groupLeft) / (columns - 1) : 0;
+  const top = o.padTop + (usableY - (rows - 1) * ASIDE_GAP) / 2;
+  const group: Point[] = [];
+  for (let i = 0; i < aside; i++) {
+    const [c, r] = [Math.floor(i / perColumn), i % perColumn];
+    group.push({ x: groupLeft + c * gapX, y: top + r * ASIDE_GAP });
+  }
+  const tree = forestLayout(places, bounds, { ...o, right: Math.max(o.padX, groupLeft - ASIDE_MARGIN - ASIDE_GAP / 2) });
+  return { tree, aside: group };
 }
 
 export interface ArcPath {

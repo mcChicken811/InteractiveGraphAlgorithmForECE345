@@ -189,6 +189,52 @@ describe('BfsSimulation (undirected)', () => {
   });
 });
 
+describe('search tree (for "Show as tree")', () => {
+  it('lays G_π out as a tidy tree: rows by distance, leaves 2 apart, parents centred over their children', () => {
+    const sim = new BfsSimulation(g.undirectedView, 0);
+    // Only the source so far; everything else waits aside.
+    expect(sim.searchTree()).toEqual({
+      places: [{ id: 0, column: 0, row: 0 }],
+      spine: [],
+      aside: [1, 2, 3, 4],
+      highlightSpine: false,
+    });
+    sim.step(); // 0 discovers 1 and 2
+    sim.step(); // 1 discovers 3
+    const tree = sim.searchTree();
+    const at = Object.fromEntries(tree.places.map((p) => [p.id, [p.column, p.row]]));
+    // 3 is 1's only child (a leaf at slot 0), 2 the next leaf (slot 1); 1 sits over 3, 0 between 1 and 2.
+    expect(at).toEqual({ 0: [1, 0], 1: [0, 1], 2: [2, 1], 3: [0, 2] });
+    expect(tree.spine).toEqual([
+      [0, 1],
+      [0, 2],
+      [1, 3],
+    ]);
+    expect(tree.aside).toEqual([4]); // isolated: never reached
+  });
+
+  it('on random graphs: every child is one row below its parent, and rows never share a column', () => {
+    for (let seed = 1; seed <= 30; seed++) {
+      const h = new Graph();
+      let s = seed;
+      const rand = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+      for (let i = 0; i < 10; i++) h.addNode(0, 0);
+      for (let a = 0; a < 10; a++) for (let b = a + 1; b < 10; b++) if (rand() < 0.2) h.addEdge(a, b);
+      const sim = new BfsSimulation(h.undirectedView, 0);
+      while (sim.step()) {
+        const tree = sim.searchTree();
+        const at = new Map(tree.places.map((p) => [p.id, p]));
+        for (const [u, v] of tree.spine) expect(at.get(v)!.row).toBe(at.get(u)!.row + 1);
+        const rows = new Map<number, number[]>();
+        for (const p of tree.places) rows.set(p.row, [...(rows.get(p.row) ?? []), p.column]);
+        for (const cols of rows.values()) expect(new Set(cols).size).toBe(cols.length);
+        expect(tree.places.length + tree.aside!.length).toBe(10);
+        for (const p of tree.places) expect(p.row).toBe(sim.distance.get(p.id));
+      }
+    }
+  });
+});
+
 describe('BfsSimulation (directed)', () => {
   it('follows arcs only forwards, and highlights only out-edges', () => {
     const sim = new BfsSimulation(g.directedView, 0);

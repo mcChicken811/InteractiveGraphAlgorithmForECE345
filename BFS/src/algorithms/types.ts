@@ -118,6 +118,13 @@ export interface ForestDiagram {
   places: Array<{ id: NodeId; column: number; row: number }>;
   /** Tree edges: straight, from parent down to child, highlighted white. All other edges curve. */
   spine: Array<[NodeId, NodeId]>;
+  /**
+   * Vertices that are not in the forest (BFS: not reached yet), grouped on the right,
+   * with the forest to their left.
+   */
+  aside?: NodeId[];
+  /** Whether the tree edges are highlighted white (default true; BFS keeps white for the next step). */
+  highlightSpine?: boolean;
 }
 
 /** One vertex's [discovery, finish] interval on a timestamp chart (DFS). */
@@ -191,6 +198,12 @@ export interface Simulation {
    * chart. Algorithms without one leave it out, and the button stays hidden.
    */
   searchForest?(): ForestDiagram | null;
+  /**
+   * Offered while running (BFS): the search tree so far, as a ForestDiagram (rows by
+   * distance), with the vertices not reached yet `aside`. Algorithms without one leave it
+   * out, and the Show as tree button stays hidden.
+   */
+  searchTree?(): ForestDiagram;
 }
 
 /** An entry in the algorithm picker. */

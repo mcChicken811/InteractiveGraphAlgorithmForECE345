@@ -1,6 +1,6 @@
 import { ForceLayout } from './layout.js';
 import { fitFontSize } from './label-fit.js';
-import { forestLayout, halfEllipse, rowLayout } from './arc-diagram.js';
+import { halfEllipse, rowLayout, treeLayout } from './arc-diagram.js';
 import { cutShape, loopsPath, polylinesPath } from './voronoi.js';
 import { nodeCountFor, randomArcs, randomPositions } from './random-graph.js';
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -27,6 +27,8 @@ const BEND_MS = 450;
 const FOREST_BULGE = 0.6;
 /** …and at most (px). */
 const FOREST_MAX_BULGE = 110;
+/** How far an edge from the tree to the vertices set aside sags, as a share of its half length. */
+const ASIDE_SAG = 0.2;
 /**
  * Interactive SVG editor:
  *  - click empty space → add node
@@ -320,9 +322,11 @@ export class GraphEditor {
         const keys = (pairs) => new Set(pairs.map(([a, b]) => this.edgeKey(a, b, this.graph.directed)));
         this.enterArrangement({
             kind: 'line',
+            highlightSpine: true,
             diagram,
             forest: null,
             rank: new Map(diagram.order.map((id, i) => [id, i])),
+            aside: new Set(),
             spine: keys(diagram.spine),
             below: keys(diagram.below),
             maxBulge: 0,
@@ -336,14 +340,20 @@ export class GraphEditor {
      * bulging to the left of its direction, so edges both ways between two vertices part).
      * Auto-layout is turned off. From the topological sort's line it moves straight over;
      * showArcDiagram(null) or auto-layout leaves it, as for the line.
+     *
+     * `kind` 'tree' is BFS's tree, shown the same way; `forest.aside` vertices (not reached
+     * yet) are grouped on the right. Showing it again with a grown tree glides every vertex
+     * to its new place, so newly reached vertices join the tree.
      */
-    showForest(forest) {
+    showForest(forest, kind = 'forest') {
         const keys = (pairs) => new Set(pairs.map(([a, b]) => this.edgeKey(a, b, this.graph.directed)));
         this.enterArrangement({
-            kind: 'forest',
+            kind,
+            highlightSpine: forest.highlightSpine ?? true,
             diagram: null,
             forest,
             rank: new Map(),
+            aside: new Set(forest.aside ?? []),
             spine: keys(forest.spine),
             below: new Set(),
             maxBulge: FOREST_MAX_BULGE,
@@ -368,7 +378,7 @@ export class GraphEditor {
         }
         this.arc = next;
         this.svg.classList.add('arc-diagram');
-        this.svg.classList.toggle('forest-view', next.kind === 'forest');
+        this.svg.classList.toggle('forest-view', next.kind !== 'line');
         this.placeArcDiagram(true);
         this.tweenBend(1);
     }
@@ -390,10 +400,11 @@ export class GraphEditor {
         const insets = this.callbacks.canvasInsets?.();
         const pads = insets ? { padTop: insets.top, padBottom: insets.bottom } : {};
         let to;
-        if (arc.kind === 'forest') {
+        if (arc.kind !== 'line') {
             const places = arc.forest.places.filter((p) => this.graph.getNode(p.id));
-            const positions = forestLayout(places, bounds, pads);
-            to = new Map(places.map((p, i) => [p.id, positions[i]]));
+            const aside = (arc.forest.aside ?? []).filter((id) => this.graph.getNode(id));
+            const { tree, aside: group } = treeLayout(places, aside.length, bounds, pads);
+            to = new Map([...places.map((p, i) => [p.id, tree[i]]), ...aside.map((id, i) => [id, group[i]])]);
         }
         else {
             const order = arc.diagram.order.filter((id) => this.graph.getNode(id));
@@ -733,7 +744,7 @@ export class GraphEditor {
             const key = this.edgeKey(a, b, directed);
             // Arc diagram: spine edges between neighbouring vertices stay straight; the rest arc.
             // Forest: every edge is a path (tree edges with no bulge), so it can blend to and fro.
-            const arcs = arc !== null && (arc.kind === 'forest' || this.arcBefore !== null || !this.straightSpine(arc, a, b, key));
+            const arcs = arc !== null && (arc.kind !== 'line' || this.arcBefore !== null || !this.straightSpine(arc, a, b, key));
             const shape = curved || arcs ? 'path' : 'line';
             liveEdges.add(key);
             let g = this.edgeEls.get(key);
@@ -761,7 +772,7 @@ export class GraphEditor {
                 ? this.arcGeometry(this.graph.getNode(a), this.graph.getNode(b), directed, key)
                 : this.edgeGeometry(this.graph.getNode(a), this.graph.getNode(b), directed, curved);
             g.classList.toggle('sim-active', this.isActiveEdge(a, b, directed));
-            g.classList.toggle('sim-spine', arc !== null && !arc.leaving && arc.spine.has(key));
+            g.classList.toggle('sim-spine', arc !== null && !arc.leaving && arc.highlightSpine && arc.spine.has(key));
             g.classList.toggle('sim-unexplored', explored !== null && !explored.has(key));
             g.classList.toggle('sim-explored', explored?.has(key) ?? false);
             g.classList.toggle('sim-tree', explored?.get(key)?.done ?? false);
@@ -948,10 +959,9 @@ export class GraphEditor {
      * the bulge blends from the old arrangement's to the new one's.
      */
     arcGeometry(a, b, directed, key) {
-        const radius = distance(a, b) / 2;
-        let bulge = this.bulgeIn(this.arc, key, radius);
+        let bulge = this.bulgeIn(this.arc, key, a, b);
         if (this.arcBefore)
-            bulge = this.bulgeIn(this.arcBefore, key, radius) * (1 - this.morph) + bulge * this.morph;
+            bulge = this.bulgeIn(this.arcBefore, key, a, b) * (1 - this.morph) + bulge * this.morph;
         const { d, mid } = halfEllipse(a, b, bulge * this.bend, NODE_RADIUS, directed ? NODE_RADIUS + 1 : NODE_RADIUS);
         return { attrs: { d }, mid };
     }
@@ -960,12 +970,25 @@ export class GraphEditor {
      * an edge `radius` (half its length) long.
      *  - line: a half circle (flattened to fit maxBulge), above the line, or below for
      *    `below`; spine edges between neighbouring vertices lie straight on the line;
-     *  - forest: tree edges straight; the others a flat half ellipse to the left.
+     *  - forest / tree: tree edges straight; the others a flat half ellipse to the left,
+     *    except edges from the tree to the vertices set aside, which only sag a little
+     *    (below the line between them, so they clear the vertices of the row they leave),
+     *    and edges within that group, which bow to the left, away from the canvas edge.
      */
-    bulgeIn(arc, key, radius) {
+    bulgeIn(arc, key, from, to) {
+        const radius = distance(from, to) / 2;
         const [a, b] = key.split(/[>-]/).map(Number);
-        if (arc.kind === 'forest')
-            return arc.spine.has(key) ? 0 : Math.min(radius * FOREST_BULGE, arc.maxBulge);
+        if (arc.kind !== 'line') {
+            if (arc.spine.has(key))
+                return 0;
+            if (arc.aside.has(a) !== arc.aside.has(b))
+                return (from.x > to.x ? 1 : -1) * Math.min(radius * ASIDE_SAG, 60);
+            const bulge = Math.min(radius * FOREST_BULGE, arc.maxBulge);
+            // Within the group (at the canvas's right edge), bow to the left, into the canvas.
+            if (arc.aside.has(a))
+                return (to.y > from.y ? -1 : 1) * bulge;
+            return bulge;
+        }
         if (this.straightSpine(arc, a, b, key))
             return 0;
         return (arc.below.has(key) ? -1 : 1) * Math.min(radius, arc.maxBulge);

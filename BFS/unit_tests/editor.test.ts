@@ -1392,6 +1392,44 @@ describe('GraphEditor arc diagram (topological sort)', () => {
       editor.setAutoLayout(true);
       expect(editor.arrangement).toBe(null);
     });
+
+    it("as BFS's tree: vertices aside wait on the right, tree edges are not white, and the tree grows", () => {
+      // 0 — 1 so far; 2 and 3 not reached yet.
+      editor.showForest(
+        { places: [{ id: 0, column: 0, row: 0 }, { id: 1, column: 0, row: 1 }], spine: [[0, 1]], aside: [2, 3], highlightSpine: false },
+        'tree',
+      );
+      expect(editor.arrangement).toBe('tree');
+      flush();
+      const [x0, x1, x2, x3] = xs([0, 1, 2, 3]);
+      expect(x2).toBeCloseTo(x3); // one column…
+      expect(x2).toBeGreaterThan(x0 + 200); // …to the right of the tree
+      expect(x1).toBeCloseTo(x0);
+      expect(svg.querySelectorAll('.sim-spine')).toHaveLength(0);
+      // 1 → 2 leaves the tree for the group: it only sags a little, below the line.
+      const y1 = graph.getNode(1)!.y;
+      const sag = Math.max(...pathYs(1, 2)) - Math.max(y1, graph.getNode(2)!.y);
+      expect(sag).toBeGreaterThan(5);
+      // 2 joins: it glides from the group into the tree.
+      const was = { ...graph.getNode(2)! };
+      editor.showForest(
+        {
+          places: [{ id: 0, column: 1, row: 0 }, { id: 1, column: 0, row: 1 }, { id: 2, column: 2, row: 1 }],
+          spine: [[0, 1], [0, 2]],
+          aside: [3],
+          highlightSpine: false,
+        },
+        'tree',
+      );
+      now += 200;
+      frames.shift()!(now);
+      const mid = graph.getNode(2)!;
+      expect(mid.x).toBeLessThan(was.x);
+      expect(mid.x).toBeGreaterThan(graph.getNode(0)!.x - 1000); // still on its way
+      flush();
+      expect(graph.getNode(2)!.y).toBeCloseTo(graph.getNode(1)!.y); // on row 1 now
+      expect(graph.getNode(2)!.x).toBeLessThan(graph.getNode(3)!.x);
+    });
   });
 });
 

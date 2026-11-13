@@ -50,6 +50,8 @@
         <button id="topo-btn" type="button" hidden>Topological sort</button>
         <!-- DFS, after the last Update: arranges the vertices as the depth-first forest, as on the timestamp chart. -->
         <button id="forest-btn" type="button" hidden>Show as forest</button>
+        <!-- BFS, while it runs: a toggle arranging the vertices as the breadth-first tree so far. -->
+        <button id="tree-btn" type="button" hidden aria-pressed="false">Show as tree</button>
         <button id="step-btn" class="primary" type="button" hidden>Update</button>
         <button id="stop-btn" type="button" hidden>Stop</button>
       </div>
@@ -150,6 +152,9 @@
                   While BFS runs, vertices show their <strong>distance</strong> from the start (blank until
                   found). <strong>Hover the queue</strong> to see their numbers again. Edges are dashed, except
                   each vertex's edge to the vertex it was discovered from (its predecessor), which turns solid.
+                  <strong>Show as tree</strong> arranges the vertices as the tree found so far, by distance
+                  from the top, with the vertices not reached yet waiting on the right; each Update brings
+                  newly found vertices into the tree. Press it again, or turn on Auto-layout, to leave it.
                 </li>
                 <li>
                   DFS reads the graph as directed. Vertices show their <strong>discovery, finish</strong> times

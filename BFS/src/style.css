@@ -262,7 +262,8 @@ button.primary:hover:not(:disabled) {
 
 /* DFS's arrangement buttons: the one being shown is marked in the accent colour. */
 #topo-btn[aria-pressed='true'],
-#forest-btn[aria-pressed='true'] {
+#forest-btn[aria-pressed='true'],
+#tree-btn[aria-pressed='true'] {
   border-color: var(--accent);
   color: var(--accent);
 }

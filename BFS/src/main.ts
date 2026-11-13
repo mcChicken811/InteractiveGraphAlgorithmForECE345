@@ -168,6 +168,7 @@ runner = new AlgorithmRunner(
     stop: document.querySelector<HTMLButtonElement>('#stop-btn')!,
     topo: document.querySelector<HTMLButtonElement>('#topo-btn')!,
     forest: document.querySelector<HTMLButtonElement>('#forest-btn')!,
+    tree: document.querySelector<HTMLButtonElement>('#tree-btn')!,
     weightSwitch: document.querySelector<HTMLFieldSetElement>('#weight-switch')!,
     directionSwitch: document.querySelector<HTMLFieldSetElement>('#direction-switch')!,
     queueCard: document.querySelector<HTMLElement>('#queue-card')!,
@@ -207,6 +208,8 @@ layoutBtn.addEventListener('click', () => {
     showMessage('Auto-layout on: left the topological order. Press Topological sort to line the vertices up again.');
   } else if (leaving === 'forest') {
     showMessage('Auto-layout on: left the forest. Press Show as forest to arrange the vertices as trees again.');
+  } else if (leaving === 'tree') {
+    showMessage('Auto-layout on: left the tree. Press Show as tree to arrange the vertices as a tree again.');
   }
 });
 

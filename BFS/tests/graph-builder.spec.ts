@@ -1525,6 +1525,153 @@ test.describe('algorithm simulation (BFS)', () => {
   });
 });
 
+test.describe('BFS: show as tree', () => {
+  const run = (page: Page) => page.getByRole('button', { name: 'Run', exact: true }).click();
+  const update = (page: Page) => page.getByRole('button', { name: 'Update', exact: true }).click();
+  const treeBtn = (page: Page) => page.getByRole('button', { name: 'Show as tree' });
+  const layoutBtn = (page: Page) => page.getByRole('button', { name: /Auto-layout/ });
+  const message = (page: Page) => page.locator('#message');
+
+  /** 0 — 1, 0 — 2, 1 — 3, 2 — 3, and 4 — 5 apart (never reached from 0). */
+  const spots: Array<[number, number]> = [
+    [700, 450],
+    [250, 200],
+    [500, 300],
+    [150, 450],
+    [850, 200],
+    [600, 150],
+  ];
+  async function build(): Promise<void> {
+    for (const p of spots) await cv.click(...p);
+    for (const [a, b] of [
+      [0, 1],
+      [0, 2],
+      [1, 3],
+      [2, 3],
+      [4, 5],
+    ]) await connect(spots[a], spots[b]);
+  }
+  const centre = (id: number) =>
+    cv.node(id).evaluate((g) => {
+      const r = g.querySelector('circle')!.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    });
+  /** Waits until no vertex is moving any more, then returns their centres (by id). */
+  async function settled(n = 6) {
+    const ids = Array.from({ length: n }, (_, i) => i);
+    let last = '';
+    await expect
+      .poll(async () => {
+        const now = JSON.stringify(await Promise.all(ids.map(centre)));
+        const same = now === last;
+        last = now;
+        return same;
+      })
+      .toBe(true);
+    return Promise.all(ids.map(centre));
+  }
+
+  test('is offered for the whole BFS run (not before), as a toggle', async ({ page }) => {
+    await build();
+    await expect(treeBtn(page)).toBeHidden();
+    await run(page);
+    await expect(treeBtn(page)).toBeVisible();
+    await expect(treeBtn(page)).toHaveAttribute('aria-pressed', 'false');
+    const [t, u] = await Promise.all([treeBtn(page).boundingBox(), page.getByRole('button', { name: 'Update' }).boundingBox()]);
+    expect(t!.x + t!.width).toBeLessThanOrEqual(u!.x);
+    await page.getByRole('button', { name: 'Stop' }).click();
+    await expect(treeBtn(page)).toBeHidden();
+    // Not for other algorithms.
+    await page.getByRole('combobox', { name: 'Algorithm' }).click();
+    await page.getByRole('option', { name: "Prim's algorithm" }).click();
+    await run(page);
+    await expect(treeBtn(page)).toBeHidden();
+  });
+
+  test('arranges the tree so far from the top by distance, the unreached vertices grouped on the right', async ({ page }) => {
+    await build();
+    await layoutBtn(page).click(); // on, after building so the clicks hit
+    await run(page);
+    await update(page); // pops 0: discovers 1 and 2
+    await treeBtn(page).click();
+    await expect(layoutBtn(page)).toHaveAttribute('aria-pressed', 'false'); // turned off
+    await expect(treeBtn(page)).toHaveAttribute('aria-pressed', 'true');
+    await expect(message(page)).toContainText('The 3 not reached yet wait on the right');
+    const [p0, p1, p2, p3, p4, p5] = await settled();
+    // The start on top, its children one row down, either side of it.
+    expect(p1.y).toBeGreaterThan(p0.y + 60);
+    expect(Math.abs(p2.y - p1.y)).toBeLessThan(1);
+    expect(p1.x).toBeLessThan(p0.x);
+    expect(p2.x).toBeGreaterThan(p0.x);
+    expect(Math.abs((p1.x + p2.x) / 2 - p0.x)).toBeLessThan(1);
+    // 3, 4 and 5 are not reached yet: one column on the right, right of the tree.
+    for (const q of [p4, p5]) expect(Math.abs(q.x - p3.x)).toBeLessThan(1);
+    const canvas = (await cv.canvas.boundingBox())!;
+    expect(p3.x).toBeGreaterThan(canvas.x + canvas.width - 100);
+    expect(Math.max(p0.x, p1.x, p2.x)).toBeLessThan(p3.x - 100);
+    // Tree edges solid but not white (white is the next pop's); the others dashed.
+    const look = (a: number, b: number) =>
+      cv.edge(a, b).evaluate((g) => ({
+        spine: g.classList.contains('sim-spine'),
+        dashed: getComputedStyle(g.querySelector('.edge-line')!).strokeDasharray !== 'none',
+      }));
+    expect(await look(0, 1)).toEqual({ spine: false, dashed: false });
+    expect((await look(4, 5)).dashed).toBe(true);
+  });
+
+  test('each Update glides the newly reached vertices into the tree', async ({ page }) => {
+    await build();
+    await run(page);
+    await treeBtn(page).click();
+    const before = await settled();
+    // Only 0 in the tree: 1 … 5 in one column on the right.
+    for (const id of [2, 3, 4, 5]) expect(Math.abs(before[id].x - before[1].x)).toBeLessThan(1);
+    await update(page); // pops 0: discovers 1 and 2
+    await page.waitForTimeout(120);
+    const moving = await centre(1);
+    expect(moving.x).toBeLessThan(before[1].x - 1); // on its way…
+    const after = await settled();
+    expect(after[1].y).toBeGreaterThan(after[0].y + 60); // …into row 1
+    expect(Math.abs(after[2].y - after[1].y)).toBeLessThan(1);
+    await update(page); // pops 1: discovers 3
+    const third = await settled();
+    expect(third[3].y).toBeGreaterThan(third[1].y + 60); // row 2, below its parent 1
+    expect(Math.abs(third[3].x - third[1].x)).toBeLessThan(1);
+    await expect(treeBtn(page)).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('pressing it again or turning auto-layout on leaves it; the run goes on; Finish ends it', async ({ page }) => {
+    await build();
+    await run(page);
+    await treeBtn(page).click();
+    const placed = await settled();
+    await treeBtn(page).click(); // off: vertices stay where they are
+    await expect(treeBtn(page)).toHaveAttribute('aria-pressed', 'false');
+    await expect(message(page)).toContainText('Left the tree');
+    await update(page);
+    const still = await settled();
+    still.forEach((p, i) => {
+      expect(p.x).toBeCloseTo(placed[i].x, 0);
+      expect(p.y).toBeCloseTo(placed[i].y, 0);
+    });
+    await treeBtn(page).click();
+    await expect(treeBtn(page)).toHaveAttribute('aria-pressed', 'true');
+    await layoutBtn(page).click();
+    await expect(treeBtn(page)).toHaveAttribute('aria-pressed', 'false');
+    await expect(message(page)).toHaveText(
+      'Auto-layout on: left the tree. Press Show as tree to arrange the vertices as a tree again.',
+    );
+    await expect(page.getByRole('button', { name: 'Update' })).toBeVisible();
+    await layoutBtn(page).click(); // off again
+    await treeBtn(page).click();
+    for (let i = 0; i < 3; i++) await update(page); // 0, 1, 2, 3 reachable: 4 pops in all
+    await expect(treeBtn(page)).toBeVisible(); // still offered at the end, until Finish
+    await page.getByRole('button', { name: 'Finish', exact: true }).click();
+    await expect(treeBtn(page)).toBeHidden();
+    await expect(cv.canvas).not.toHaveClass(/forest-view/);
+  });
+});
+
 test.describe('BFS queue card (side panel)', () => {
   const card = (page: Page) => page.getByRole('region', { name: 'Queue' });
   const strip = (page: Page) => page.getByRole('list', { name: 'Queue, front first' });

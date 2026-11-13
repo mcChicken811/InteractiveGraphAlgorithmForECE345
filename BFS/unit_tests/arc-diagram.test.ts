@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { FOREST_DEFAULTS, ROW_DEFAULTS, forestLayout, halfEllipse, rowLayout, type Point } from '../src/arc-diagram.js';
+import {
+  ASIDE_GAP,
+  ASIDE_MARGIN,
+  FOREST_DEFAULTS,
+  ROW_DEFAULTS,
+  forestLayout,
+  halfEllipse,
+  rowLayout,
+  treeLayout,
+  type Point,
+} from '../src/arc-diagram.js';
 
 const BOUNDS = { width: 1000, height: 600 };
 
@@ -37,6 +47,42 @@ describe('forestLayout', () => {
     const [p] = forestLayout([{ column: 1.5, row: 0 }], BOUNDS, { padTop: 0, padBottom: 0 });
     expect(p.x).toBeCloseTo(500);
     expect(forestLayout([], BOUNDS)).toEqual([]);
+  });
+});
+
+describe('treeLayout', () => {
+  const tree = [
+    { column: 2, row: 0 },
+    { column: 0, row: 1 },
+    { column: 4, row: 1 },
+  ];
+
+  it('with nothing aside, is the forest layout', () => {
+    expect(treeLayout(tree, 0, BOUNDS)).toEqual({ tree: forestLayout(tree, BOUNDS), aside: [] });
+  });
+
+  it('groups the vertices aside on the right, and centres the tree in the space left of them', () => {
+    const { tree: t, aside } = treeLayout(tree, 3, BOUNDS);
+    expect(aside).toHaveLength(3);
+    // One column at the right pad, ASIDE_GAP apart, vertically centred between the pads.
+    for (const p of aside) expect(p.x).toBeCloseTo(1000 - FOREST_DEFAULTS.padX);
+    expect(aside[1].y - aside[0].y).toBeCloseTo(ASIDE_GAP);
+    expect(aside[1].y).toBeCloseTo((FOREST_DEFAULTS.padTop + 600 - FOREST_DEFAULTS.padBottom) / 2);
+    const right = 1000 - FOREST_DEFAULTS.padX - ASIDE_MARGIN - ASIDE_GAP / 2;
+    for (const p of t) expect(p.x).toBeLessThanOrEqual(right);
+    expect((t[1].x + t[2].x) / 2).toBeCloseTo((FOREST_DEFAULTS.padX + right) / 2);
+  });
+
+  it('wraps a large group into more columns, leftwards, never past the middle', () => {
+    const { tree: t, aside } = treeLayout(tree, 30, BOUNDS);
+    const xs = [...new Set(aside.map((p) => Math.round(p.x)))];
+    expect(xs.length).toBeGreaterThan(1);
+    expect(Math.min(...xs)).toBeGreaterThanOrEqual(500);
+    for (const p of aside) {
+      expect(p.y).toBeGreaterThanOrEqual(FOREST_DEFAULTS.padTop - 0.01);
+      expect(p.y).toBeLessThanOrEqual(600 - FOREST_DEFAULTS.padBottom + 0.01);
+    }
+    for (const p of t) expect(p.x).toBeLessThan(Math.min(...xs));
   });
 });
 
