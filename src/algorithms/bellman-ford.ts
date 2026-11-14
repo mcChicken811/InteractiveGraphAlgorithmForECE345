@@ -32,8 +32,9 @@ import { tidyTree } from './tidy-tree.js';
  * The display shows what the next step will do: its edge is white, and so is that edge's
  * place in the adjacency list (the from vertex, and the to vertex in its row) and in the
  * adjacency matrix (row u, column v). Each vertex shows its d (∞ until an edge reaches
- * it). At the end, when the check passes, the edges (v.π, v) — the shortest-paths tree —
- * are white; when it fails, the edge that failed it stays white.
+ * it). At the end the edges (v.π, v) — the shortest-paths tree, when the check passes —
+ * are white. When it fails, every edge that could still be relaxed (v.d > u.d + w(u, v))
+ * is red: the degenerate edges, which only a negative-weight cycle allows.
  *
  * Within each pass (and the check), the edges this pass has not reached yet are dashed and
  * those it has relaxed are solid, so a pass starts all dashed and fills in edge by edge.
@@ -68,10 +69,14 @@ export class BellmanFordSimulation implements Simulation {
   /** The check's verdict once it has ended: TRUE (no negative cycle) or FALSE; null before. */
   result: boolean | null = null;
 
+  /** Whether G.E is directed (undirected: each edge is two arcs, drawn as one). */
+  private readonly directed: boolean;
+
   constructor(
     view: GraphView,
     readonly source: NodeId,
   ) {
+    this.directed = view.directed;
     const ids = view.nodeIds();
     for (const id of ids) {
       this.distance.set(id, Infinity);
@@ -104,9 +109,18 @@ export class BellmanFordSimulation implements Simulation {
    */
   visitedThisPass(): Arc[] {
     if (this.last === null) return [];
-    if (this.result === false) return this.edges.slice(0, this.index + 1);
+    if (this.finished) return [...this.edges]; // the end: every edge solid
     if (this.index === 0) return [...this.edges]; // a pass has just completed
     return this.edges.slice(0, this.index);
+  }
+
+  /**
+   * The degenerate edges: every edge (u, v) that could still be relaxed, v.d > u.d + w(u, v).
+   * After |V| − 1 passes there are none unless a negative-weight cycle is reachable from
+   * the source (CLRS Theorem 22.4), and then the check stops at the first of them.
+   */
+  degenerateEdges(): Arc[] {
+    return this.edges.filter(({ from, to, weight }) => this.distance.get(to)! > this.distance.get(from)! + weight);
   }
 
   /** Steps left until the current pass (or the check) is through: the Full cycle button's run. */
@@ -182,18 +196,22 @@ export class BellmanFordSimulation implements Simulation {
 
   highlight(): Highlight {
     const next = this.nextEdge;
-    const failed = this.result === false && this.last ? this.last.arc : null;
-    const focus = next ?? failed;
+    // At the end of a FALSE run, the degenerate edges are red (drawn edges: undirected,
+    // either way round), and they take precedence over the white predecessor edges.
+    const degenerate = this.result === false ? this.degenerateEdges() : [];
+    const key = (a: NodeId, b: NodeId) => (this.directed ? `${a}>${b}` : `${Math.min(a, b)}-${Math.max(a, b)}`);
+    const red = new Set(degenerate.map(({ from, to }) => key(from, to)));
     return {
       current: null,
       done: [],
-      // The edge the next step works on; at the end, the shortest-paths tree (or the edge
-      // that failed the check).
-      activeEdges: focus ? [[focus.from, focus.to]] : this.predecessorEdges(),
-      // This pass's edges so far solid; the rest dashed.
-      exploredEdges: this.visitedThisPass().map(({ from, to }): ExploredEdge => ({ from, to })),
+      // The edge the next step works on; at the end, the predecessor edges.
+      activeEdges: next ? [[next.from, next.to]] : this.predecessorEdges().filter(([u, v]) => !red.has(key(u, v))),
+      // This pass's edges so far solid; the rest dashed. At the end, the red ones flagged.
+      exploredEdges: this.visitedThisPass().map(
+        ({ from, to }): ExploredEdge => (red.has(key(from, to)) ? { from, to, degenerate: true } : { from, to }),
+      ),
       labels: Object.fromEntries([...this.distance].map(([id, d]) => [id, formatDistance(d)])),
-      representationEdge: focus ? { from: focus.from, to: focus.to } : undefined,
+      representationEdge: next ? { from: next.from, to: next.to } : undefined,
     };
   }
 
@@ -232,8 +250,13 @@ export class BellmanFordSimulation implements Simulation {
     }
     if (this.result === true)
       return `${done} Bellman–Ford finished: no negative-weight cycle is reachable from ${this.source} (TRUE), so every d is a shortest-path weight; the white edges (v.π, v) form the shortest-paths tree. Press Finish.`;
-    if (this.result === false)
-      return `${done} Bellman–Ford finished: a negative-weight cycle is reachable from ${this.source} (FALSE), so some shortest paths are not defined. Press Finish.`;
+    if (this.result === false) {
+      const red = this.degenerateEdges().length;
+      return (
+        `${done} Bellman–Ford finished: a negative-weight cycle is reachable from ${this.source} (FALSE), so some shortest paths are not defined. ` +
+        `In red: the ${red === 1 ? 'edge' : `${red} edges`} that could still lower a d. Press Finish.`
+      );
+    }
     return `${done}${nextText()}`;
   }
 }

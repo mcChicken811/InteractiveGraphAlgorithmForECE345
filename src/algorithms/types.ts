@@ -96,6 +96,11 @@ export interface ExploredEdge {
    * result, but the algorithm has yet to check the edge (Kruskal: still in the sorted list).
    */
   waiting?: boolean;
+  /**
+   * Draw the edge red: it breaks what the result needs (Bellman–Ford at the end: it could
+   * still be relaxed, v.d > u.d + w(u, v), which only a negative-weight cycle allows).
+   */
+  degenerate?: boolean;
 }
 
 /** A queue-like structure for the side panel (BFS's queue). */

@@ -1144,8 +1144,10 @@ button:disabled {
   marker-end: url(#arrow-done);
 }
 
-/* The topological sort's backward edges (on a cyclic graph): red, pointing right to left. */
-.edge.sim-backward .edge-line {
+/* The topological sort's backward edges (on a cyclic graph): red, pointing right to left.
+   Bellman–Ford's degenerate edges (still relaxable after a FALSE run) are red too. */
+.edge.sim-backward .edge-line,
+.edge.sim-degenerate .edge-line {
   stroke: var(--danger);
   stroke-width: 3;
   stroke-dasharray: none;
@@ -1155,7 +1157,8 @@ button:disabled {
   fill: var(--danger);
 }
 
-#canvas.directed .edge.sim-backward .edge-line {
+#canvas.directed .edge.sim-backward .edge-line,
+#canvas.directed .edge.sim-degenerate .edge-line {
   marker-end: url(#arrow-backward);
 }
 
@@ -1883,11 +1886,13 @@ button:disabled {
 }
 
 /* Backward edges stay red when hovered on the locked canvas (after the hover rules above). */
-#canvas.locked .edge.sim-backward:hover .edge-line {
+#canvas.locked .edge.sim-backward:hover .edge-line,
+#canvas.locked .edge.sim-degenerate:hover .edge-line {
   stroke: var(--danger);
   stroke-dasharray: none;
 }
 
-#canvas.directed.locked .edge.sim-backward:hover .edge-line {
+#canvas.directed.locked .edge.sim-backward:hover .edge-line,
+#canvas.directed.locked .edge.sim-degenerate:hover .edge-line {
   marker-end: url(#arrow-backward);
 }

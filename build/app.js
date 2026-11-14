@@ -2186,6 +2186,7 @@
 				g.classList.toggle("sim-tree", explored?.get(key)?.done ?? false);
 				g.classList.toggle("sim-crossing", explored?.get(key)?.crossing ?? false);
 				g.classList.toggle("sim-within", explored?.get(key)?.within ?? false);
+				g.classList.toggle("sim-degenerate", explored?.get(key)?.degenerate ?? false);
 				g.classList.toggle("sim-waiting", explored?.get(key)?.waiting ?? false);
 				for (const el of g.querySelectorAll(".edge-hit, .edge-line")) setAttrs(el, attrs);
 				const tag = explored?.get(key)?.label ?? "";
@@ -3823,8 +3824,11 @@
 		last = null;
 		/** The check's verdict once it has ended: TRUE (no negative cycle) or FALSE; null before. */
 		result = null;
+		/** Whether G.E is directed (undirected: each edge is two arcs, drawn as one). */
+		directed;
 		constructor(view, source) {
 			this.source = source;
+			this.directed = view.directed;
 			const ids = view.nodeIds();
 			for (const id of ids) {
 				this.distance.set(id, Infinity);
@@ -3857,9 +3861,17 @@
 		*/
 		visitedThisPass() {
 			if (this.last === null) return [];
-			if (this.result === false) return this.edges.slice(0, this.index + 1);
+			if (this.finished) return [...this.edges];
 			if (this.index === 0) return [...this.edges];
 			return this.edges.slice(0, this.index);
+		}
+		/**
+		* The degenerate edges: every edge (u, v) that could still be relaxed, v.d > u.d + w(u, v).
+		* After |V| − 1 passes there are none unless a negative-weight cycle is reachable from
+		* the source (CLRS Theorem 22.4), and then the check stops at the first of them.
+		*/
+		degenerateEdges() {
+			return this.edges.filter(({ from, to, weight }) => this.distance.get(to) > this.distance.get(from) + weight);
 		}
 		/** Steps left until the current pass (or the check) is through: the Full cycle button's run. */
 		stepsLeftInPass() {
@@ -3934,20 +3946,25 @@
 		}
 		highlight() {
 			const next = this.nextEdge;
-			const failed = this.result === false && this.last ? this.last.arc : null;
-			const focus = next ?? failed;
+			const degenerate = this.result === false ? this.degenerateEdges() : [];
+			const key = (a, b) => this.directed ? `${a}>${b}` : `${Math.min(a, b)}-${Math.max(a, b)}`;
+			const red = new Set(degenerate.map(({ from, to }) => key(from, to)));
 			return {
 				current: null,
 				done: [],
-				activeEdges: focus ? [[focus.from, focus.to]] : this.predecessorEdges(),
-				exploredEdges: this.visitedThisPass().map(({ from, to }) => ({
+				activeEdges: next ? [[next.from, next.to]] : this.predecessorEdges().filter(([u, v]) => !red.has(key(u, v))),
+				exploredEdges: this.visitedThisPass().map(({ from, to }) => red.has(key(from, to)) ? {
+					from,
+					to,
+					degenerate: true
+				} : {
 					from,
 					to
-				})),
+				}),
 				labels: Object.fromEntries([...this.distance].map(([id, d]) => [id, formatDistance(d)])),
-				representationEdge: focus ? {
-					from: focus.from,
-					to: focus.to
+				representationEdge: next ? {
+					from: next.from,
+					to: next.to
 				} : void 0
 			};
 		}
@@ -3973,7 +3990,10 @@
 				done = last.ok ? `${where} ${name(last.arc)} cannot lower ${last.arc.to}.d.` : `${where} ${name(last.arc)} could still lower ${last.arc.to}.d (${formatDistance(this.distance.get(last.arc.to))} > ${formatDistance(this.distance.get(last.arc.from))} + ${last.arc.weight}).`;
 			}
 			if (this.result === true) return `${done} Bellman–Ford finished: no negative-weight cycle is reachable from ${this.source} (TRUE), so every d is a shortest-path weight; the white edges (v.π, v) form the shortest-paths tree. Press Finish.`;
-			if (this.result === false) return `${done} Bellman–Ford finished: a negative-weight cycle is reachable from ${this.source} (FALSE), so some shortest paths are not defined. Press Finish.`;
+			if (this.result === false) {
+				const red = this.degenerateEdges().length;
+				return `${done} Bellman–Ford finished: a negative-weight cycle is reachable from ${this.source} (FALSE), so some shortest paths are not defined. In red: the ${red === 1 ? "edge" : `${red} edges`} that could still lower a d. Press Finish.`;
+			}
 			return `${done}${nextText()}`;
 		}
 	};

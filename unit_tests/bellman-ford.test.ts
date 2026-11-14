@@ -143,7 +143,7 @@ describe('per-pass dashing, Full cycle and Show as tree', () => {
     expect(solid(sim)).toEqual(['0>1']);
   });
 
-  it('the check fills in too; TRUE leaves every edge solid, FALSE the ones up to the failing edge', () => {
+  it('the check fills in too; at the end every edge is solid, TRUE or FALSE', () => {
     const sim = new BellmanFordSimulation(weighted(g), s);
     runToEnd(sim);
     expect(solid(sim)).toHaveLength(10);
@@ -157,10 +157,7 @@ describe('per-pass dashing, Full cycle and Show as tree', () => {
     const bad = new BellmanFordSimulation(weighted(h), 0);
     runToEnd(bad);
     expect(bad.result).toBe(false);
-    const failing = bad.highlight().representationEdge!;
-    const marks = solid(bad);
-    expect(marks.at(-1)).toBe(`${failing.from}>${failing.to}`);
-    expect(marks.length).toBeLessThan(3);
+    expect(solid(bad)).toEqual(['0>1', '1>2', '2>1']);
   });
 
   it('search tree: the predecessor tree from the source, rearranging as d values drop', () => {
@@ -210,7 +207,7 @@ describe('per-pass dashing, Full cycle and Show as tree', () => {
 });
 
 describe('BellmanFordSimulation: negative-weight cycles and other graphs', () => {
-  it('returns FALSE at the first edge that could still be relaxed, which stays white', () => {
+  it('returns FALSE at the first edge that could still be relaxed; at the end the degenerate edges are red', () => {
     const h = new Graph();
     for (let i = 0; i < 3; i++) h.addNode(0, 0);
     h.directed = true;
@@ -219,11 +216,43 @@ describe('BellmanFordSimulation: negative-weight cycles and other graphs', () =>
     h.addEdge(2, 1, 1); // 1 → 2 → 1 weighs −1
     const sim = new BellmanFordSimulation(weighted(h), 0);
     runToEnd(sim);
+    // Pass 2 leaves d = 0, −1, −2 (π: 1 ← 2, 2 ← 1); the check fails at 1 → 2: −2 > −1 − 2.
     expect(sim.result).toBe(false);
+    expect(Object.fromEntries(sim.distance)).toEqual({ 0: 0, 1: -1, 2: -2 });
+    expect(sim.degenerateEdges().map((e) => `${e.from}>${e.to}`)).toEqual(['1>2']);
     const last = sim.highlight();
-    expect(last.representationEdge).toBeDefined();
-    expect(last.activeEdges).toEqual([[last.representationEdge!.from, last.representationEdge!.to]]);
-    expect(sim.describe()).toMatch(/could still lower .* Bellman–Ford finished: a negative-weight cycle is reachable from 0 \(FALSE\)/);
+    expect(last.exploredEdges).toEqual([
+      { from: 0, to: 1 },
+      { from: 1, to: 2, degenerate: true },
+      { from: 2, to: 1 },
+    ]);
+    // The predecessor edges are white, except 1 → 2 (2.π = 1), which is red.
+    expect(last.activeEdges).toEqual([[2, 1]]);
+    expect(last.representationEdge).toBeUndefined();
+    expect(sim.describe()).toMatch(
+      /could still lower 2\.d .* Bellman–Ford finished: a negative-weight cycle is reachable from 0 \(FALSE\), so some shortest paths are not defined\. In red: the edge that could still lower a d\. Press Finish\.$/,
+    );
+  });
+
+  it('a TRUE run has no degenerate edges, and nothing red', () => {
+    const sim = new BellmanFordSimulation(weighted(g), s);
+    runToEnd(sim);
+    expect(sim.degenerateEdges()).toEqual([]);
+    expect(sim.highlight().exploredEdges!.some((e) => e.degenerate)).toBe(false);
+  });
+
+  it('undirected: a red edge is red whichever way round it failed, and is not also white', () => {
+    const h = new Graph();
+    for (let i = 0; i < 3; i++) h.addNode(0, 0);
+    h.addEdge(0, 1, 2);
+    h.addEdge(1, 2, -1); // a negative undirected edge: a negative cycle by itself
+    const sim = new BellmanFordSimulation(weighted(h, 'undirected'), 0);
+    runToEnd(sim);
+    expect(sim.result).toBe(false);
+    const h2 = sim.highlight();
+    const red = h2.exploredEdges!.filter((e) => e.degenerate).map((e) => `${Math.min(e.from, e.to)}-${Math.max(e.from, e.to)}`);
+    expect(red).toContain('1-2');
+    for (const [a, b] of h2.activeEdges) expect(red).not.toContain(`${Math.min(a, b)}-${Math.max(a, b)}`);
   });
 
   it('a negative cycle that the source cannot reach does not matter', () => {

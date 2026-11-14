@@ -4087,13 +4087,13 @@ test.describe('algorithm simulation (Bellman–Ford)', () => {
   ];
   const SPOTS = [P.a, P.b, P.c];
 
-  async function build(page: Page, algorithm = 'Bellman–Ford algorithm'): Promise<void> {
+  async function build(page: Page, algorithm = 'Bellman–Ford algorithm', arcs = ARCS): Promise<void> {
     await addTriangleNodes();
-    for (const [a, b] of ARCS) await connect(SPOTS[a], SPOTS[b]);
+    for (const [a, b] of arcs) await connect(SPOTS[a], SPOTS[b]);
     await page.locator('label[for="mode-directed"]').click();
     await page.locator('label[for="weights-on"]').click();
     const height = page.viewportSize()!.height;
-    for (const [a, b, w] of ARCS) {
+    for (const [a, b, w] of arcs) {
       await cv.move(...mid(SPOTS[a], SPOTS[b]));
       await page.mouse.wheel(0, -((w + 0.4 * Math.sign(w)) / 15) * height);
       await expect(cv.edge(a, b)).toHaveAttribute('data-weight', String(w));
@@ -4268,6 +4268,34 @@ test.describe('algorithm simulation (Bellman–Ford)', () => {
     [y0, y1, y2] = await settledY([0, 1, 2]);
     expect(y1).toBeGreaterThan(y2 + 20);
     expect(y2).toBeGreaterThan(y0 + 20);
+  });
+
+  test('a negative-weight cycle: at the end the degenerate edges are red, the predecessor edges white', async ({ page }) => {
+    // 0 → 1 (1), 1 → 2 (−3), 2 → 0 (1): the cycle weighs −1. The check fails at 0 → 1.
+    await build(page, 'Bellman–Ford algorithm', [
+      [0, 1, 1],
+      [1, 2, -3],
+      [2, 0, 1],
+    ]);
+    await run(page);
+    for (let i = 0; i < 7; i++) await update(page);
+    await expect(message(page)).toContainText('a negative-weight cycle is reachable from 0 (FALSE)');
+    await expect(message(page)).toContainText('In red: the edge that could still lower a d.');
+    expect(await edgeDashes(page)).toEqual({ '0-1': 'solid', '1-2': 'white', '2-0': 'white' });
+    const red = await page.evaluate(() => {
+      const probe = document.createElement('div');
+      probe.style.color = 'var(--danger)';
+      document.body.append(probe);
+      const colour = getComputedStyle(probe).color;
+      probe.remove();
+      return colour;
+    });
+    const line = cv.edge(0, 1).locator('.edge-line');
+    await expect(cv.edge(0, 1)).toHaveClass(/sim-degenerate/);
+    await expect.poll(() => line.evaluate((l) => getComputedStyle(l).stroke)).toBe(red); // after its 0.12 s fade
+    expect(await line.evaluate((l) => getComputedStyle(l).markerEnd)).toContain('arrow-backward');
+    await page.getByRole('button', { name: 'Finish', exact: true }).click();
+    await expect(cv.canvas.locator('.edge.sim-degenerate')).toHaveCount(0);
   });
 
   test('Full cycle is for Bellman–Ford only', async ({ page }) => {
