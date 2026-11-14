@@ -30,6 +30,13 @@ const clearBtn = document.querySelector<HTMLButtonElement>('#clear-btn')!;
 const randomBtn = document.querySelector<HTMLButtonElement>('#random-btn')!;
 const layoutBtn = document.querySelector<HTMLButtonElement>('#layout-toggle')!;
 const layoutState = layoutBtn.querySelector<HTMLElement>('.state')!;
+const weightedLayoutBtn = document.querySelector<HTMLButtonElement>('#weighted-layout-toggle')!;
+
+/** The weighted-layout dot: shown while auto-layout is on in Weighted or Positive mode. */
+function syncWeightedLayoutToggle(): void {
+  weightedLayoutBtn.hidden = !(editor.autoLayoutEnabled && graph.weighted);
+  weightedLayoutBtn.setAttribute('aria-pressed', String(editor.weightedLayoutEnabled));
+}
 const panelBtn = document.querySelector<HTMLButtonElement>('#panel-toggle')!;
 const panel = document.querySelector<HTMLElement>('#info-panel')!;
 
@@ -64,6 +71,7 @@ function refreshPanels(): void {
     listNote.textContent += positive;
     matrixNote.textContent += positive;
   }
+  syncWeightedLayoutToggle();
   placePanel();
 }
 
@@ -104,6 +112,7 @@ const editor = new GraphEditor(svg, graph, {
   onAutoLayoutChange: (enabled) => {
     layoutBtn.setAttribute('aria-pressed', String(enabled));
     layoutState.textContent = enabled ? 'On' : 'Off';
+    syncWeightedLayoutToggle();
   },
 });
 
@@ -211,6 +220,11 @@ for (const input of weightInputs) {
     if (input.checked) editor.setWeighting(input.value as Weighting);
   });
 }
+
+weightedLayoutBtn.addEventListener('click', () => {
+  editor.setWeightedLayout(!editor.weightedLayoutEnabled);
+  syncWeightedLayoutToggle();
+});
 
 layoutBtn.addEventListener('click', () => {
   // Turning auto-layout on leaves the topological order or the forest (the run itself goes on).

@@ -133,6 +133,8 @@ export class GraphEditor {
   private wheelCarry = 0;
 
   private readonly layout = new ForceLayout({ padding: NODE_RADIUS + 2 });
+  /** Weighted modes: whether the layout's edge lengths follow the weights. */
+  private weightedLayout = true;
   private autoLayout = false;
   private frame: number | null = null;
 
@@ -413,6 +415,27 @@ export class GraphEditor {
 
   get autoLayoutEnabled(): boolean {
     return this.autoLayout;
+  }
+
+  /** Weighted or Positive: whether auto-layout makes edge lengths follow the weights (default on). */
+  get weightedLayoutEnabled(): boolean {
+    return this.weightedLayout;
+  }
+
+  /**
+   * Weighted or Positive: lets auto-layout give edges lengths in proportion to their weights
+   * (on, the default), or lay the graph out as usual, every edge alike (off). The layout
+   * moves to match; unweighted mode always uses the usual layout.
+   */
+  setWeightedLayout(enabled: boolean): void {
+    if (enabled === this.weightedLayout) return;
+    this.weightedLayout = enabled;
+    this.kickLayout();
+    this.message(
+      enabled
+        ? 'Weighted layout: edge lengths follow the weights.'
+        : 'Usual layout: every edge has the same length, whatever its weight.',
+    );
   }
 
   /** Turns the force-directed auto-layout on or off. Nodes stay where they are when turned off. */
@@ -1235,12 +1258,12 @@ export class GraphEditor {
   }
 
   /**
-   * The weights the auto-layout gives edge lengths in proportion to: none when unweighted
-   * (every edge the same ideal length). Weighted or positive, each pair's magnitude:
+   * The weights the auto-layout gives edge lengths in proportion to: none when unweighted,
+   * or when the weighted layout is switched off (every edge the same ideal length). Weighted or positive, each pair's magnitude:
    * directed, the average of the two arcs' (one arc: its own); undirected, the edge's weight.
    */
   private layoutWeight(): EdgeWeight | undefined {
-    if (!this.graph.weighted) return undefined;
+    if (!this.graph.weighted || !this.weightedLayout) return undefined;
     const view = this.graph.currentView;
     if (!this.graph.directed) return (a, b) => Math.abs(view.weight(a, b) ?? 0);
     return (a, b) => {

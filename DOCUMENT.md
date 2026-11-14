@@ -126,6 +126,7 @@ Checking that a test can fail: break the feature in `src/`, not in `build/`. Pla
 | **Randomise** button (header, left of Clear graph) | Empty canvas: a random graph of 5–10 nodes. Nodes already placed: keep them where they are and replace their edges with a random set. The graph is random for the selected mode (see `src/random-graph.ts` below) |
 | **Clear graph** button (header) | Remove every node and edge |
 | **Auto-layout** button (top-left of the canvas) | Turn automatic spacing on/off |
+| Small dot at the right of the Auto-layout panel (Weighted or Positive, while auto-layout is on) | Lit (default): edge lengths follow the weights. Dimmed: the usual layout, every edge alike |
 | **Undirected / Directed** switch (top-left, next to Auto-layout) | Choose how edges are interpreted (see below) |
 | **Unweighted / Weighted / Positive** switch (top-left, next to Undirected / Directed) | Show or hide edge weights, or show and use their magnitudes (see below) |
 | Weighted mode: **scroll over an edge** (or its weight label) | Change its weight: 15 per page of scrolling, up = more |
@@ -486,6 +487,8 @@ The **Auto-layout** toggle runs a force-directed layout ([src/layout.ts](src/lay
 ### Edge lengths from weights
 
 In Weighted and Positive modes, auto-layout gives each edge an ideal length in proportion to its weight's magnitude. Unweighted mode keeps one ideal length k for every edge, exactly as before.
+
+- **Switching it off:** in those modes, while auto-layout is on, a small round toggle sits at the right of the Auto-layout panel ("Edge lengths follow weights"). Lit, the default, it uses the weighted layout below. Dimmed, it uses the usual layout, every edge alike, and the graph moves to match. The arcs of a two-way pair are still drawn by their weights either way (the lighter straight).
 
 - **Which weight:**
   - **Directed:** a pair joined both ways uses the **average** of the two arcs' magnitudes, since it is one distance; a single arc uses its own.

@@ -4969,6 +4969,50 @@ test.describe('auto-layout', () => {
       expect(Math.abs(d(pos, 1, 2) / d(pos, 0, 1) - 1)).toBeLessThan(0.1);
     });
 
+    test('a small dot on the auto-layout panel switches between the weighted and the usual layout', async ({ page }) => {
+      const dot = page.getByRole('button', { name: 'Edge lengths follow weights' });
+      for (const p of P3) await cv.click(...p);
+      await connect(P3[0], P3[1]);
+      await connect(P3[1], P3[2]);
+      await expect(dot).toBeHidden(); // unweighted, auto-layout off
+      await page.locator('label[for="weights-on"]').click();
+      await setWeight(page, 0, 1, 3);
+      await setWeight(page, 1, 2, 12);
+      await expect(dot).toBeHidden(); // auto-layout still off
+      await page.getByRole('button', { name: /Auto-layout/ }).click();
+      await expect(dot).toBeVisible();
+      await expect(dot).toHaveAttribute('aria-pressed', 'true'); // lit by default
+      // On the panel's right, inside it.
+      const [panel, toggle, box] = await Promise.all([
+        page.locator('.layout-panel').boundingBox(),
+        page.getByRole('button', { name: /Auto-layout/ }).boundingBox(),
+        dot.boundingBox(),
+      ]);
+      expect(box!.x).toBeGreaterThan(toggle!.x + toggle!.width - 4); // right of the toggle (tucked in 2 px)
+      expect(box!.x + box!.width).toBeLessThanOrEqual(panel!.x + panel!.width);
+      expect(box!.width).toBeLessThan(20);
+      let pos = await waitUntilSettled(page);
+      expect(d(pos, 1, 2) / d(pos, 0, 1)).toBeGreaterThan(2.2);
+      // Dimmed: the usual layout, every edge alike.
+      await dot.click();
+      await expect(dot).toHaveAttribute('aria-pressed', 'false');
+      await expect(page.locator('#message')).toContainText('Usual layout');
+      pos = await waitUntilSettled(page);
+      expect(Math.abs(d(pos, 1, 2) / d(pos, 0, 1) - 1)).toBeLessThan(0.1);
+      // Lit again: the weights again.
+      await dot.click();
+      await expect(dot).toHaveAttribute('aria-pressed', 'true');
+      pos = await waitUntilSettled(page);
+      expect(d(pos, 1, 2) / d(pos, 0, 1)).toBeGreaterThan(2.2);
+      // Gone in unweighted mode, and with auto-layout off.
+      await page.locator('label[for="weights-off"]').click();
+      await expect(dot).toBeHidden();
+      await page.locator('label[for="weights-positive"]').click();
+      await expect(dot).toBeVisible();
+      await page.getByRole('button', { name: /Auto-layout/ }).click();
+      await expect(dot).toBeHidden();
+    });
+
     test('arcs both ways: the lighter runs straight, the heavier bows out; unweighted, both bow', async ({ page }) => {
       await cv.click(...P3[0]);
       await cv.click(...P3[2]);

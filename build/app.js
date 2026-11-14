@@ -1547,6 +1547,8 @@
 		wheelEdge = null;
 		wheelCarry = 0;
 		layout = new ForceLayout({ padding: 22 });
+		/** Weighted modes: whether the layout's edge lengths follow the weights. */
+		weightedLayout = true;
 		autoLayout = false;
 		frame = null;
 		/** Arc diagram state, and the tweens that move vertices into line and bend the edges. */
@@ -1809,6 +1811,21 @@
 		}
 		get autoLayoutEnabled() {
 			return this.autoLayout;
+		}
+		/** Weighted or Positive: whether auto-layout makes edge lengths follow the weights (default on). */
+		get weightedLayoutEnabled() {
+			return this.weightedLayout;
+		}
+		/**
+		* Weighted or Positive: lets auto-layout give edges lengths in proportion to their weights
+		* (on, the default), or lay the graph out as usual, every edge alike (off). The layout
+		* moves to match; unweighted mode always uses the usual layout.
+		*/
+		setWeightedLayout(enabled) {
+			if (enabled === this.weightedLayout) return;
+			this.weightedLayout = enabled;
+			this.kickLayout();
+			this.message(enabled ? "Weighted layout: edge lengths follow the weights." : "Usual layout: every edge has the same length, whatever its weight.");
 		}
 		/** Turns the force-directed auto-layout on or off. Nodes stay where they are when turned off. */
 		setAutoLayout(enabled) {
@@ -2597,12 +2614,12 @@
 			return Math.max(44, .2 * distance(this.graph.getNode(a), this.graph.getNode(b))) * (1 + 2 * (here - back) / (here + back));
 		}
 		/**
-		* The weights the auto-layout gives edge lengths in proportion to: none when unweighted
-		* (every edge the same ideal length). Weighted or positive, each pair's magnitude:
+		* The weights the auto-layout gives edge lengths in proportion to: none when unweighted,
+		* or when the weighted layout is switched off (every edge the same ideal length). Weighted or positive, each pair's magnitude:
 		* directed, the average of the two arcs' (one arc: its own); undirected, the edge's weight.
 		*/
 		layoutWeight() {
-			if (!this.graph.weighted) return void 0;
+			if (!this.graph.weighted || !this.weightedLayout) return void 0;
 			const view = this.graph.currentView;
 			if (!this.graph.directed) return (a, b) => Math.abs(view.weight(a, b) ?? 0);
 			return (a, b) => {
@@ -5623,6 +5640,12 @@
 	const randomBtn = document.querySelector("#random-btn");
 	const layoutBtn = document.querySelector("#layout-toggle");
 	const layoutState = layoutBtn.querySelector(".state");
+	const weightedLayoutBtn = document.querySelector("#weighted-layout-toggle");
+	/** The weighted-layout dot: shown while auto-layout is on in Weighted or Positive mode. */
+	function syncWeightedLayoutToggle() {
+		weightedLayoutBtn.hidden = !(editor.autoLayoutEnabled && graph.weighted);
+		weightedLayoutBtn.setAttribute("aria-pressed", String(editor.weightedLayoutEnabled));
+	}
 	const panelBtn = document.querySelector("#panel-toggle");
 	const panel = document.querySelector("#info-panel");
 	const graph = new Graph();
@@ -5644,6 +5667,7 @@
 			listNote.textContent += positive;
 			matrixNote.textContent += positive;
 		}
+		syncWeightedLayoutToggle();
 		placePanel();
 	}
 	/** Opens the ☰ panel below the toolbar when the toolbar would otherwise overlap it. */
@@ -5673,6 +5697,7 @@
 		onAutoLayoutChange: (enabled) => {
 			layoutBtn.setAttribute("aria-pressed", String(enabled));
 			layoutState.textContent = enabled ? "On" : "Off";
+			syncWeightedLayoutToggle();
 		}
 	});
 	clearBtn.addEventListener("click", () => editor.clear());
@@ -5735,6 +5760,10 @@
 	});
 	for (const input of weightInputs) input.addEventListener("change", () => {
 		if (input.checked) editor.setWeighting(input.value);
+	});
+	weightedLayoutBtn.addEventListener("click", () => {
+		editor.setWeightedLayout(!editor.weightedLayoutEnabled);
+		syncWeightedLayoutToggle();
 	});
 	layoutBtn.addEventListener("click", () => {
 		const leaving = editor.autoLayoutEnabled ? null : editor.arrangement;
