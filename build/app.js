@@ -2639,7 +2639,7 @@
 	* a gap, each vertex's neighbours as boxes joined left to right (like an array).
 	* Built from nested lists so screen readers announce "Neighbours of 0, 2 items" etc.
 	*/
-	function renderAdjacencyList(target, view) {
+	function renderAdjacencyList(target, view, focus = null) {
 		const rows = view.weightedAdjacencyList();
 		if (rows.length === 0) {
 			const empty = document.createElement("p");
@@ -2659,12 +2659,15 @@
 			const vertex = document.createElement("span");
 			vertex.className = "adj-vertex";
 			vertex.textContent = String(id);
+			const focusRow = focus !== null && focus.from === id;
+			if (focusRow) markFocus(vertex);
 			const chain = document.createElement("ul");
 			chain.className = "adj-neighbors";
 			chain.setAttribute("aria-label", `${view.directed ? "Out-neighbours" : "Neighbours"} of ${id}`);
 			for (const n of neighbors) {
 				const box = document.createElement("li");
 				box.className = "adj-box";
+				if (focusRow && n.id === focus.to) markFocus(box);
 				const idEl = document.createElement("span");
 				idEl.className = "adj-id";
 				idEl.textContent = String(n.id);
@@ -2691,7 +2694,7 @@
 		target.replaceChildren(list);
 	}
 	/** Renders the adjacency matrix as a table with node ids as row and column headers. */
-	function renderAdjacencyMatrix(target, view) {
+	function renderAdjacencyMatrix(target, view, focus = null) {
 		const { ids, matrix } = view.weighted ? view.weightMatrix() : view.adjacencyMatrix();
 		if (ids.length === 0) {
 			const empty = document.createElement("p");
@@ -2718,11 +2721,17 @@
 				const td = cell("td", value === null ? "—" : String(value));
 				if (present) td.classList.add("on");
 				if (i === j) td.classList.add("diag");
+				if (focus !== null && ids[i] === focus.from && ids[j] === focus.to) markFocus(td);
 				tr.append(td);
 			});
 			body.append(tr);
 		});
 		target.replaceChildren(table);
+	}
+	/** Picks out an element as the focus edge's (white, as the edge on the canvas). */
+	function markFocus(el) {
+		el.classList.add("sim-focus");
+		el.setAttribute("aria-current", "true");
 	}
 	function cell(tag, text, attrs = {}) {
 		const el = document.createElement(tag);
@@ -3748,7 +3757,7 @@
 				current: next,
 				done: [...this.order],
 				activeEdges: next !== null ? this.edgesToRelax() : this.predecessorEdges(),
-				labels: Object.fromEntries([...this.distance].map(([id, d]) => [id, formatDistance(d)]))
+				labels: Object.fromEntries([...this.distance].map(([id, d]) => [id, formatDistance$1(d)]))
 			};
 		}
 		priorityQueueSnapshot() {
@@ -3772,7 +3781,7 @@
 			const parts = [`Extracted ${u} (d = ${this.distance.get(u)}).`];
 			if (relaxed.length === 0) parts.push("No edge to relax.");
 			else {
-				if (lowered.length) parts.push(`Relaxed ${lowered.map((r) => `${u} ${arrow} ${r.v}: d ${formatDistance(r.before)} → ${r.after}`).join(", ")}.`);
+				if (lowered.length) parts.push(`Relaxed ${lowered.map((r) => `${u} ${arrow} ${r.v}: d ${formatDistance$1(r.before)} → ${r.after}`).join(", ")}.`);
 				if (kept.length) parts.push(`No shorter path to ${kept.map((r) => r.v).join(", ")}.`);
 			}
 			if (!this.finished) return `${parts.join(" ")} ${nextText()}`;
@@ -3781,6 +3790,147 @@
 			const unreachable = n - reached;
 			const ending = unreachable === 0 ? `Dijkstra finished: shortest paths from ${this.source} to all ${n} vertices; the white edges (v.π, v) form the shortest-paths tree. Press Finish.` : `Dijkstra finished: shortest paths from ${this.source} to ${reached} of ${n} vertices; ${unreachable} not reachable (d = ∞). The white edges (v.π, v) form the shortest-paths tree. Press Finish.`;
 			return `${parts.join(" ")} ${ending}`;
+		}
+	};
+	function formatDistance$1(d) {
+		return Number.isFinite(d) ? String(d) : "∞";
+	}
+	const dijkstra = {
+		id: "dijkstra",
+		name: "Dijkstra's algorithm",
+		requires: { weighting: "positive" },
+		create: (view, start) => new DijkstraSimulation(view, start)
+	};
+	// src/algorithms/bellman-ford.ts
+	var BellmanFordSimulation = class {
+		source;
+		/** G.E, in the order each pass goes through them. */
+		edges;
+		/** v.d: the shortest-path estimate (Infinity for ∞). */
+		distance = /* @__PURE__ */ new Map();
+		/** v.π: the predecessor on the shortest path found so far (null for NIL). */
+		parent = /* @__PURE__ */ new Map();
+		/** Passes of RELAX: |V| − 1. */
+		passes;
+		/** Which pass the next step is in (1 … passes), or passes + 1 for the check. */
+		pass = 1;
+		/** The next edge's index in `edges`. */
+		index = 0;
+		last = null;
+		/** The check's verdict once it has ended: TRUE (no negative cycle) or FALSE; null before. */
+		result = null;
+		constructor(view, source) {
+			this.source = source;
+			const ids = view.nodeIds();
+			for (const id of ids) {
+				this.distance.set(id, Infinity);
+				this.parent.set(id, null);
+			}
+			if (this.distance.has(source)) this.distance.set(source, 0);
+			this.edges = ids.flatMap((u) => view.neighbors(u).map((v) => ({
+				from: u,
+				to: v,
+				weight: view.weight(u, v)
+			})));
+			this.passes = Math.max(0, ids.length - 1);
+			if (this.edges.length === 0) this.result = true;
+		}
+		get finished() {
+			return this.result !== null;
+		}
+		/** Whether the next step is in the final check (rather than a pass of RELAX). */
+		get checking() {
+			return this.pass > this.passes;
+		}
+		/** The edge the next step relaxes or checks (null once finished). */
+		get nextEdge() {
+			return this.finished ? null : this.edges[this.index];
+		}
+		/** The shortest-paths tree found so far: (v.π, v) for every v with a predecessor. */
+		predecessorEdges() {
+			const edges = [];
+			for (const [v, p] of this.parent) if (p !== null) edges.push([p, v]);
+			return edges;
+		}
+		step() {
+			const arc = this.nextEdge;
+			if (!arc) return false;
+			const { from: u, to: v, weight } = arc;
+			const through = this.distance.get(u) + weight;
+			if (!this.checking) {
+				const before = this.distance.get(v);
+				if (through < before) {
+					this.distance.set(v, through);
+					this.parent.set(v, u);
+				}
+				this.last = {
+					kind: "relax",
+					arc,
+					pass: this.pass,
+					index: this.index,
+					before,
+					after: this.distance.get(v)
+				};
+			} else {
+				const ok = !(this.distance.get(v) > through);
+				this.last = {
+					kind: "check",
+					arc,
+					index: this.index,
+					ok
+				};
+				if (!ok) {
+					this.result = false;
+					return true;
+				}
+			}
+			this.index++;
+			if (this.index === this.edges.length) {
+				this.index = 0;
+				if (this.checking) this.result = true;
+				this.pass++;
+			}
+			return true;
+		}
+		highlight() {
+			const next = this.nextEdge;
+			const failed = this.result === false && this.last ? this.last.arc : null;
+			const focus = next ?? failed;
+			return {
+				current: null,
+				done: [],
+				activeEdges: focus ? [[focus.from, focus.to]] : this.predecessorEdges(),
+				labels: Object.fromEntries([...this.distance].map(([id, d]) => [id, formatDistance(d)])),
+				representationEdge: focus ? {
+					from: focus.from,
+					to: focus.to
+				} : void 0
+			};
+		}
+		describe() {
+			const name = (a) => `${a.from} → ${a.to} (weight ${a.weight})`;
+			const m = this.edges.length;
+			const next = this.nextEdge;
+			const nextText = () => {
+				if (!next) return "";
+				return this.checking ? ` Next: check ${name(next)}${this.index === 0 ? ", the first edge of the final check" : ""}.` : ` Next: relax ${name(next)}${this.index === 0 && this.last ? `, starting pass ${this.pass} of ${this.passes}` : ""}.`;
+			};
+			const last = this.last;
+			if (last === null) {
+				if (this.finished) return `Bellman–Ford from ${this.source}: there are no edges, so nothing to relax; no negative-weight cycle (TRUE). Press Finish.`;
+				return `Bellman–Ford from ${this.source}. Every d is ∞ except ${this.source}.d = 0. ${this.passes} ${this.passes === 1 ? "pass" : "passes"} (|V| − 1) over the ${m} edges, then a check.${nextText()}`;
+			}
+			let done;
+			if (last.kind === "relax") {
+				const where = `Pass ${last.pass} of ${this.passes}, edge ${last.index + 1} of ${m}:`;
+				done = last.after < last.before ? `${where} relaxed ${name(last.arc)}: ${last.arc.to}.d ${formatDistance(last.before)} → ${last.after}.` : `${where} ${name(last.arc)} gives no shorter path to ${last.arc.to}.`;
+			} else {
+				const where = `Check, edge ${last.index + 1} of ${m}:`;
+				done = last.ok ? `${where} ${name(last.arc)} cannot lower ${last.arc.to}.d.` : `${where} ${name(last.arc)} could still lower ${last.arc.to}.d (${formatDistance(this.distance.get(last.arc.to))} > ${formatDistance(this.distance.get(last.arc.from))} + ${last.arc.weight}).`;
+			}
+			if (this.result === true) return `${done} Bellman–Ford finished: no negative-weight cycle is reachable from ${this.source} (TRUE), so every d is a shortest-path weight; the white edges (v.π, v) form the shortest-paths tree. Press Finish.`;
+			if (this.result === false) return `${done} Bellman–Ford finished: a negative-weight cycle is reachable from ${this.source} (FALSE), so some shortest paths are not defined. Press Finish.`;
+			return `${done}${nextText()}`;
 		}
 	};
 	function formatDistance(d) {
@@ -3793,11 +3943,13 @@
 		dfs,
 		prim,
 		kruskal,
+		dijkstra,
 		{
-			id: "dijkstra",
-			name: "Dijkstra's algorithm",
-			requires: { weighting: "positive" },
-			create: (view, start) => new DijkstraSimulation(view, start)
+			id: "bellman-ford",
+			name: "Bellman–Ford algorithm",
+			requires: {},
+			usesWeights: true,
+			create: (view, start) => new BellmanFordSimulation(view, start)
 		}
 	];
 	// src/runner.ts
@@ -3853,6 +4005,10 @@
 		}
 		get running() {
 			return this.simulation !== null;
+		}
+		/** The edge the running simulation's next step works on, for the side panel (Bellman–Ford); else null. */
+		get representationEdge() {
+			return this.simulation?.highlight().representationEdge ?? null;
 		}
 		get algorithm() {
 			return ALGORITHMS.find((a) => a.id === this.el.select.value) ?? ALGORITHMS[0];
@@ -5018,8 +5174,9 @@
 		clearBtn.disabled = n === 0 || (runner?.running ?? false);
 		randomBtn.disabled = runner?.running ?? false;
 		runner?.refresh();
-		renderAdjacencyList(adjacencyEl, graph.currentView);
-		renderAdjacencyMatrix(matrixEl, graph.currentView);
+		const focus = runner?.representationEdge ?? null;
+		renderAdjacencyList(adjacencyEl, graph.currentView, focus);
+		renderAdjacencyMatrix(matrixEl, graph.currentView, focus);
 		listNote.textContent = (graph.directed ? "Each node followed by the nodes its edges point to." : "Each node followed by its neighbours.") + (graph.weighted ? " Each box shows the neighbour (top) and the edge weight (bottom)." : "");
 		matrixNote.textContent = graph.weighted ? graph.directed ? "Row r, column c is the weight of the edge r → c; — means no edge." : "Each cell is the weight of the edge between the row and column nodes; — means no edge. If edges run both ways with different weights, the smaller is shown." : graph.directed ? "Row r, column c is 1 when there is an edge r → c, so the matrix need not be symmetric." : "1 marks an edge between the row and column nodes. The matrix is symmetric because edges are undirected.";
 		if (graph.weighting === "positive") {

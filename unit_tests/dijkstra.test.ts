@@ -39,8 +39,8 @@ function runToEnd(sim: DijkstraSimulation): number {
 }
 
 describe('Dijkstra registry entry', () => {
-  it('is offered last, and forces the positive weighting (direction as chosen)', () => {
-    expect(ALGORITHMS.at(-1)).toBe(dijkstra);
+  it('is offered after Kruskal, and forces the positive weighting (direction as chosen)', () => {
+    expect(ALGORITHMS[ALGORITHMS.findIndex((a) => a.id === 'kruskal') + 1]).toBe(dijkstra);
     expect(dijkstra.name).toBe("Dijkstra's algorithm");
     expect(dijkstra.requires).toEqual({ weighting: 'positive' });
     expect(dijkstra.create(positive(g), s)).toBeInstanceOf(DijkstraSimulation);

@@ -1,4 +1,11 @@
 import type { GraphView } from './graph-views.js';
+import type { NodeId } from './graph.js';
+
+/**
+ * An edge to pick out in the representations (Bellman–Ford's next edge): its from vertex
+ * and, in that row, its to vertex in the list; row `from`, column `to` in the matrix.
+ */
+export type FocusEdge = { from: NodeId; to: NodeId } | null;
 
 /**
  * Renders the two standard graph representations shown in the ☰ panel: the adjacency
@@ -14,7 +21,7 @@ const EMPTY = 'No nodes yet.';
  * a gap, each vertex's neighbours as boxes joined left to right (like an array).
  * Built from nested lists so screen readers announce "Neighbours of 0, 2 items" etc.
  */
-export function renderAdjacencyList(target: HTMLElement, view: GraphView): void {
+export function renderAdjacencyList(target: HTMLElement, view: GraphView, focus: FocusEdge = null): void {
   // Weighted views: each neighbour box also shows the edge's weight (below the id).
   const rows = view.weightedAdjacencyList();
   if (rows.length === 0) {
@@ -42,6 +49,8 @@ export function renderAdjacencyList(target: HTMLElement, view: GraphView): void 
     const vertex = document.createElement('span');
     vertex.className = 'adj-vertex';
     vertex.textContent = String(id);
+    const focusRow = focus !== null && focus.from === id;
+    if (focusRow) markFocus(vertex);
 
     const chain = document.createElement('ul');
     chain.className = 'adj-neighbors';
@@ -49,6 +58,7 @@ export function renderAdjacencyList(target: HTMLElement, view: GraphView): void 
     for (const n of neighbors) {
       const box = document.createElement('li');
       box.className = 'adj-box';
+      if (focusRow && n.id === focus.to) markFocus(box);
       const idEl = document.createElement('span');
       idEl.className = 'adj-id';
       idEl.textContent = String(n.id);
@@ -77,7 +87,7 @@ export function renderAdjacencyList(target: HTMLElement, view: GraphView): void 
 }
 
 /** Renders the adjacency matrix as a table with node ids as row and column headers. */
-export function renderAdjacencyMatrix(target: HTMLElement, view: GraphView): void {
+export function renderAdjacencyMatrix(target: HTMLElement, view: GraphView, focus: FocusEdge = null): void {
   // Unweighted: 0/1. Weighted: the weight, or "—" where there is no edge (0 is a real weight).
   const { ids, matrix } = view.weighted ? view.weightMatrix() : view.adjacencyMatrix();
   if (ids.length === 0) {
@@ -108,12 +118,19 @@ export function renderAdjacencyMatrix(target: HTMLElement, view: GraphView): voi
       const td = cell('td', value === null ? '—' : String(value));
       if (present) td.classList.add('on');
       if (i === j) td.classList.add('diag');
+      if (focus !== null && ids[i] === focus.from && ids[j] === focus.to) markFocus(td);
       tr.append(td);
     });
     body.append(tr);
   });
 
   target.replaceChildren(table);
+}
+
+/** Picks out an element as the focus edge's (white, as the edge on the canvas). */
+function markFocus(el: HTMLElement): void {
+  el.classList.add('sim-focus');
+  el.setAttribute('aria-current', 'true');
 }
 
 function cell(tag: 'th' | 'td', text: string, attrs: Record<string, string> = {}): HTMLTableCellElement {

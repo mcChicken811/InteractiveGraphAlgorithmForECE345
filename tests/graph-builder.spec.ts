@@ -1319,6 +1319,7 @@ test.describe('algorithm simulation (BFS)', () => {
       "Prim's algorithm",
       "Kruskal's algorithm",
       "Dijkstra's algorithm",
+      'Bellman–Ford algorithm',
     ]);
     await page.keyboard.press('Escape');
     await expect(runBtn(page)).toBeVisible();
@@ -3947,7 +3948,7 @@ test.describe("algorithm simulation (Dijkstra's shortest paths)", () => {
   test('is offered in the picker, after Kruskal', async ({ page }) => {
     await page.getByRole('combobox', { name: 'Algorithm' }).click();
     const options = await page.getByRole('listbox', { name: 'Algorithm' }).getByRole('option').allTextContents();
-    expect(options.at(-1)).toBe("Dijkstra's algorithm");
+    expect(options[options.indexOf("Kruskal's algorithm") + 1]).toBe("Dijkstra's algorithm");
   });
 
   test('Run forces Positive (weights read as magnitudes) and locks the switches; Stop restores', async ({ page }) => {
@@ -4068,6 +4069,125 @@ test.describe("algorithm simulation (Dijkstra's shortest paths)", () => {
     await expect(pqStrip(page)).toHaveClass(/peek-ids/);
     await page.mouse.move(5, 790);
     await expect(cv.canvas).not.toHaveClass(/peek-ids/);
+  });
+});
+
+test.describe('algorithm simulation (Bellman–Ford)', () => {
+  const run = (page: Page) => page.getByRole('button', { name: 'Run', exact: true }).click();
+  const update = (page: Page) => page.getByRole('button', { name: 'Update', exact: true }).click();
+  const message = (page: Page) => page.locator('#message');
+  const radio = (page: Page, name: string) => page.getByRole('radio', { name, exact: true });
+  const WHITE = 'rgb(255, 255, 255)';
+
+  /** Directed, weighted: 0 → 1 (4), 0 → 2 (−1), 2 → 1 (3). Edge order 0→1, 0→2, 2→1; 2 passes + check = 9 steps. */
+  const ARCS: Array<[number, number, number]> = [
+    [0, 1, 4],
+    [0, 2, -1],
+    [2, 1, 3],
+  ];
+  const SPOTS = [P.a, P.b, P.c];
+
+  async function build(page: Page, algorithm = 'Bellman–Ford algorithm'): Promise<void> {
+    await addTriangleNodes();
+    for (const [a, b] of ARCS) await connect(SPOTS[a], SPOTS[b]);
+    await page.locator('label[for="mode-directed"]').click();
+    await page.locator('label[for="weights-on"]').click();
+    const height = page.viewportSize()!.height;
+    for (const [a, b, w] of ARCS) {
+      await cv.move(...mid(SPOTS[a], SPOTS[b]));
+      await page.mouse.wheel(0, -((w + 0.4 * Math.sign(w)) / 15) * height);
+      await expect(cv.edge(a, b)).toHaveAttribute('data-weight', String(w));
+    }
+    await page.getByRole('combobox', { name: 'Algorithm' }).click();
+    await page.getByRole('option', { name: algorithm }).click();
+  }
+  async function openPanel(page: Page): Promise<void> {
+    await page.getByRole('button', { name: 'Help and adjacency list' }).click();
+    await page.getByRole('button', { name: 'How to use' }).click();
+  }
+  /** What the adjacency list picks out: its vertex and box texts, as "row:id". */
+  const listFocus = (page: Page) =>
+    page.locator('#adjacency .sim-focus').evaluateAll((els) =>
+      els.map((el) => `${el.closest('.adj-row')!.querySelector('.adj-vertex')!.textContent}:${el.querySelector('.adj-id')?.textContent ?? el.textContent}`),
+    );
+  /** The matrix cell picked out, as "row,column", or nothing. */
+  const matrixFocus = (page: Page) =>
+    page.locator('#adjacency-matrix td.sim-focus').evaluateAll((tds) =>
+      tds.map((td) => {
+        const cell = td as HTMLTableCellElement;
+        const row = cell.parentElement!.querySelector('th')!.textContent;
+        const col = cell.closest('table')!.querySelectorAll('thead th')[cell.cellIndex - 1].textContent;
+        return `${row},${col}`;
+      }),
+    );
+  const whiteEdges = (page: Page) =>
+    page
+      .locator('#canvas .edge.sim-active')
+      .evaluateAll((gs) => gs.map((g) => `${(g as SVGGElement).dataset.edgeA}-${(g as SVGGElement).dataset.edgeB}`).sort());
+
+  test('is offered last in the picker', async ({ page }) => {
+    await page.getByRole('combobox', { name: 'Algorithm' }).click();
+    const options = await page.getByRole('listbox', { name: 'Algorithm' }).getByRole('option').allTextContents();
+    expect(options.at(-1)).toBe('Bellman–Ford algorithm');
+  });
+
+  test('keeps the weighting and direction as chosen, locked; vertices show d', async ({ page }) => {
+    await build(page);
+    await run(page);
+    await expect(radio(page, 'Weighted')).toBeChecked();
+    await expect(radio(page, 'Directed')).toBeChecked();
+    for (const name of ['Unweighted', 'Weighted', 'Positive', 'Undirected', 'Directed']) await expect(radio(page, name)).toBeDisabled();
+    await expect(message(page)).toHaveText(
+      'Bellman–Ford from 0. Every d is ∞ except 0.d = 0. 2 passes (|V| − 1) over the 3 edges, then a check. Next: relax 0 → 1 (weight 4).',
+    );
+    const labels = await page.locator('#canvas [data-node-id] .sim-label').allTextContents();
+    expect(labels).toEqual(['0', '∞', '∞']);
+  });
+
+  test('the next edge is white on the canvas, in the adjacency list (from vertex, to vertex in its row) and matrix', async ({ page }) => {
+    await build(page);
+    await run(page);
+    await openPanel(page);
+    expect(await whiteEdges(page)).toEqual(['0-1']);
+    expect(await listFocus(page)).toEqual(['0:0', '0:1']);
+    const box = page.locator('#adjacency .adj-box.sim-focus');
+    expect(await box.evaluate((el) => getComputedStyle(el).outlineColor)).toBe(WHITE);
+
+    await update(page); // relaxes 0 → 1: 1.d = 4; next 0 → 2
+    await expect(message(page)).toHaveText('Pass 1 of 2, edge 1 of 3: relaxed 0 → 1 (weight 4): 1.d ∞ → 4. Next: relax 0 → 2 (weight -1).');
+    expect(await whiteEdges(page)).toEqual(['0-2']);
+    expect(await listFocus(page)).toEqual(['0:0', '0:2']);
+
+    await update(page); // next 2 → 1
+    expect(await whiteEdges(page)).toEqual(['2-1']);
+    expect(await listFocus(page)).toEqual(['2:2', '2:1']);
+    await page.getByRole('tab', { name: 'Adjacency matrix' }).click();
+    expect(await matrixFocus(page)).toEqual(['2,1']);
+    await update(page); // relaxes 2 → 1: 1.d 4 → 2; pass 2 starts at 0 → 1
+    expect(await matrixFocus(page)).toEqual(['0,1']);
+    expect(await page.locator('#canvas [data-node-id] .sim-label').allTextContents()).toEqual(['0', '2', '-1']);
+  });
+
+  test('at the end: TRUE, the shortest-paths tree white, and nothing picked out in the panel; Stop restores', async ({ page }) => {
+    await build(page);
+    await run(page);
+    await openPanel(page);
+    for (let i = 0; i < 9; i++) await update(page);
+    await expect(message(page)).toContainText('Bellman–Ford finished: no negative-weight cycle is reachable from 0 (TRUE)');
+    expect(await whiteEdges(page)).toEqual(['0-2', '2-1']);
+    expect(await listFocus(page)).toEqual([]);
+    await page.getByRole('button', { name: 'Finish', exact: true }).click();
+    await expect(radio(page, 'Directed')).toBeEnabled();
+  });
+
+  test('only Bellman–Ford picks out an edge in the panel (not Dijkstra, say)', async ({ page }) => {
+    await build(page, "Dijkstra's algorithm");
+    await run(page);
+    await openPanel(page);
+    expect((await whiteEdges(page)).length).toBeGreaterThan(0);
+    await expect(page.locator('#adjacency .sim-focus')).toHaveCount(0);
+    await page.getByRole('tab', { name: 'Adjacency matrix' }).click();
+    await expect(page.locator('#adjacency-matrix .sim-focus')).toHaveCount(0);
   });
 });
 

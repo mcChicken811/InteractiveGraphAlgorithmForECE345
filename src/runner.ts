@@ -1,6 +1,6 @@
 import { ALGORITHMS, type AlgorithmDefinition, type Simulation } from './algorithms/index.js';
 import type { GraphEditor } from './editor.js';
-import type { Graph } from './graph.js';
+import type { Graph, NodeId } from './graph.js';
 import type { Weighting } from './graph-views.js';
 import type { QueueView } from './queue-view.js';
 import type { SelectMenu } from './select-menu.js';
@@ -95,6 +95,11 @@ export class AlgorithmRunner {
 
   get running(): boolean {
     return this.simulation !== null;
+  }
+
+  /** The edge the running simulation's next step works on, for the side panel (Bellman–Ford); else null. */
+  get representationEdge(): { from: NodeId; to: NodeId } | null {
+    return this.simulation?.highlight().representationEdge ?? null;
   }
 
   private get algorithm(): AlgorithmDefinition {

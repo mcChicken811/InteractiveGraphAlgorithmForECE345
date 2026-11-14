@@ -30,7 +30,7 @@ function runToEnd(sim: BfsSimulation): number {
 
 describe('BFS registry entry', () => {
   it('is offered first, and requires the unweighted view', () => {
-    expect(ALGORITHMS.map((a) => a.id)).toEqual(['bfs', 'dfs', 'prim', 'kruskal', 'dijkstra']);
+    expect(ALGORITHMS.map((a) => a.id)).toEqual(['bfs', 'dfs', 'prim', 'kruskal', 'dijkstra', 'bellman-ford']);
     expect(bfs.name).toBe('Breadth-first search');
     expect(bfs.requires).toEqual({ weighted: false });
     expect(bfs.create(g.undirectedView, 0)).toBeInstanceOf(BfsSimulation);

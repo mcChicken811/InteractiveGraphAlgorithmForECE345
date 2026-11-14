@@ -763,6 +763,11 @@ button:disabled {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
+/* The edge Bellman–Ford works on next (ringed white, with the list's boxes below). */
+.matrix td.sim-focus {
+  opacity: 1;
+}
+
 .matrix td.corner {
   border: none;
   opacity: 1;
@@ -859,6 +864,21 @@ button:disabled {
 
 .adj-box:only-child {
   border-radius: 5px;
+}
+
+/* Bellman–Ford's next edge u → v: the vertex u, and v in u's row, white as on the canvas
+   (an outline over the border, so nothing shifts), with a dark halo for the light theme. */
+.adj-vertex.sim-focus,
+.adj-box.sim-focus,
+.matrix td.sim-focus {
+  position: relative;
+  z-index: 1;
+  /* A white ring just inside the box, edged dark on both sides (outer and inner shadow). */
+  outline: 3px solid var(--sim-current);
+  outline-offset: -3px;
+  box-shadow:
+    0 0 0 1.5px var(--sim-outline),
+    inset 0 0 0 4px var(--sim-outline);
 }
 
 .adj-none {

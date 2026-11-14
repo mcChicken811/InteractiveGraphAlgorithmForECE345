@@ -65,6 +65,12 @@ export interface Highlight {
   cutGroups?: NodeId[][];
   /** Keep the white `activeEdges` dashed (Kruskal: the next edge is not in the result yet). */
   activeDashed?: boolean;
+  /**
+   * The edge the next step works on, also highlighted in the side panel's graph
+   * representations (Bellman–Ford): its from vertex and, in that row, its to vertex in the
+   * adjacency list, and row `from`, column `to` in the adjacency matrix.
+   */
+  representationEdge?: { from: NodeId; to: NodeId };
 }
 
 export interface ExploredEdge {

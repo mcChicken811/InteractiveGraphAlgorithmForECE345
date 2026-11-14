@@ -45,8 +45,10 @@ function refreshPanels(): void {
   runner?.refresh();
 
   // The panel shows whichever reading of the graph the Undirected/Directed switch selects.
-  renderAdjacencyList(adjacencyEl, graph.currentView);
-  renderAdjacencyMatrix(matrixEl, graph.currentView);
+  // Bellman–Ford also picks out its next edge there (null for every other algorithm).
+  const focus = runner?.representationEdge ?? null;
+  renderAdjacencyList(adjacencyEl, graph.currentView, focus);
+  renderAdjacencyMatrix(matrixEl, graph.currentView, focus);
   listNote.textContent =
     (graph.directed ? 'Each node followed by the nodes its edges point to.' : 'Each node followed by its neighbours.') +
     (graph.weighted ? ' Each box shows the neighbour (top) and the edge weight (bottom).' : '');
