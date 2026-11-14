@@ -1,4 +1,4 @@
-# BFS · Graph Builder
+# Graph Demonstration
 
 Interactive editor for building a graph in the browser. The graph is stored as weighted and directed, and can be viewed as directed or undirected, weighted or unweighted (TypeScript, no runtime dependencies).
 

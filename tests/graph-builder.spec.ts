@@ -149,7 +149,7 @@ async function connect(a: readonly [number, number], b: readonly [number, number
 }
 
 test('shows an empty editor on load', async ({ page }) => {
-  await expect(page).toHaveTitle('BFS Graph Builder');
+  await expect(page).toHaveTitle('Graph Demonstration');
   await expect(page.locator('#stats')).toHaveText('0 nodes · 0 edges');
   await expect(page.locator('#message')).toHaveText('Click empty space to add a node.');
   await expectAdjacency(page, 'No nodes yet.');
