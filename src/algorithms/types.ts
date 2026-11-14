@@ -158,6 +158,8 @@ export interface ForestDiagram {
   highlightSpine?: boolean;
   /** What the arrangement shows, said when it is first shown (Show as tree). */
   intro?: string;
+  /** Says what the `aside` vertices are, when it is more than "not reached yet" (Bellman–Ford). */
+  asideNote?: string;
 }
 
 /** One vertex's [discovery, finish] interval on a timestamp chart (DFS). */
@@ -240,6 +242,11 @@ export interface Simulation {
    * The runner re-sends it after every step while it is shown.
    */
   searchTree?(): ForestDiagram;
+  /**
+   * Steps left in the current pass over the edges (Bellman–Ford). Offering it puts a Full
+   * cycle button next to Update, which plays those steps at FULL_CYCLE_RATE per second.
+   */
+  stepsLeftInPass?(): number;
 }
 
 /** An entry in the algorithm picker. */

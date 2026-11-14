@@ -6,7 +6,9 @@ import type { ForestDiagram } from './types.js';
  * "Show as tree": rows by depth (the root on row 0); leaves two column units apart, in the
  * order a depth-first walk meets them (children in the order they appear in `parent`);
  * each parent centred over its first and last child. Vertices not connected to `root`
- * through `parent` are left out. Pure.
+ * through `parent` are left out, and so is any loop in `parent` (a negative-weight cycle
+ * can make Bellman–Ford's predecessors loop, even back to the root): each vertex is
+ * placed once. Pure.
  */
 export function tidyTree(root: NodeId, parent: ReadonlyMap<NodeId, NodeId | null>): ForestDiagram['places'] {
   const children = new Map<NodeId, NodeId[]>();
@@ -15,9 +17,11 @@ export function tidyTree(root: NodeId, parent: ReadonlyMap<NodeId, NodeId | null
     children.set(u, [...(children.get(u) ?? []), v]);
   }
   const places: ForestDiagram['places'] = [];
+  const placed = new Set<NodeId>([root]);
   let slot = 0;
   const place = (v: NodeId, row: number): number => {
-    const kids = children.get(v) ?? [];
+    const kids = (children.get(v) ?? []).filter((kid) => !placed.has(kid));
+    for (const kid of kids) placed.add(kid);
     let column: number;
     if (kids.length === 0) column = 2 * slot++;
     else {

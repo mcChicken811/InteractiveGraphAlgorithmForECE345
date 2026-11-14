@@ -1,6 +1,7 @@
 import type { NodeId } from '../graph.js';
 import type { GraphView } from '../graph-views.js';
-import type { AlgorithmDefinition, Highlight, Simulation } from './types.js';
+import type { AlgorithmDefinition, ExploredEdge, ForestDiagram, Highlight, Simulation } from './types.js';
+import { tidyTree } from './tidy-tree.js';
 
 /**
  * The Bellman–Ford single-source shortest-paths algorithm as defined in CLRS
@@ -33,6 +34,12 @@ import type { AlgorithmDefinition, Highlight, Simulation } from './types.js';
  * adjacency matrix (row u, column v). Each vertex shows its d (∞ until an edge reaches
  * it). At the end, when the check passes, the edges (v.π, v) — the shortest-paths tree —
  * are white; when it fails, the edge that failed it stays white.
+ *
+ * Within each pass (and the check), the edges this pass has not reached yet are dashed and
+ * those it has relaxed are solid, so a pass starts all dashed and fills in edge by edge.
+ * Right after a pass completes, every edge shows solid; the next step starts the next pass.
+ * `stepsLeftInPass()` lets the runner play the rest of a pass at once (Full cycle), and
+ * `searchTree()` gives the predecessor tree so far for "Show as tree", as for Dijkstra.
  */
 interface Arc {
   from: NodeId;
@@ -90,6 +97,53 @@ export class BellmanFordSimulation implements Simulation {
     return this.finished ? null : this.edges[this.index];
   }
 
+  /**
+   * The edges the current pass (or the check) has gone through, by index in `edges`: all of
+   * them right after a pass completes (and at the end, TRUE), up to and including the edge
+   * that failed the check (FALSE), and none before the first step.
+   */
+  visitedThisPass(): Arc[] {
+    if (this.last === null) return [];
+    if (this.result === false) return this.edges.slice(0, this.index + 1);
+    if (this.index === 0) return [...this.edges]; // a pass has just completed
+    return this.edges.slice(0, this.index);
+  }
+
+  /** Steps left until the current pass (or the check) is through: the Full cycle button's run. */
+  stepsLeftInPass(): number {
+    return this.finished ? 0 : this.edges.length - this.index;
+  }
+
+  /**
+   * The predecessor tree G_π so far, as a tidy tree from the source (rows count edges),
+   * children in id order. Vertices not in it — d = ∞, or (after a negative-weight cycle)
+   * caught in a loop of predecessors — go `aside`. Not highlighted white while running.
+   */
+  searchTree(): ForestDiagram {
+    const places = this.distance.has(this.source) ? tidyTree(this.source, this.parent) : [];
+    const placed = new Set(places.map((p) => p.id));
+    const aside = [...this.distance.keys()].filter((id) => !placed.has(id));
+    // Reached (finite d) but not in the tree: their predecessors loop (CLRS Lemma 22.16).
+    const looped = aside.filter((id) => Number.isFinite(this.distance.get(id)!)).length;
+    const unreached = aside.length - looped;
+    const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+    return {
+      places,
+      spine: this.predecessorEdges().filter(([u, v]) => placed.has(u) && placed.has(v) && v !== this.source),
+      aside,
+      asideNote:
+        looped === 0
+          ? undefined
+          : `Waiting on the right: ${unreached ? `${plural(unreached, 'vertex', 'vertices')} not reached yet, and ` : ''}` +
+            `${plural(looped, 'vertex', 'vertices')} whose predecessors run round in a loop, which only a negative-weight ` +
+            'cycle makes possible (CLRS Lemma 22.16), so they hang from no tree.',
+      highlightSpine: false,
+      intro:
+        'Shortest-paths tree so far: the start is on top, and each vertex hangs from its predecessor v.π, ' +
+        'one row below it; each relaxation that lowers a d may move a vertex under a new predecessor.',
+    };
+  }
+
   /** The shortest-paths tree found so far: (v.π, v) for every v with a predecessor. */
   predecessorEdges(): Array<[NodeId, NodeId]> {
     const edges: Array<[NodeId, NodeId]> = [];
@@ -136,6 +190,8 @@ export class BellmanFordSimulation implements Simulation {
       // The edge the next step works on; at the end, the shortest-paths tree (or the edge
       // that failed the check).
       activeEdges: focus ? [[focus.from, focus.to]] : this.predecessorEdges(),
+      // This pass's edges so far solid; the rest dashed.
+      exploredEdges: this.visitedThisPass().map(({ from, to }): ExploredEdge => ({ from, to })),
       labels: Object.fromEntries([...this.distance].map(([id, d]) => [id, formatDistance(d)])),
       representationEdge: focus ? { from: focus.from, to: focus.to } : undefined,
     };

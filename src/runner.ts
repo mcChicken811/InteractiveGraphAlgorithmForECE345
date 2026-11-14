@@ -18,8 +18,10 @@ export interface RunnerElements {
   topo?: HTMLButtonElement;
   /** "Show as forest", a toggle offered while the simulation has a search forest to show (DFS). */
   forest?: HTMLButtonElement;
-  /** "Show as tree", a toggle offered while the simulation has a search tree to show (BFS). */
+  /** "Show as tree", a toggle offered while the simulation has a search tree to show (BFS, Dijkstra, Bellman–Ford). */
   tree?: HTMLButtonElement;
+  /** "Full cycle", offered while the simulation goes in passes over the edges (Bellman–Ford): plays the rest of a pass. */
+  cycle?: HTMLButtonElement;
   /** The Unweighted / Weighted / Positive switch (locked when an algorithm requires a weighting or reads the weights). */
   weightSwitch: HTMLFieldSetElement;
   /** The Undirected / Directed switch (locked while running: changing it would change the graph). */
@@ -43,6 +45,9 @@ export interface RunnerElements {
 
 const LOCKED_TITLE = 'Locked while the algorithm runs. Press Stop to change it.';
 
+/** Full cycle: steps (edges) per second. */
+export const FULL_CYCLE_RATE = 15;
+
 /**
  * Runs the selected algorithm step by step:
  *   Run    → locks the graph (editing, the direction switch, and the weighting) and
@@ -59,15 +64,21 @@ const LOCKED_TITLE = 'Locked while the algorithm runs. Press Stop to change it.'
  *            Update then glides them into place. Once DFS has finished, its tree edges are
  *            white, and it and Topological sort switch between each other. Pressing it
  *            again, or turning auto-layout on, leaves it. The run goes on until Finish or Stop;
- *   Show as tree → (BFS, any time while it runs) a toggle: arranges the vertices as the
- *            breadth-first tree so far (rows by distance), the vertices not reached yet
- *            grouped on the right; each Update then glides newly reached vertices into the
- *            tree. Pressing it again, or turning auto-layout on, leaves it;
+ *   Show as tree → (BFS, Dijkstra, Bellman–Ford, any time while they run) a toggle:
+ *            arranges the vertices as the search tree so far (the start on top), the
+ *            vertices not reached yet grouped on the right; each Update then glides them
+ *            into place. Pressing it again, or turning auto-layout on, leaves it;
+ *   Full cycle → (Bellman–Ford) a toggle: plays the rest of the current pass over the
+ *            edges, FULL_CYCLE_RATE steps a second, Update greyed out meanwhile; pressing
+ *            it again pauses. It stops by itself at the end of the pass (or of the run);
  *   Stop / Finish → ends the run, clears the highlighting and releases every lock
  *            (restoring the weighting and direction that were selected before).
  */
 export class AlgorithmRunner {
   private simulation: Simulation | null = null;
+  /** Full cycle playing: the timer, and how many steps it still has to take. */
+  private cycleTimer: ReturnType<typeof setInterval> | null = null;
+  private cycleLeft = 0;
   /** The weighting / direction chosen before Run forced one, restored on Stop. */
   private savedWeighting: Weighting | null = null;
   private savedDirected: boolean | null = null;
@@ -90,6 +101,7 @@ export class AlgorithmRunner {
     el.topo?.addEventListener('click', () => this.topologicalSort());
     el.forest?.addEventListener('click', () => this.toggleForest());
     el.tree?.addEventListener('click', () => this.toggleTree());
+    el.cycle?.addEventListener('click', () => this.toggleCycle());
     this.updateControls();
   }
 
@@ -135,6 +147,47 @@ export class AlgorithmRunner {
 
     this.simulation = algorithm.create(this.graph.currentView, start);
     this.show(false);
+  }
+
+  /** Whether Full cycle is playing. */
+  get playingCycle(): boolean {
+    return this.cycleTimer !== null;
+  }
+
+  /**
+   * Full cycle (Bellman–Ford): plays the rest of the current pass over the edges, one step
+   * now and then FULL_CYCLE_RATE a second, stopping by itself at the end of the pass or of
+   * the run. Pressing it while it plays pauses it.
+   */
+  toggleCycle(): void {
+    if (this.cycleTimer !== null) {
+      this.stopCycle();
+      return;
+    }
+    const simulation = this.simulation;
+    const left = simulation?.stepsLeftInPass?.() ?? 0;
+    if (!simulation || simulation.finished || left === 0) return;
+    this.cycleLeft = left;
+    this.cycleTimer = setInterval(() => this.cycleTick(), 1000 / FULL_CYCLE_RATE);
+    this.cycleTick();
+  }
+
+  private cycleTick(): void {
+    const simulation = this.simulation;
+    if (!simulation || simulation.finished || this.cycleLeft <= 0) {
+      this.stopCycle();
+      return;
+    }
+    this.cycleLeft--;
+    this.step();
+    if (this.cycleLeft <= 0 || simulation.finished) this.stopCycle();
+  }
+
+  private stopCycle(): void {
+    if (this.cycleTimer !== null) clearInterval(this.cycleTimer);
+    this.cycleTimer = null;
+    this.cycleLeft = 0;
+    if (this.simulation) this.updateControls();
   }
 
   /** Advances one step; once finished, ends the run like Stop. */
@@ -234,13 +287,16 @@ export class AlgorithmRunner {
     const waiting = tree.aside?.length ?? 0;
     this.hooks.message(
       `${tree.intro ?? 'The search tree so far.'} ` +
-        (waiting ? `The ${waiting} not reached yet wait on the right; each Update brings the new ones into the tree.` : 'Every vertex is in it.'),
+        (waiting
+          ? (tree.asideNote ?? `The ${waiting} not reached yet wait on the right; each Update brings the new ones into the tree.`)
+          : 'Every vertex is in it.'),
     );
   }
 
   /** Ends the run and releases every lock. */
   stop(message = 'Stopped.'): void {
     if (!this.simulation) return;
+    this.stopCycle();
     this.simulation = null;
     this.editor.showArcDiagram(null); // vertices stay where they are
     this.editor.setHighlight(null);
@@ -319,6 +375,15 @@ export class AlgorithmRunner {
       else topo.removeAttribute('title');
       topo.setAttribute('aria-pressed', String(this.editor.arrangement === 'line'));
     }
+    // Full cycle: while the simulation goes in passes (Bellman–Ford) and is not finished;
+    // pressed while it plays, and Update greyed out meanwhile.
+    const cycle = this.el.cycle;
+    if (cycle) {
+      const simulation = this.simulation;
+      cycle.hidden = !(simulation && typeof simulation.stepsLeftInPass === 'function' && !simulation.finished);
+      cycle.setAttribute('aria-pressed', String(this.playingCycle));
+    }
+    this.el.step.disabled = this.playingCycle;
     // Show as tree: while the simulation has a search tree (BFS), pressed while it is shown.
     const tree = this.el.tree;
     if (tree) {

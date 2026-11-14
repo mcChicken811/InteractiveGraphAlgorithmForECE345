@@ -2833,7 +2833,9 @@
 	* "Show as tree": rows by depth (the root on row 0); leaves two column units apart, in the
 	* order a depth-first walk meets them (children in the order they appear in `parent`);
 	* each parent centred over its first and last child. Vertices not connected to `root`
-	* through `parent` are left out. Pure.
+	* through `parent` are left out, and so is any loop in `parent` (a negative-weight cycle
+	* can make Bellman–Ford's predecessors loop, even back to the root): each vertex is
+	* placed once. Pure.
 	*/
 	function tidyTree(root, parent) {
 		const children = /* @__PURE__ */ new Map();
@@ -2842,9 +2844,11 @@
 			children.set(u, [...children.get(u) ?? [], v]);
 		}
 		const places = [];
+		const placed = /* @__PURE__ */ new Set([root]);
 		let slot = 0;
 		const place = (v, row) => {
-			const kids = children.get(v) ?? [];
+			const kids = (children.get(v) ?? []).filter((kid) => !placed.has(kid));
+			for (const kid of kids) placed.add(kid);
 			let column;
 			if (kids.length === 0) column = 2 * slot++;
 			else {
@@ -3846,6 +3850,42 @@
 		get nextEdge() {
 			return this.finished ? null : this.edges[this.index];
 		}
+		/**
+		* The edges the current pass (or the check) has gone through, by index in `edges`: all of
+		* them right after a pass completes (and at the end, TRUE), up to and including the edge
+		* that failed the check (FALSE), and none before the first step.
+		*/
+		visitedThisPass() {
+			if (this.last === null) return [];
+			if (this.result === false) return this.edges.slice(0, this.index + 1);
+			if (this.index === 0) return [...this.edges];
+			return this.edges.slice(0, this.index);
+		}
+		/** Steps left until the current pass (or the check) is through: the Full cycle button's run. */
+		stepsLeftInPass() {
+			return this.finished ? 0 : this.edges.length - this.index;
+		}
+		/**
+		* The predecessor tree G_π so far, as a tidy tree from the source (rows count edges),
+		* children in id order. Vertices not in it — d = ∞, or (after a negative-weight cycle)
+		* caught in a loop of predecessors — go `aside`. Not highlighted white while running.
+		*/
+		searchTree() {
+			const places = this.distance.has(this.source) ? tidyTree(this.source, this.parent) : [];
+			const placed = new Set(places.map((p) => p.id));
+			const aside = [...this.distance.keys()].filter((id) => !placed.has(id));
+			const looped = aside.filter((id) => Number.isFinite(this.distance.get(id))).length;
+			const unreached = aside.length - looped;
+			const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+			return {
+				places,
+				spine: this.predecessorEdges().filter(([u, v]) => placed.has(u) && placed.has(v) && v !== this.source),
+				aside,
+				asideNote: looped === 0 ? void 0 : `Waiting on the right: ${unreached ? `${plural(unreached, "vertex", "vertices")} not reached yet, and ` : ""}${plural(looped, "vertex", "vertices")} whose predecessors run round in a loop, which only a negative-weight cycle makes possible (CLRS Lemma 22.16), so they hang from no tree.`,
+				highlightSpine: false,
+				intro: "Shortest-paths tree so far: the start is on top, and each vertex hangs from its predecessor v.π, one row below it; each relaxation that lowers a d may move a vertex under a new predecessor."
+			};
+		}
 		/** The shortest-paths tree found so far: (v.π, v) for every v with a predecessor. */
 		predecessorEdges() {
 			const edges = [];
@@ -3900,6 +3940,10 @@
 				current: null,
 				done: [],
 				activeEdges: focus ? [[focus.from, focus.to]] : this.predecessorEdges(),
+				exploredEdges: this.visitedThisPass().map(({ from, to }) => ({
+					from,
+					to
+				})),
 				labels: Object.fromEntries([...this.distance].map(([id, d]) => [id, formatDistance(d)])),
 				representationEdge: focus ? {
 					from: focus.from,
@@ -3970,10 +4014,13 @@
 	*            Update then glides them into place. Once DFS has finished, its tree edges are
 	*            white, and it and Topological sort switch between each other. Pressing it
 	*            again, or turning auto-layout on, leaves it. The run goes on until Finish or Stop;
-	*   Show as tree → (BFS, any time while it runs) a toggle: arranges the vertices as the
-	*            breadth-first tree so far (rows by distance), the vertices not reached yet
-	*            grouped on the right; each Update then glides newly reached vertices into the
-	*            tree. Pressing it again, or turning auto-layout on, leaves it;
+	*   Show as tree → (BFS, Dijkstra, Bellman–Ford, any time while they run) a toggle:
+	*            arranges the vertices as the search tree so far (the start on top), the
+	*            vertices not reached yet grouped on the right; each Update then glides them
+	*            into place. Pressing it again, or turning auto-layout on, leaves it;
+	*   Full cycle → (Bellman–Ford) a toggle: plays the rest of the current pass over the
+	*            edges, FULL_CYCLE_RATE steps a second, Update greyed out meanwhile; pressing
+	*            it again pauses. It stops by itself at the end of the pass (or of the run);
 	*   Stop / Finish → ends the run, clears the highlighting and releases every lock
 	*            (restoring the weighting and direction that were selected before).
 	*/
@@ -3983,6 +4030,9 @@
 		el;
 		hooks;
 		simulation = null;
+		/** Full cycle playing: the timer, and how many steps it still has to take. */
+		cycleTimer = null;
+		cycleLeft = 0;
 		/** The weighting / direction chosen before Run forced one, restored on Stop. */
 		savedWeighting = null;
 		savedDirected = null;
@@ -4001,6 +4051,7 @@
 			el.topo?.addEventListener("click", () => this.topologicalSort());
 			el.forest?.addEventListener("click", () => this.toggleForest());
 			el.tree?.addEventListener("click", () => this.toggleTree());
+			el.cycle?.addEventListener("click", () => this.toggleCycle());
 			this.updateControls();
 		}
 		get running() {
@@ -4036,6 +4087,43 @@
 			this.lockSwitch(this.el.directionSwitch, true);
 			this.simulation = algorithm.create(this.graph.currentView, start);
 			this.show(false);
+		}
+		/** Whether Full cycle is playing. */
+		get playingCycle() {
+			return this.cycleTimer !== null;
+		}
+		/**
+		* Full cycle (Bellman–Ford): plays the rest of the current pass over the edges, one step
+		* now and then FULL_CYCLE_RATE a second, stopping by itself at the end of the pass or of
+		* the run. Pressing it while it plays pauses it.
+		*/
+		toggleCycle() {
+			if (this.cycleTimer !== null) {
+				this.stopCycle();
+				return;
+			}
+			const simulation = this.simulation;
+			const left = simulation?.stepsLeftInPass?.() ?? 0;
+			if (!simulation || simulation.finished || left === 0) return;
+			this.cycleLeft = left;
+			this.cycleTimer = setInterval(() => this.cycleTick(), 1e3 / 15);
+			this.cycleTick();
+		}
+		cycleTick() {
+			const simulation = this.simulation;
+			if (!simulation || simulation.finished || this.cycleLeft <= 0) {
+				this.stopCycle();
+				return;
+			}
+			this.cycleLeft--;
+			this.step();
+			if (this.cycleLeft <= 0 || simulation.finished) this.stopCycle();
+		}
+		stopCycle() {
+			if (this.cycleTimer !== null) clearInterval(this.cycleTimer);
+			this.cycleTimer = null;
+			this.cycleLeft = 0;
+			if (this.simulation) this.updateControls();
 		}
 		/** Advances one step; once finished, ends the run like Stop. */
 		step() {
@@ -4102,11 +4190,12 @@
 			this.editor.showForest(tree, "tree");
 			this.updateControls();
 			const waiting = tree.aside?.length ?? 0;
-			this.hooks.message(`${tree.intro ?? "The search tree so far."} ` + (waiting ? `The ${waiting} not reached yet wait on the right; each Update brings the new ones into the tree.` : "Every vertex is in it."));
+			this.hooks.message(`${tree.intro ?? "The search tree so far."} ` + (waiting ? tree.asideNote ?? `The ${waiting} not reached yet wait on the right; each Update brings the new ones into the tree.` : "Every vertex is in it."));
 		}
 		/** Ends the run and releases every lock. */
 		stop(message = "Stopped.") {
 			if (!this.simulation) return;
+			this.stopCycle();
 			this.simulation = null;
 			this.editor.showArcDiagram(null);
 			this.editor.setHighlight(null);
@@ -4179,6 +4268,13 @@
 				else topo.removeAttribute("title");
 				topo.setAttribute("aria-pressed", String(this.editor.arrangement === "line"));
 			}
+			const cycle = this.el.cycle;
+			if (cycle) {
+				const simulation = this.simulation;
+				cycle.hidden = !(simulation && typeof simulation.stepsLeftInPass === "function" && !simulation.finished);
+				cycle.setAttribute("aria-pressed", String(this.playingCycle));
+			}
+			this.el.step.disabled = this.playingCycle;
 			const tree = this.el.tree;
 			if (tree) {
 				tree.hidden = !(this.simulation && typeof this.simulation.searchTree === "function");
@@ -5253,6 +5349,7 @@
 		topo: document.querySelector("#topo-btn"),
 		forest: document.querySelector("#forest-btn"),
 		tree: document.querySelector("#tree-btn"),
+		cycle: document.querySelector("#cycle-btn"),
 		weightSwitch: document.querySelector("#weight-switch"),
 		directionSwitch: document.querySelector("#direction-switch"),
 		queueCard: document.querySelector("#queue-card"),

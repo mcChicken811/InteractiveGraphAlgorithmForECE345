@@ -181,6 +181,7 @@ runner = new AlgorithmRunner(
     topo: document.querySelector<HTMLButtonElement>('#topo-btn')!,
     forest: document.querySelector<HTMLButtonElement>('#forest-btn')!,
     tree: document.querySelector<HTMLButtonElement>('#tree-btn')!,
+    cycle: document.querySelector<HTMLButtonElement>('#cycle-btn')!,
     weightSwitch: document.querySelector<HTMLFieldSetElement>('#weight-switch')!,
     directionSwitch: document.querySelector<HTMLFieldSetElement>('#direction-switch')!,
     queueCard: document.querySelector<HTMLElement>('#queue-card')!,

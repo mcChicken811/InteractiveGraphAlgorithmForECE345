@@ -76,6 +76,7 @@ describe('BellmanFordSimulation on CLRS Figure 22.4', () => {
       activeEdges: [[s, t]],
       labels: { 0: '0', 1: '∞', 2: '∞', 3: '∞', 4: '∞' },
       representationEdge: { from: s, to: t },
+      exploredEdges: [], // pass 1 has reached no edge yet: every edge dashed
     });
     expect(sim.describe()).toBe(
       'Bellman–Ford from 0. Every d is ∞ except 0.d = 0. 4 passes (|V| − 1) over the 10 edges, then a check. Next: relax 0 → 1 (weight 6).',
@@ -122,6 +123,89 @@ describe('BellmanFordSimulation on CLRS Figure 22.4', () => {
     const arcs = g.getArcs();
     runToEnd(sim);
     expect(g.getArcs()).toEqual(arcs);
+  });
+});
+
+describe('per-pass dashing, Full cycle and Show as tree', () => {
+  const solid = (sim: BellmanFordSimulation) => sim.highlight().exploredEdges!.map((e) => `${e.from}>${e.to}`);
+
+  it('each pass fills in edge by edge (the rest dashed); right after a pass every edge is solid', () => {
+    const sim = new BellmanFordSimulation(weighted(g), s);
+    expect(sim.stepsLeftInPass()).toBe(10);
+    sim.step();
+    sim.step();
+    expect(solid(sim)).toEqual(['0>1', '0>3']);
+    expect(sim.stepsLeftInPass()).toBe(8);
+    for (let i = 2; i < 10; i++) sim.step(); // pass 1 complete
+    expect(solid(sim)).toHaveLength(10);
+    expect(sim.stepsLeftInPass()).toBe(10); // the whole of pass 2 ahead
+    sim.step(); // pass 2 begins: dashed again but its first edge
+    expect(solid(sim)).toEqual(['0>1']);
+  });
+
+  it('the check fills in too; TRUE leaves every edge solid, FALSE the ones up to the failing edge', () => {
+    const sim = new BellmanFordSimulation(weighted(g), s);
+    runToEnd(sim);
+    expect(solid(sim)).toHaveLength(10);
+    expect(sim.stepsLeftInPass()).toBe(0);
+    const h = new Graph();
+    for (let i = 0; i < 3; i++) h.addNode(0, 0);
+    h.directed = true;
+    h.addEdge(0, 1, 1);
+    h.addEdge(1, 2, -2);
+    h.addEdge(2, 1, 1);
+    const bad = new BellmanFordSimulation(weighted(h), 0);
+    runToEnd(bad);
+    expect(bad.result).toBe(false);
+    const failing = bad.highlight().representationEdge!;
+    const marks = solid(bad);
+    expect(marks.at(-1)).toBe(`${failing.from}>${failing.to}`);
+    expect(marks.length).toBeLessThan(3);
+  });
+
+  it('search tree: the predecessor tree from the source, rearranging as d values drop', () => {
+    const sim = new BellmanFordSimulation(weighted(g), s);
+    expect(sim.searchTree()).toMatchObject({ places: [{ id: s, column: 0, row: 0 }], spine: [], aside: [t, x, y, z] });
+    for (let i = 0; i < 10; i++) sim.step(); // pass 1
+    runToEnd(sim);
+    // The book's tree: s → y → x → t → z, a chain of rows 0 … 4.
+    const rows = Object.fromEntries(sim.searchTree().places.map((p) => [p.id, p.row]));
+    expect(rows).toEqual({ [s]: 0, [y]: 1, [x]: 2, [t]: 3, [z]: 4 });
+    expect(sim.searchTree().aside).toEqual([]);
+  });
+
+  it('search tree with a negative-weight cycle: never loops, and puts the cycle’s vertices aside', () => {
+    const h = new Graph();
+    for (let i = 0; i < 3; i++) h.addNode(0, 0);
+    h.directed = true;
+    h.addEdge(0, 1, 1);
+    h.addEdge(1, 0, -3); // 0 → 1 → 0 weighs −2: even the source gets a predecessor
+    h.addEdge(1, 2, 1);
+    const sim = new BellmanFordSimulation(weighted(h), 0);
+    do {
+      const tree = sim.searchTree();
+      expect(tree.places.length + tree.aside!.length).toBe(3);
+      expect(new Set(tree.places.map((p) => p.id)).size).toBe(tree.places.length);
+    } while (sim.step());
+    expect(sim.result).toBe(false);
+  });
+
+  it('reached vertices whose predecessors loop are set aside and explained, not called "not reached yet"', () => {
+    const h = new Graph();
+    for (let i = 0; i < 4; i++) h.addNode(0, 0);
+    h.directed = true;
+    h.addEdge(0, 1, 1);
+    h.addEdge(1, 2, 1);
+    h.addEdge(2, 1, -3); // 1 → 2 → 1 weighs −2, away from the source
+    const sim = new BellmanFordSimulation(weighted(h), 0);
+    runToEnd(sim);
+    const tree = sim.searchTree();
+    expect(tree.places.map((p) => p.id)).toEqual([0]);
+    expect(tree.aside).toEqual([1, 2, 3]);
+    expect(tree.asideNote).toBe(
+      'Waiting on the right: 1 vertex not reached yet, and 2 vertices whose predecessors run round in a loop, which only a negative-weight cycle makes possible (CLRS Lemma 22.16), so they hang from no tree.',
+    );
+    expect(new BellmanFordSimulation(weighted(g), s).searchTree().asideNote).toBeUndefined(); // only d = ∞ aside
   });
 });
 

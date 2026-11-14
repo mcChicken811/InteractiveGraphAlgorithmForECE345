@@ -53,8 +53,18 @@
         <button id="topo-btn" type="button" hidden>Topological sort</button>
         <!-- DFS, while it runs: a toggle arranging the vertices as the depth-first forest so far, as on the timestamp chart. -->
         <button id="forest-btn" type="button" hidden aria-pressed="false">Show as forest</button>
-        <!-- BFS, while it runs: a toggle arranging the vertices as the breadth-first tree so far. -->
+        <!-- BFS, Dijkstra and Bellman–Ford, while they run: a toggle arranging the vertices as the search tree so far. -->
         <button id="tree-btn" type="button" hidden aria-pressed="false">Show as tree</button>
+        <!-- Bellman–Ford, while it runs: plays the rest of the current pass over the edges, 15 a second (press again to pause). -->
+        <button
+          id="cycle-btn"
+          type="button"
+          hidden
+          aria-pressed="false"
+          title="Relax the rest of this pass over the edges, 15 edges a second. Press again to pause."
+        >
+          Full cycle
+        </button>
         <button id="step-btn" class="primary" type="button" hidden>Update</button>
         <button id="stop-btn" type="button" hidden>Stop</button>
       </div>
@@ -201,7 +211,9 @@
                   allowed. Each Update relaxes one edge, in the order of the adjacency list, for |V| − 1 passes, then
                   checks every edge once more for a negative-weight cycle. The next edge is white on the canvas,
                   and in the <strong>Graph representation</strong> card (its row and box in the list, its cell in
-                  the matrix).
+                  the matrix). Within each pass, edges not reached yet are dashed. <strong>Full cycle</strong> plays
+                  the rest of a pass, 15 edges a second (press it again to pause), and <strong>Show as tree</strong>
+                  arranges the vertices as the tree of predecessors.
                 </li>
                 <li>
                   When DFS is done, <strong>Topological sort</strong> lines the vertices up by decreasing finish

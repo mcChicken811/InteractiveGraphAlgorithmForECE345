@@ -4180,6 +4180,103 @@ test.describe('algorithm simulation (Bellman–Ford)', () => {
     await expect(radio(page, 'Directed')).toBeEnabled();
   });
 
+  /** Each edge as "a-b": 'white' (next), 'solid' or 'dashed'. */
+  const edgeDashes = (page: Page) =>
+    page.locator('#canvas .edge').evaluateAll((gs) =>
+      Object.fromEntries(
+        gs.map((g) => {
+          const el = g as SVGGElement;
+          const dashed = getComputedStyle(el.querySelector('.edge-line')!).strokeDasharray !== 'none';
+          return [`${el.dataset.edgeA}-${el.dataset.edgeB}`, el.classList.contains('sim-active') ? 'white' : dashed ? 'dashed' : 'solid'];
+        }),
+      ),
+    );
+  const cycleBtn = (page: Page) => page.getByRole('button', { name: 'Full cycle' });
+
+  test('each pass starts all dashed and fills in edge by edge; a completed pass shows every edge solid', async ({ page }) => {
+    await build(page);
+    await run(page);
+    expect(await edgeDashes(page)).toEqual({ '0-1': 'white', '0-2': 'dashed', '2-1': 'dashed' });
+    await update(page);
+    expect(await edgeDashes(page)).toEqual({ '0-1': 'solid', '0-2': 'white', '2-1': 'dashed' });
+    await update(page);
+    await update(page); // pass 1 complete: every edge solid (0 → 1 is next again, in white)
+    expect(await edgeDashes(page)).toEqual({ '0-1': 'white', '0-2': 'solid', '2-1': 'solid' });
+    await update(page); // pass 2 begins
+    expect(await edgeDashes(page)).toEqual({ '0-1': 'solid', '0-2': 'white', '2-1': 'dashed' });
+  });
+
+  test('Full cycle plays the rest of the pass at 15 edges a second, then stops; pressing it again pauses', async ({ page }) => {
+    await build(page);
+    await expect(cycleBtn(page)).toBeHidden();
+    await run(page);
+    await expect(cycleBtn(page)).toBeVisible();
+    const [c, u] = await Promise.all([cycleBtn(page).boundingBox(), page.getByRole('button', { name: 'Update', exact: true }).boundingBox()]);
+    expect(c!.x + c!.width).toBeLessThanOrEqual(u!.x); // just left of Update
+    const start = Date.now();
+    await cycleBtn(page).click();
+    await expect(cycleBtn(page)).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('button', { name: 'Update', exact: true })).toBeDisabled();
+    await expect(cycleBtn(page)).toHaveAttribute('aria-pressed', 'false'); // stopped by itself
+    expect(Date.now() - start).toBeGreaterThanOrEqual(2 * (1000 / 15) - 10); // three steps: now, +1/15 s, +2/15 s
+    await expect(message(page)).toHaveText(/^Pass 1 of 2, edge 3 of 3: .* Next: relax 0 → 1 \(weight 4\), starting pass 2 of 2\.$/);
+    await expect(page.getByRole('button', { name: 'Update', exact: true })).toBeEnabled();
+    // Pause: one step happens at once, and pressing again stops it before the pass ends.
+    await cycleBtn(page).click();
+    await cycleBtn(page).click();
+    await expect(cycleBtn(page)).toHaveAttribute('aria-pressed', 'false');
+    await expect(message(page)).toHaveText(/^Pass 2 of 2, edge [12] of 3: /);
+    // The check is a pass too; Full cycle disappears once the run is finished.
+    const finish = page.getByRole('button', { name: 'Finish', exact: true });
+    for (let i = 0; i < 3 && !(await finish.isVisible()); i++) {
+      await cycleBtn(page).click();
+      // Until the pass (or the run) is through.
+      await expect
+        .poll(async () => (await finish.isVisible()) || (await page.locator('#cycle-btn').getAttribute('aria-pressed')) === 'false')
+        .toBe(true);
+    }
+    await expect(message(page)).toContainText('Bellman–Ford finished');
+    await expect(cycleBtn(page)).toBeHidden();
+  });
+
+  test('Show as tree: the predecessor tree, rearranging as relaxations change v.π', async ({ page }) => {
+    const treeBtn = page.getByRole('button', { name: 'Show as tree' });
+    const y = (id: number) => cv.node(id).evaluate((g) => Math.round(g.querySelector('circle')!.getBoundingClientRect().y));
+    async function settledY(ids: number[]) {
+      let last = '';
+      await expect
+        .poll(async () => {
+          const now = JSON.stringify(await Promise.all(ids.map(y)));
+          const same = now === last;
+          last = now;
+          return same;
+        })
+        .toBe(true);
+      return Promise.all(ids.map(y));
+    }
+    await build(page);
+    await run(page);
+    await treeBtn.click();
+    await expect(treeBtn).toHaveAttribute('aria-pressed', 'true');
+    await expect(message(page)).toContainText('Shortest-paths tree so far');
+    await update(page); // 1.π = 0
+    await update(page); // 2.π = 0
+    let [y0, y1, y2] = await settledY([0, 1, 2]);
+    expect(y1).toBeGreaterThan(y0 + 20);
+    expect(y2).toBe(y1); // both children of 0
+    await update(page); // 2 → 1 lowers 1.d to 2: 1 moves under 2
+    [y0, y1, y2] = await settledY([0, 1, 2]);
+    expect(y1).toBeGreaterThan(y2 + 20);
+    expect(y2).toBeGreaterThan(y0 + 20);
+  });
+
+  test('Full cycle is for Bellman–Ford only', async ({ page }) => {
+    await build(page, "Dijkstra's algorithm");
+    await run(page);
+    await expect(page.getByRole('button', { name: 'Update', exact: true })).toBeVisible();
+    await expect(cycleBtn(page)).toBeHidden();
+  });
+
   test('only Bellman–Ford picks out an edge in the panel (not Dijkstra, say)', async ({ page }) => {
     await build(page, "Dijkstra's algorithm");
     await run(page);
