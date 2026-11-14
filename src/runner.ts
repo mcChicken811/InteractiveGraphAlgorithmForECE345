@@ -1,4 +1,5 @@
 import { ALGORITHMS, type AlgorithmDefinition, type Simulation } from './algorithms/index.js';
+import type { FollowUp } from './algorithms/types.js';
 import type { GraphEditor } from './editor.js';
 import type { Graph, NodeId } from './graph.js';
 import type { Weighting } from './graph-views.js';
@@ -14,7 +15,10 @@ export interface RunnerElements {
   /** "Update" while steps remain, "Finish" after the last one. */
   step: HTMLButtonElement;
   stop: HTMLButtonElement;
-  /** "Topological sort", offered next to Finish when the simulation has one (DFS). */
+  /**
+   * "Topological sort", offered when the simulation has a line-up (DFS once finished; DAG
+   * shortest paths all along). In DFS's line-up it becomes "Find shortest path for DAG".
+   */
   topo?: HTMLButtonElement;
   /** "Show as forest", a toggle offered while the simulation has a search forest to show (DFS). */
   forest?: HTMLButtonElement;
@@ -55,9 +59,12 @@ export const FULL_CYCLE_RATE = 15;
  *            "Unweighted" and "Directed"; Prim and Kruskal: "Undirected", with the
  *            weighting left as chosen but locked), then starts the simulation;
  *   Update → advances one step; after the last step it turns into Finish;
- *   Topological sort → (DFS, once finished) lines the vertices up in topological order
- *            as an arc diagram (on a cyclic graph, the same line-up with the backward
- *            edges in red). The run goes on until Finish or Stop;
+ *   Topological sort → (DFS, once finished; DAG shortest paths, all along) lines the
+ *            vertices up in topological order as an arc diagram (on a cyclic graph, the
+ *            same line-up with the backward edges in red). The run goes on until Finish
+ *            or Stop. While DFS's line-up is shown it reads "Find shortest path for DAG",
+ *            filled, and starts DAG shortest paths from DFS's start vertex (greyed out
+ *            when the graph has a cycle);
  *   Show as forest → (DFS, any time while it runs) a toggle: arranges the vertices as the
  *            depth-first forest so far, laid out like the timestamp chart (rows by depth,
  *            columns by time), the vertices not discovered yet grouped on the right; each
@@ -98,7 +105,7 @@ export class AlgorithmRunner {
     el.run.addEventListener('click', () => this.run());
     el.step.addEventListener('click', () => this.step());
     el.stop.addEventListener('click', () => this.stop('Stopped.'));
-    el.topo?.addEventListener('click', () => this.topologicalSort());
+    el.topo?.addEventListener('click', () => this.topoClicked());
     el.forest?.addEventListener('click', () => this.toggleForest());
     el.tree?.addEventListener('click', () => this.toggleTree());
     el.cycle?.addEventListener('click', () => this.toggleCycle());
@@ -118,11 +125,11 @@ export class AlgorithmRunner {
     return ALGORITHMS.find((a) => a.id === this.el.select.value) ?? ALGORITHMS[0];
   }
 
-  /** Starts the selected algorithm from the selected node (or the lowest id). */
-  run(): void {
+  /** Starts the selected algorithm from `start`, or else the selected node (or the lowest id). */
+  run(start?: NodeId): void {
     if (this.running || this.graph.nodeCount === 0) return;
     const algorithm = this.algorithm;
-    const start = this.editor.selectedNode ?? this.graph.getNodes()[0].id;
+    start ??= this.editor.selectedNode ?? this.graph.getNodes()[0].id;
 
     // Locks: no editing; the direction switch; and the weighting the algorithm needs.
     this.editor.setLocked(true);
@@ -216,14 +223,24 @@ export class AlgorithmRunner {
     this.editor.showArcDiagram(diagram);
     this.updateControls();
     const backward = diagram.backward?.length ?? 0;
+    const next = this.simulation?.followUp?.() ?? null;
+    const ending = next && !next.blocked ? ` Press ${next.label}, or Finish or Stop to end.` : ' Press Finish or Stop to end.';
+    if (diagram.spine.length === 0 && backward === 0) {
+      // DAG shortest paths: the order it takes the vertices in, nothing white but its next step.
+      this.hooks.message(
+        `Topological order: ${diagram.order.join(', ')}, the order the vertices are taken in. Every edge points left to right; ` +
+          'the edges DFS classed as crossed arc below, the rest above.',
+      );
+      return;
+    }
     this.hooks.message(
       backward === 0
         ? `Topological order (decreasing finish time): ${diagram.order.join(', ')}. Every edge points left to right: ` +
-            'tree edges in white, forward edges arc above, crossed edges below. Press Finish or Stop to end.'
+            `tree edges in white, forward edges arc above, crossed edges below.${ending}`
         : `By decreasing finish time: ${diagram.order.join(', ')}. No topological order: ` +
             `${backward === 1 ? 'the backward edge (red) points' : `the ${backward} backward edges (red) point`} right to left, ` +
             `${backward === 1 ? 'closing a cycle' : 'each closing a cycle'}. The rest point left to right: tree edges in white, ` +
-            'forward edges arc above, crossed and backward edges below. Press Finish or Stop to end.',
+            `forward edges arc above, crossed and backward edges below.${ending}`,
     );
   }
 
@@ -293,12 +310,45 @@ export class AlgorithmRunner {
     );
   }
 
-  /** Ends the run and releases every lock. */
-  stop(message = 'Stopped.'): void {
+  /**
+   * The Topological sort button: lines the vertices up in topological order — or, once that
+   * line-up is shown and the simulation offers a program to go on with (DFS: DAG shortest
+   * paths), starts that program, as the button then says.
+   */
+  private topoClicked(): void {
+    const next = this.editor.arrangement === 'line' ? (this.simulation?.followUp?.() ?? null) : null;
+    if (next) this.startFollowUp(next);
+    else this.topologicalSort();
+  }
+
+  /**
+   * Ends the finished run and starts `next` on the same graph (picked in the picker, from
+   * `next.start`), keeping the topological line-up when the new program has one.
+   */
+  private startFollowUp(next: FollowUp): void {
+    if (next.blocked || !ALGORITHMS.some((a) => a.id === next.algorithm)) return;
+    this.stop(null, { keepArrangement: true });
+    this.el.select.value = next.algorithm;
+    this.run(next.start);
+    const simulation = this.simulation;
+    if (!simulation) return;
+    const diagram = simulation.topologicalSort?.() ?? null;
+    if (diagram) this.editor.showArcDiagram(diagram);
+    else this.editor.showArcDiagram(null);
+    this.updateControls();
+    this.hooks.message(simulation.describe());
+  }
+
+  /**
+   * Ends the run and releases every lock. `message` (null: none) is shown with a note that
+   * the graph can be edited again; `keepArrangement` leaves the vertices' arrangement (a
+   * line-up) on, for a program that takes over.
+   */
+  stop(message: string | null = 'Stopped.', { keepArrangement = false } = {}): void {
     if (!this.simulation) return;
     this.stopCycle();
     this.simulation = null;
-    this.editor.showArcDiagram(null); // vertices stay where they are
+    if (!keepArrangement) this.editor.showArcDiagram(null); // vertices stay where they are
     this.editor.setHighlight(null);
     this.editor.setLocked(false);
     if (this.savedWeighting !== null) {
@@ -326,7 +376,7 @@ export class AlgorithmRunner {
     if (this.el.timestampsCard) this.el.timestampsCard.hidden = true;
     this.updateControls();
     this.hooks.onStateChange();
-    this.hooks.message(`${message} The graph can be edited again.`);
+    if (message !== null) this.hooks.message(`${message} The graph can be edited again.`);
   }
 
   /** Draws the simulation's state; `animate` animates the queue / stack from its previous state. */
@@ -363,17 +413,29 @@ export class AlgorithmRunner {
     this.el.step.textContent = this.simulation?.finished ? 'Finish' : 'Update';
     this.el.select.disabled = running;
 
-    // Topological sort: next to Finish once the simulation offers one (on a cyclic graph
-    // too: the line-up shows the backward edges in red), with a tooltip saying so.
+    // Topological sort: whenever the simulation offers a line-up (DFS: once finished, on a
+    // cyclic graph too, the backward edges in red; DAG shortest paths: all along). While
+    // DFS's line-up is shown, it turns into a filled button for the program to go on with
+    // (DAG shortest paths), greyed out with the reason when the graph has a cycle.
     const topo = this.el.topo;
     if (topo) {
       const simulation = this.simulation;
-      const diagram = simulation?.finished ? (simulation.topologicalSort?.() ?? null) : null;
+      const diagram = simulation?.topologicalSort?.() ?? null;
+      const next = this.editor.arrangement === 'line' ? (simulation?.followUp?.() ?? null) : null;
       topo.hidden = diagram === null;
-      if (diagram?.backward?.length)
-        topo.title = 'No topological order (a backward edge means a cycle): lines the vertices up by decreasing finish time, backward edges in red.';
-      else topo.removeAttribute('title');
-      topo.setAttribute('aria-pressed', String(this.editor.arrangement === 'line'));
+      topo.classList.toggle('primary', next !== null);
+      topo.disabled = !!next?.blocked;
+      if (next) {
+        topo.textContent = next.label;
+        topo.title = next.blocked ?? next.title;
+        topo.removeAttribute('aria-pressed');
+      } else {
+        topo.textContent = 'Topological sort';
+        if (diagram?.backward?.length)
+          topo.title = 'No topological order (a backward edge means a cycle): lines the vertices up by decreasing finish time, backward edges in red.';
+        else topo.removeAttribute('title');
+        topo.setAttribute('aria-pressed', String(this.editor.arrangement === 'line'));
+      }
     }
     // Full cycle: while the simulation goes in passes (Bellman–Ford) and is not finished;
     // pressed while it plays, and Update greyed out meanwhile.
@@ -404,7 +466,6 @@ export class AlgorithmRunner {
     this.updateControls();
   }
 
-  /** Checks the radio matching the graph's state (`on`: the option named `onValue`). */
   /** Checks the switch's option with this value. */
   private syncSwitch(fieldset: HTMLFieldSetElement, value: string): void {
     for (const input of fieldset.querySelectorAll<HTMLInputElement>('input')) {

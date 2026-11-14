@@ -3139,6 +3139,22 @@
 			};
 		}
 		/**
+		* Once finished, from the topological line-up: DAG shortest paths (CLRS §22.2) from the
+		* vertex DFS started at, on this graph — greyed out when DFS found a backward edge, since
+		* the graph then has a cycle and no topological order.
+		*/
+		followUp() {
+			if (!this.finished || !this.view.directed) return null;
+			const back = this.edges.find((e) => e.kind === "back");
+			return {
+				label: "Find shortest path for DAG",
+				title: `Run DAG shortest paths (CLRS §22.2) from ${this.start}, taking the vertices in this topological order. It switches to Weighted.`,
+				algorithm: "dag-shortest-paths",
+				start: this.start,
+				blocked: back ? `Not a DAG: the backward edge ${back.from} → ${back.to} closes a cycle, so there is no topological order for DAG shortest paths.` : void 0
+			};
+		}
+		/**
 		* The depth-first forest G_π found so far (CLRS §20.3: the discovered vertices and the
 		* tree edges (v.π, v)), laid out as on the timestamp chart: each vertex on the row of
 		* its depth, above the middle of its interval [d, f] — for a vertex still running,
@@ -3762,7 +3778,7 @@
 				current: next,
 				done: [...this.order],
 				activeEdges: next !== null ? this.edgesToRelax() : this.predecessorEdges(),
-				labels: Object.fromEntries([...this.distance].map(([id, d]) => [id, formatDistance$1(d)]))
+				labels: Object.fromEntries([...this.distance].map(([id, d]) => [id, formatDistance$2(d)]))
 			};
 		}
 		priorityQueueSnapshot() {
@@ -3786,7 +3802,7 @@
 			const parts = [`Extracted ${u} (d = ${this.distance.get(u)}).`];
 			if (relaxed.length === 0) parts.push("No edge to relax.");
 			else {
-				if (lowered.length) parts.push(`Relaxed ${lowered.map((r) => `${u} ${arrow} ${r.v}: d ${formatDistance$1(r.before)} → ${r.after}`).join(", ")}.`);
+				if (lowered.length) parts.push(`Relaxed ${lowered.map((r) => `${u} ${arrow} ${r.v}: d ${formatDistance$2(r.before)} → ${r.after}`).join(", ")}.`);
 				if (kept.length) parts.push(`No shorter path to ${kept.map((r) => r.v).join(", ")}.`);
 			}
 			if (!this.finished) return `${parts.join(" ")} ${nextText()}`;
@@ -3797,7 +3813,7 @@
 			return `${parts.join(" ")} ${ending}`;
 		}
 	};
-	function formatDistance$1(d) {
+	function formatDistance$2(d) {
 		return Number.isFinite(d) ? String(d) : "∞";
 	}
 	const dijkstra = {
@@ -3961,7 +3977,7 @@
 					from,
 					to
 				}),
-				labels: Object.fromEntries([...this.distance].map(([id, d]) => [id, formatDistance(d)])),
+				labels: Object.fromEntries([...this.distance].map(([id, d]) => [id, formatDistance$1(d)])),
 				representationEdge: next ? {
 					from: next.from,
 					to: next.to
@@ -3984,10 +4000,10 @@
 			let done;
 			if (last.kind === "relax") {
 				const where = `Pass ${last.pass} of ${this.passes}, edge ${last.index + 1} of ${m}:`;
-				done = last.after < last.before ? `${where} relaxed ${name(last.arc)}: ${last.arc.to}.d ${formatDistance(last.before)} → ${last.after}.` : `${where} ${name(last.arc)} gives no shorter path to ${last.arc.to}.`;
+				done = last.after < last.before ? `${where} relaxed ${name(last.arc)}: ${last.arc.to}.d ${formatDistance$1(last.before)} → ${last.after}.` : `${where} ${name(last.arc)} gives no shorter path to ${last.arc.to}.`;
 			} else {
 				const where = `Check, edge ${last.index + 1} of ${m}:`;
-				done = last.ok ? `${where} ${name(last.arc)} cannot lower ${last.arc.to}.d.` : `${where} ${name(last.arc)} could still lower ${last.arc.to}.d (${formatDistance(this.distance.get(last.arc.to))} > ${formatDistance(this.distance.get(last.arc.from))} + ${last.arc.weight}).`;
+				done = last.ok ? `${where} ${name(last.arc)} cannot lower ${last.arc.to}.d.` : `${where} ${name(last.arc)} could still lower ${last.arc.to}.d (${formatDistance$1(this.distance.get(last.arc.to))} > ${formatDistance$1(this.distance.get(last.arc.from))} + ${last.arc.weight}).`;
 			}
 			if (this.result === true) return `${done} Bellman–Ford finished: no negative-weight cycle is reachable from ${this.source} (TRUE), so every d is a shortest-path weight; the white edges (v.π, v) form the shortest-paths tree. Press Finish.`;
 			if (this.result === false) {
@@ -3995,6 +4011,146 @@
 				return `${done} Bellman–Ford finished: a negative-weight cycle is reachable from ${this.source} (FALSE), so some shortest paths are not defined. In red: the ${red === 1 ? "edge" : `${red} edges`} that could still lower a d. Press Finish.`;
 			}
 			return `${done}${nextText()}`;
+		}
+	};
+	function formatDistance$1(d) {
+		return Number.isFinite(d) ? String(d) : "∞";
+	}
+	const bellmanFord = {
+		id: "bellman-ford",
+		name: "Bellman–Ford algorithm",
+		requires: {},
+		usesWeights: true,
+		create: (view, start) => new BellmanFordSimulation(view, start)
+	};
+	// src/algorithms/dag-shortest-paths.ts
+	var DagShortestPathsSimulation = class {
+		view;
+		source;
+		/** The topological order (empty if the graph has a cycle). */
+		order;
+		/** A backward edge DFS found (the graph has a cycle), or null for a DAG. */
+		cycleEdge;
+		/** v.d: the shortest-path estimate (Infinity for ∞). */
+		distance = /* @__PURE__ */ new Map();
+		/** v.π: the predecessor on the shortest path found so far (null for NIL). */
+		parent = /* @__PURE__ */ new Map();
+		/** How many vertices of `order` have been taken. */
+		taken = 0;
+		last = null;
+		/** DFS's line-up, kept for Topological sort. */
+		diagram;
+		constructor(view, source) {
+			this.view = view;
+			this.source = source;
+			const dfs = new DfsSimulation(view, source);
+			while (dfs.step());
+			const back = dfs.edges.find((e) => e.kind === "back");
+			this.cycleEdge = back ? [back.from, back.to] : null;
+			const sorted = back ? null : dfs.topologicalSort();
+			this.order = sorted?.order ?? [];
+			this.diagram = sorted ? {
+				order: sorted.order,
+				spine: [],
+				below: sorted.below
+			} : null;
+			for (const id of view.nodeIds()) {
+				this.distance.set(id, Infinity);
+				this.parent.set(id, null);
+			}
+			if (this.distance.has(source)) this.distance.set(source, 0);
+		}
+		get finished() {
+			return this.taken >= this.order.length;
+		}
+		/** The vertex the next step takes (null once finished). */
+		get next() {
+			return this.finished ? null : this.order[this.taken];
+		}
+		/** The edges the next step relaxes: every edge leaving the next vertex. */
+		edgesToRelax() {
+			const u = this.next;
+			return u === null ? [] : this.view.neighbors(u).map((v) => [u, v]);
+		}
+		/** The shortest-paths tree found so far: (v.π, v) for every v with a predecessor. */
+		predecessorEdges() {
+			const edges = [];
+			for (const [v, p] of this.parent) if (p !== null) edges.push([p, v]);
+			return edges;
+		}
+		step() {
+			const u = this.next;
+			if (u === null) return false;
+			const du = this.distance.get(u);
+			const relaxed = [];
+			for (const v of this.view.neighbors(u)) {
+				const before = this.distance.get(v);
+				const through = du + this.view.weight(u, v);
+				if (through < before) {
+					this.distance.set(v, through);
+					this.parent.set(v, u);
+				}
+				relaxed.push({
+					v,
+					before,
+					after: this.distance.get(v)
+				});
+			}
+			this.taken++;
+			this.last = {
+				u,
+				relaxed
+			};
+			return true;
+		}
+		highlight() {
+			const next = this.next;
+			return {
+				current: next,
+				done: this.order.slice(0, this.taken),
+				activeEdges: next !== null ? this.edgesToRelax() : this.predecessorEdges(),
+				labels: Object.fromEntries([...this.distance].map(([id, d]) => [id, formatDistance(d)]))
+			};
+		}
+		/** The vertices lined up in the order they are taken (DFS's topological line-up). */
+		topologicalSort() {
+			return this.diagram;
+		}
+		/** The predecessor tree so far, from the source (rows count edges); d = ∞ aside. */
+		searchTree() {
+			return {
+				places: this.distance.has(this.source) ? tidyTree(this.source, this.parent) : [],
+				spine: this.predecessorEdges(),
+				aside: this.view.nodeIds().filter((id) => !Number.isFinite(this.distance.get(id))),
+				highlightSpine: false,
+				intro: "Shortest-paths tree so far: the start is on top, and each vertex hangs from its predecessor v.π, one row below it; each Update may move vertices under a new predecessor."
+			};
+		}
+		describe() {
+			if (this.cycleEdge) {
+				const [u, v] = this.cycleEdge;
+				return `DAG shortest paths needs a directed acyclic graph, but DFS found the backward edge ${u} → ${v} (a cycle), so there is no topological order. Press Finish.`;
+			}
+			const next = this.next;
+			const nextText = () => {
+				const d = this.distance.get(next);
+				return Number.isFinite(d) ? ` Next: ${next} (d = ${d}), relaxing the edges out of it.` : ` Next: ${next} (d = ∞: not reachable from ${this.source}, so relaxing its edges changes nothing).`;
+			};
+			const last = this.last;
+			if (last === null) return `DAG shortest paths from ${this.source}, taking the vertices in topological order: ${this.order.join(", ")}. Every d is ∞ except ${this.source}.d = 0.${nextText()}`;
+			const { u, relaxed } = last;
+			const lowered = relaxed.filter((r) => r.after < r.before);
+			const kept = relaxed.filter((r) => r.after === r.before);
+			const parts = [`Took ${u} (d = ${formatDistance(this.distance.get(u))}).`];
+			if (relaxed.length === 0) parts.push("No edge leaves it.");
+			else {
+				if (lowered.length) parts.push(`Relaxed ${lowered.map((r) => `${u} → ${r.v}: d ${formatDistance(r.before)} → ${r.after}`).join(", ")}.`);
+				if (kept.length) parts.push(`No shorter path to ${kept.map((r) => r.v).join(", ")}.`);
+			}
+			if (!this.finished) return `${parts.join(" ")}${nextText()}`;
+			const unreachable = [...this.distance.values()].filter((d) => !Number.isFinite(d)).length;
+			const n = this.order.length;
+			return `${parts.join(" ")} DAG shortest paths finished: shortest paths from ${this.source} to ` + (unreachable === 0 ? `all ${n} vertices` : `${n - unreachable} of ${n} vertices; ${unreachable} not reachable (d = ∞)`) + ". The white edges (v.π, v) form the shortest-paths tree. Press Finish.";
 		}
 	};
 	function formatDistance(d) {
@@ -4008,12 +4164,15 @@
 		prim,
 		kruskal,
 		dijkstra,
+		bellmanFord,
 		{
-			id: "bellman-ford",
-			name: "Bellman–Ford algorithm",
-			requires: {},
-			usesWeights: true,
-			create: (view, start) => new BellmanFordSimulation(view, start)
+			id: "dag-shortest-paths",
+			name: "DAG shortest paths",
+			requires: {
+				weighting: "weighted",
+				directed: true
+			},
+			create: (view, start) => new DagShortestPathsSimulation(view, start)
 		}
 	];
 	// src/runner.ts
@@ -4025,9 +4184,12 @@
 	*            "Unweighted" and "Directed"; Prim and Kruskal: "Undirected", with the
 	*            weighting left as chosen but locked), then starts the simulation;
 	*   Update → advances one step; after the last step it turns into Finish;
-	*   Topological sort → (DFS, once finished) lines the vertices up in topological order
-	*            as an arc diagram (on a cyclic graph, the same line-up with the backward
-	*            edges in red). The run goes on until Finish or Stop;
+	*   Topological sort → (DFS, once finished; DAG shortest paths, all along) lines the
+	*            vertices up in topological order as an arc diagram (on a cyclic graph, the
+	*            same line-up with the backward edges in red). The run goes on until Finish
+	*            or Stop. While DFS's line-up is shown it reads "Find shortest path for DAG",
+	*            filled, and starts DAG shortest paths from DFS's start vertex (greyed out
+	*            when the graph has a cycle);
 	*   Show as forest → (DFS, any time while it runs) a toggle: arranges the vertices as the
 	*            depth-first forest so far, laid out like the timestamp chart (rows by depth,
 	*            columns by time), the vertices not discovered yet grouped on the right; each
@@ -4068,7 +4230,7 @@
 			el.run.addEventListener("click", () => this.run());
 			el.step.addEventListener("click", () => this.step());
 			el.stop.addEventListener("click", () => this.stop("Stopped."));
-			el.topo?.addEventListener("click", () => this.topologicalSort());
+			el.topo?.addEventListener("click", () => this.topoClicked());
 			el.forest?.addEventListener("click", () => this.toggleForest());
 			el.tree?.addEventListener("click", () => this.toggleTree());
 			el.cycle?.addEventListener("click", () => this.toggleCycle());
@@ -4084,11 +4246,11 @@
 		get algorithm() {
 			return ALGORITHMS.find((a) => a.id === this.el.select.value) ?? ALGORITHMS[0];
 		}
-		/** Starts the selected algorithm from the selected node (or the lowest id). */
-		run() {
+		/** Starts the selected algorithm from `start`, or else the selected node (or the lowest id). */
+		run(start) {
 			if (this.running || this.graph.nodeCount === 0) return;
 			const algorithm = this.algorithm;
-			const start = this.editor.selectedNode ?? this.graph.getNodes()[0].id;
+			start ??= this.editor.selectedNode ?? this.graph.getNodes()[0].id;
 			this.editor.setLocked(true);
 			const { weighted, weighting, directed } = algorithm.requires;
 			const forcesWeighting = weighted !== void 0 || weighting !== void 0;
@@ -4169,7 +4331,13 @@
 			this.editor.showArcDiagram(diagram);
 			this.updateControls();
 			const backward = diagram.backward?.length ?? 0;
-			this.hooks.message(backward === 0 ? `Topological order (decreasing finish time): ${diagram.order.join(", ")}. Every edge points left to right: tree edges in white, forward edges arc above, crossed edges below. Press Finish or Stop to end.` : `By decreasing finish time: ${diagram.order.join(", ")}. No topological order: ${backward === 1 ? "the backward edge (red) points" : `the ${backward} backward edges (red) point`} right to left, ${backward === 1 ? "closing a cycle" : "each closing a cycle"}. The rest point left to right: tree edges in white, forward edges arc above, crossed and backward edges below. Press Finish or Stop to end.`);
+			const next = this.simulation?.followUp?.() ?? null;
+			const ending = next && !next.blocked ? ` Press ${next.label}, or Finish or Stop to end.` : " Press Finish or Stop to end.";
+			if (diagram.spine.length === 0 && backward === 0) {
+				this.hooks.message(`Topological order: ${diagram.order.join(", ")}, the order the vertices are taken in. Every edge points left to right; the edges DFS classed as crossed arc below, the rest above.`);
+				return;
+			}
+			this.hooks.message(backward === 0 ? `Topological order (decreasing finish time): ${diagram.order.join(", ")}. Every edge points left to right: tree edges in white, forward edges arc above, crossed edges below.${ending}` : `By decreasing finish time: ${diagram.order.join(", ")}. No topological order: ${backward === 1 ? "the backward edge (red) points" : `the ${backward} backward edges (red) point`} right to left, ${backward === 1 ? "closing a cycle" : "each closing a cycle"}. The rest point left to right: tree edges in white, forward edges arc above, crossed and backward edges below.${ending}`);
 		}
 		/**
 		* Arranges the vertices as the simulation's depth-first forest so far (DFS), as its
@@ -4212,12 +4380,43 @@
 			const waiting = tree.aside?.length ?? 0;
 			this.hooks.message(`${tree.intro ?? "The search tree so far."} ` + (waiting ? tree.asideNote ?? `The ${waiting} not reached yet wait on the right; each Update brings the new ones into the tree.` : "Every vertex is in it."));
 		}
-		/** Ends the run and releases every lock. */
-		stop(message = "Stopped.") {
+		/**
+		* The Topological sort button: lines the vertices up in topological order — or, once that
+		* line-up is shown and the simulation offers a program to go on with (DFS: DAG shortest
+		* paths), starts that program, as the button then says.
+		*/
+		topoClicked() {
+			const next = this.editor.arrangement === "line" ? this.simulation?.followUp?.() ?? null : null;
+			if (next) this.startFollowUp(next);
+			else this.topologicalSort();
+		}
+		/**
+		* Ends the finished run and starts `next` on the same graph (picked in the picker, from
+		* `next.start`), keeping the topological line-up when the new program has one.
+		*/
+		startFollowUp(next) {
+			if (next.blocked || !ALGORITHMS.some((a) => a.id === next.algorithm)) return;
+			this.stop(null, { keepArrangement: true });
+			this.el.select.value = next.algorithm;
+			this.run(next.start);
+			const simulation = this.simulation;
+			if (!simulation) return;
+			const diagram = simulation.topologicalSort?.() ?? null;
+			if (diagram) this.editor.showArcDiagram(diagram);
+			else this.editor.showArcDiagram(null);
+			this.updateControls();
+			this.hooks.message(simulation.describe());
+		}
+		/**
+		* Ends the run and releases every lock. `message` (null: none) is shown with a note that
+		* the graph can be edited again; `keepArrangement` leaves the vertices' arrangement (a
+		* line-up) on, for a program that takes over.
+		*/
+		stop(message = "Stopped.", { keepArrangement = false } = {}) {
 			if (!this.simulation) return;
 			this.stopCycle();
 			this.simulation = null;
-			this.editor.showArcDiagram(null);
+			if (!keepArrangement) this.editor.showArcDiagram(null);
 			this.editor.setHighlight(null);
 			this.editor.setLocked(false);
 			if (this.savedWeighting !== null) {
@@ -4245,7 +4444,7 @@
 			if (this.el.timestampsCard) this.el.timestampsCard.hidden = true;
 			this.updateControls();
 			this.hooks.onStateChange();
-			this.hooks.message(`${message} The graph can be edited again.`);
+			if (message !== null) this.hooks.message(`${message} The graph can be edited again.`);
 		}
 		/** Draws the simulation's state; `animate` animates the queue / stack from its previous state. */
 		show(animate) {
@@ -4282,11 +4481,21 @@
 			const topo = this.el.topo;
 			if (topo) {
 				const simulation = this.simulation;
-				const diagram = simulation?.finished ? simulation.topologicalSort?.() ?? null : null;
+				const diagram = simulation?.topologicalSort?.() ?? null;
+				const next = this.editor.arrangement === "line" ? simulation?.followUp?.() ?? null : null;
 				topo.hidden = diagram === null;
-				if (diagram?.backward?.length) topo.title = "No topological order (a backward edge means a cycle): lines the vertices up by decreasing finish time, backward edges in red.";
-				else topo.removeAttribute("title");
-				topo.setAttribute("aria-pressed", String(this.editor.arrangement === "line"));
+				topo.classList.toggle("primary", next !== null);
+				topo.disabled = !!next?.blocked;
+				if (next) {
+					topo.textContent = next.label;
+					topo.title = next.blocked ?? next.title;
+					topo.removeAttribute("aria-pressed");
+				} else {
+					topo.textContent = "Topological sort";
+					if (diagram?.backward?.length) topo.title = "No topological order (a backward edge means a cycle): lines the vertices up by decreasing finish time, backward edges in red.";
+					else topo.removeAttribute("title");
+					topo.setAttribute("aria-pressed", String(this.editor.arrangement === "line"));
+				}
 			}
 			const cycle = this.el.cycle;
 			if (cycle) {
@@ -4311,7 +4520,6 @@
 		refresh() {
 			this.updateControls();
 		}
-		/** Checks the radio matching the graph's state (`on`: the option named `onValue`). */
 		/** Checks the switch's option with this value. */
 		syncSwitch(fieldset, value) {
 			for (const input of fieldset.querySelectorAll("input")) input.checked = input.value === value;

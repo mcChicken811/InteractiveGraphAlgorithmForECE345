@@ -38,8 +38,8 @@ function runToEnd(sim: BellmanFordSimulation): number {
 }
 
 describe('Bellman–Ford registry entry', () => {
-  it('is offered last, and reads the weights as chosen (any weighting, either direction)', () => {
-    expect(ALGORITHMS.at(-1)).toBe(bellmanFord);
+  it('is offered after Dijkstra, and reads the weights as chosen (any weighting, either direction)', () => {
+    expect(ALGORITHMS[ALGORITHMS.findIndex((a) => a.id === 'dijkstra') + 1]).toBe(bellmanFord);
     expect(bellmanFord.name).toBe('Bellman–Ford algorithm');
     expect(bellmanFord.requires).toEqual({});
     expect(bellmanFord.usesWeights).toBe(true);

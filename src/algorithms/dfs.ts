@@ -4,6 +4,7 @@ import type {
   AlgorithmDefinition,
   ArcDiagram,
   ExploredEdge,
+  FollowUp,
   ForestDiagram,
   Highlight,
   Simulation,
@@ -213,6 +214,25 @@ export class DfsSimulation implements Simulation {
       spine: pairs('tree'),
       below: pairs('cross'),
       backward: pairs('back'),
+    };
+  }
+
+  /**
+   * Once finished, from the topological line-up: DAG shortest paths (CLRS §22.2) from the
+   * vertex DFS started at, on this graph — greyed out when DFS found a backward edge, since
+   * the graph then has a cycle and no topological order.
+   */
+  followUp(): FollowUp | null {
+    if (!this.finished || !this.view.directed) return null;
+    const back = this.edges.find((e) => e.kind === 'back');
+    return {
+      label: 'Find shortest path for DAG',
+      title: `Run DAG shortest paths (CLRS §22.2) from ${this.start}, taking the vertices in this topological order. It switches to Weighted.`,
+      algorithm: 'dag-shortest-paths',
+      start: this.start,
+      blocked: back
+        ? `Not a DAG: the backward edge ${back.from} → ${back.to} closes a cycle, so there is no topological order for DAG shortest paths.`
+        : undefined,
     };
   }
 

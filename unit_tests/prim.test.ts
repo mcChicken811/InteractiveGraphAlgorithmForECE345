@@ -41,7 +41,7 @@ function runToEnd(sim: PrimSimulation): number {
 
 describe('Prim registry entry', () => {
   it('is offered after DFS; requires the undirected view and reads weights without forcing a weighting', () => {
-    expect(ALGORITHMS.map((a) => a.id)).toEqual(['bfs', 'dfs', 'prim', 'kruskal', 'dijkstra', 'bellman-ford']);
+    expect(ALGORITHMS.map((a) => a.id)).toEqual(['bfs', 'dfs', 'prim', 'kruskal', 'dijkstra', 'bellman-ford', 'dag-shortest-paths']);
     expect(prim.name).toBe("Prim's algorithm");
     expect(prim.requires).toEqual({ directed: false }); // no `weighted`: either is fine
     expect(prim.usesWeights).toBe(true);

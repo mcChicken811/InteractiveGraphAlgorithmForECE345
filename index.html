@@ -207,6 +207,11 @@
                   arranges the vertices as the tree of predecessors so far, rearranging after each Update.
                 </li>
                 <li>
+                  After <strong>Topological sort</strong> in DFS, the button becomes <strong>Find shortest path for
+                  DAG</strong> (greyed out if there is a cycle): it runs DAG shortest paths from the start, taking the
+                  vertices in topological order. The vertex being taken and the edges it relaxes are white.
+                </li>
+                <li>
                   The Bellman–Ford algorithm also finds <strong>shortest paths</strong>, with negative weights
                   allowed. Each Update relaxes one edge, in the order of the adjacency list, for |V| − 1 passes, then
                   checks every edge once more for a negative-weight cycle. The next edge is white on the canvas,

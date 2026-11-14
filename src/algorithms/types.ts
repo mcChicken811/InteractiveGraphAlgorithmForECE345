@@ -252,6 +252,25 @@ export interface Simulation {
    * cycle button next to Update, which plays those steps at FULL_CYCLE_RATE per second.
    */
   stepsLeftInPass?(): number;
+  /**
+   * Offered once finished, while its topological line-up is shown (DFS): a program to go
+   * on with on the same graph. The Topological sort button then turns into a filled button
+   * with this label, greyed out (with `blocked` as its tooltip) when it cannot run.
+   */
+  followUp?(): FollowUp | null;
+}
+
+/** A program to start from a finished one (DFS → DAG shortest paths). */
+export interface FollowUp {
+  /** The button's label, e.g. "Find shortest path for DAG". */
+  label: string;
+  /** Tooltip saying what it does. */
+  title: string;
+  /** The algorithm to start (an id in ALGORITHMS) and the vertex to start it from. */
+  algorithm: string;
+  start: NodeId;
+  /** Why it cannot run (the button is greyed out), or undefined when it can. */
+  blocked?: string;
 }
 
 /** An entry in the algorithm picker. */

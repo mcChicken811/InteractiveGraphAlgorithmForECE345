@@ -1320,6 +1320,7 @@ test.describe('algorithm simulation (BFS)', () => {
       "Kruskal's algorithm",
       "Dijkstra's algorithm",
       'Bellman–Ford algorithm',
+      'DAG shortest paths',
     ]);
     await page.keyboard.press('Escape');
     await expect(runBtn(page)).toBeVisible();
@@ -2325,6 +2326,11 @@ test.describe('algorithm simulation (DFS)', () => {
         .toBe(true);
       return Promise.all(ids.map(centre));
     }
+    /** Vertex centres relative to the canvas (the canvas moves when the header wraps onto a second row). */
+    async function local(ids: number[]) {
+      const box = (await cv.canvas.boundingBox())!;
+      return (await Promise.all(ids.map(centre))).map((c) => ({ x: Math.round(c.x - box.x), y: Math.round(c.y - box.y) }));
+    }
     const edgeShape = (a: number, b: number) =>
       cv.edge(a, b).evaluate((g) => {
         const line = g.querySelector('.edge-line') as SVGGraphicsElement;
@@ -2365,7 +2371,9 @@ test.describe('algorithm simulation (DFS)', () => {
       await expect(topoBtn(page)).toBeEnabled();
       await expect(topoBtn(page)).toHaveAttribute('title', /backward edges in red/);
       await topoBtn(page).click();
-      await expect(topoBtn(page)).toHaveAttribute('aria-pressed', 'true');
+      // In the line-up, the button offers DAG shortest paths instead (greyed out here: a cycle).
+      await expect(page.locator('#topo-btn')).toHaveText('Find shortest path for DAG');
+      await expect(page.locator('#topo-btn')).toBeDisabled();
       const after = await settled([3, 4, 0, 1, 2]); // decreasing finish time, as without the cycle
       for (let i = 1; i < after.length; i++) {
         expect(after[i].x).toBeGreaterThan(after[i - 1].x + 40);
@@ -2438,7 +2446,7 @@ test.describe('algorithm simulation (DFS)', () => {
       }
       await expect(message(page)).toHaveText(
         'Topological order (decreasing finish time): 3, 4, 0, 1, 2. Every edge points left to right: ' +
-          'tree edges in white, forward edges arc above, crossed edges below. Press Finish or Stop to end.',
+          'tree edges in white, forward edges arc above, crossed edges below. Press Find shortest path for DAG, or Finish or Stop to end.',
       );
     });
 
@@ -2475,7 +2483,8 @@ test.describe('algorithm simulation (DFS)', () => {
     test('the run goes on: Finish (or Stop) ends it, edges straighten and the vertices stay', async ({ page }) => {
       await runToEnd(page);
       await topoBtn(page).click();
-      const placed = await settled([0, 1, 2, 3, 4]);
+      await settled([0, 1, 2, 3, 4]);
+      const placed = await local([0, 1, 2, 3, 4]);
       await expect(finishBtn(page)).toBeVisible();
       await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeHidden();
@@ -2485,7 +2494,7 @@ test.describe('algorithm simulation (DFS)', () => {
       await expect(cv.canvas).not.toHaveClass(/arc-diagram/);
       await expect.poll(() => cv.canvas.locator('.edge path.edge-line').count()).toBe(0);
       await expect(cv.canvas.locator('.sim-spine')).toHaveCount(0);
-      expect(await Promise.all([0, 1, 2, 3, 4].map(centre))).toEqual(placed);
+      expect(await local([0, 1, 2, 3, 4])).toEqual(placed);
     });
 
     test('turning auto-layout on leaves the line; Topological sort brings it back', async ({ page }) => {
@@ -2525,6 +2534,88 @@ test.describe('algorithm simulation (DFS)', () => {
         );
         expect(top).toBe(true);
       }
+    });
+
+    test.describe('find shortest path for DAG', () => {
+      const topo = (page: Page) => page.locator('#topo-btn');
+      const dagBtn = (page: Page) => page.getByRole('button', { name: 'Find shortest path for DAG' });
+
+      test('in the topological line-up, Topological sort turns into a filled "Find shortest path for DAG"', async ({ page }) => {
+        await runToEnd(page);
+        await expect(topo(page)).toHaveText('Topological sort');
+        await expect(topo(page)).not.toHaveClass(/primary/);
+        await topo(page).click();
+        await expect(dagBtn(page)).toBeVisible();
+        await expect(dagBtn(page)).toBeEnabled();
+        await expect(dagBtn(page)).toHaveClass(/primary/);
+        // Filled like Finish.
+        const [bg, finishBg] = await Promise.all([
+          dagBtn(page).evaluate((b) => getComputedStyle(b).backgroundColor),
+          finishBtn(page).evaluate((b) => getComputedStyle(b).backgroundColor),
+        ]);
+        expect(bg).toBe(finishBg);
+        await expect(message(page)).toContainText('Press Find shortest path for DAG, or Finish or Stop to end.');
+        // Leaving the line-up (here for the forest) turns it back.
+        await page.getByRole('button', { name: 'Show as forest' }).click();
+        await expect(topo(page)).toHaveText('Topological sort');
+        await expect(topo(page)).not.toHaveClass(/primary/);
+      });
+
+      test('greyed out, with the reason, when DFS found a backward edge', async ({ page }) => {
+        await runToEnd(page, ARCS, 13); // with 2 → 0
+        await topo(page).click();
+        await expect(dagBtn(page)).toBeDisabled();
+        await expect(dagBtn(page)).toHaveAttribute('title', /^Not a DAG: the backward edge 2 → 0 closes a cycle/);
+      });
+
+      test('starts DAG shortest paths from the start: Weighted and Directed, the line-up kept, Show as tree for Show as forest', async ({ page }) => {
+        await runToEnd(page);
+        await topo(page).click();
+        await settled([3, 4, 0, 1, 2]);
+        const before = await local([0, 1, 2, 3, 4]);
+        await dagBtn(page).click();
+        await expect(page.getByRole('combobox', { name: 'Algorithm' })).toHaveText('DAG shortest paths');
+        await expect(radio(page, 'Weighted')).toBeChecked();
+        await expect(radio(page, 'Directed')).toBeChecked();
+        for (const name of ['Unweighted', 'Weighted', 'Positive', 'Undirected', 'Directed']) await expect(radio(page, name)).toBeDisabled();
+        await expect(message(page)).toHaveText(
+          'DAG shortest paths from 0, taking the vertices in topological order: 3, 4, 0, 1, 2. Every d is ∞ except 0.d = 0. ' +
+            'Next: 3 (d = ∞: not reachable from 0, so relaxing its edges changes nothing).',
+        );
+        // Still lined up, with Topological sort offered again (pressed), and Show as tree instead of Show as forest.
+        await expect(cv.canvas).toHaveClass(/arc-diagram/);
+        await settled([0, 1, 2, 3, 4]);
+        expect(await local([0, 1, 2, 3, 4])).toEqual(before);
+        await expect(topo(page)).toHaveText('Topological sort');
+        await expect(topo(page)).toHaveAttribute('aria-pressed', 'true');
+        await expect(page.getByRole('button', { name: 'Show as forest' })).toBeHidden();
+        await expect(page.getByRole('button', { name: 'Show as tree' })).toBeVisible();
+        // The vertex to take is white, and so are the edges it will relax.
+        await expect.poll(() => strokeOf(3)).toBe(WHITE);
+        const white = () =>
+          page.locator('#canvas .edge.sim-active').evaluateAll((gs) => gs.map((g) => `${(g as SVGGElement).dataset.edgeA}-${(g as SVGGElement).dataset.edgeB}`).sort());
+        expect(await white()).toEqual(['3-1', '3-4']);
+        await update(page); // takes 3
+        await expect.poll(() => strokeOf(3)).toBe(GREEN);
+        await expect.poll(() => strokeOf(4)).toBe(WHITE);
+        for (let i = 0; i < 4; i++) await update(page);
+        await expect(message(page)).toContainText('DAG shortest paths finished: shortest paths from 0 to 3 of 5 vertices; 2 not reachable (d = ∞).');
+        expect(await white()).toEqual(['0-1', '0-2']); // the shortest-paths tree
+        // Finish brings back what was chosen before DFS: Unweighted and Undirected.
+        await page.getByRole('button', { name: 'Finish', exact: true }).click();
+        await expect(radio(page, 'Unweighted')).toBeChecked();
+        await expect(radio(page, 'Undirected')).toBeChecked();
+        await expect(radio(page, 'Weighted')).toBeEnabled();
+      });
+
+      test('also in the picker, as DAG shortest paths; on a graph with a cycle it says it cannot run', async ({ page }) => {
+        await build(page, { arcs: ARCS }); // with 2 → 0
+        await page.getByRole('combobox', { name: 'Algorithm' }).click();
+        await page.getByRole('option', { name: 'DAG shortest paths' }).click();
+        await run(page);
+        await expect(message(page)).toHaveText(/^DAG shortest paths needs a directed acyclic graph, but DFS found the backward edge 2 → 0 \(a cycle\)/);
+        await expect(finishBtn(page)).toBeVisible();
+      });
     });
 
     test.describe('show as forest', () => {
@@ -2657,7 +2748,7 @@ test.describe('algorithm simulation (DFS)', () => {
         await forestBtn(page).click();
         const forest = await settled([0, 1, 2, 3, 4]);
         await topoBtn(page).click();
-        await expect(topoBtn(page)).toHaveAttribute('aria-pressed', 'true');
+        await expect(page.locator('#topo-btn')).toHaveText('Find shortest path for DAG'); // the line-up is shown
         await expect(forestBtn(page)).toHaveAttribute('aria-pressed', 'false');
         await expect(cv.canvas).not.toHaveClass(/forest-view/);
         const line = await settled([3, 4, 0, 1, 2]);
@@ -2667,9 +2758,11 @@ test.describe('algorithm simulation (DFS)', () => {
         await expect(forestBtn(page)).toHaveAttribute('aria-pressed', 'true');
         await expect(topoBtn(page)).toHaveAttribute('aria-pressed', 'false');
         const back = await settled([0, 1, 2, 3, 4]);
+        // The same forest again: its shape (each vertex relative to vertex 0) — the canvas may
+        // be a header row taller or shorter than before, which only moves it as a whole.
         back.forEach((p, i) => {
-          expect(p.x).toBeCloseTo(forest[i].x, 0);
-          expect(p.y).toBeCloseTo(forest[i].y, 0);
+          expect(p.x - back[0].x).toBeCloseTo(forest[i].x - forest[0].x, 0);
+          expect(p.y - back[0].y).toBeCloseTo(forest[i].y - forest[0].y, 0);
         });
       });
 
@@ -4125,10 +4218,10 @@ test.describe('algorithm simulation (Bellman–Ford)', () => {
       .locator('#canvas .edge.sim-active')
       .evaluateAll((gs) => gs.map((g) => `${(g as SVGGElement).dataset.edgeA}-${(g as SVGGElement).dataset.edgeB}`).sort());
 
-  test('is offered last in the picker', async ({ page }) => {
+  test('is offered in the picker, after Dijkstra', async ({ page }) => {
     await page.getByRole('combobox', { name: 'Algorithm' }).click();
     const options = await page.getByRole('listbox', { name: 'Algorithm' }).getByRole('option').allTextContents();
-    expect(options.at(-1)).toBe('Bellman–Ford algorithm');
+    expect(options[options.indexOf("Dijkstra's algorithm") + 1]).toBe('Bellman–Ford algorithm');
   });
 
   test('keeps the weighting and direction as chosen, locked; vertices show d', async ({ page }) => {
