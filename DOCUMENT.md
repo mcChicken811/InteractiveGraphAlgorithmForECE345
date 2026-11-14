@@ -66,7 +66,8 @@ Pass Playwright options after `--`, e.g. `npm run test:e2e -- --grep "edge"`.
 - `unit_tests/editor.test.ts`: `GraphEditor` interactions driven by synthetic pointer and keyboard events in a simulated DOM, including auto-layout with manually stepped animation frames.
 - `unit_tests/layout.test.ts`: `ForceLayout` behaviour:
   - pair spacing and equilateral triangles
-  - grids unfold, and isolated or coincident nodes spread out
+  - grids unfold (at least 45 of 50 random starts; a fold is a local minimum), and isolated or coincident nodes spread out
+  - no zig-zag: on dense graphs, nodes don't flip direction from one frame to the next
   - nodes stay in bounds and pinned nodes stay put
   - the layout settles and gives the same result every run
 - `tests/graph-builder.spec.ts`: end-to-end tests that click, drag, right-click, type and tap in a real browser. Playwright runs `npm run build`, then starts `scripts/static-server.mjs` on port 5199. That server serves files as-is from the repository root, the way Live Server does, so a page that only works through a dev server fails the tests. One test also opens `index.html` from disk (`file://`), with no server.
@@ -472,10 +473,35 @@ The **Auto-layout** toggle runs a force-directed layout ([src/layout.ts](src/lay
    - every edge pulls its endpoints together with force d²/k
    - k is the ideal edge length, worked out from the canvas area per node
    - each node moves along its net force, capped by a "temperature" that cools so the layout settles
+   - each node's step is its force divided by its own **stiffness** (Σ 2d/k over its edges plus Σ k²/d² over the other nodes), not one global step size. See "Why the step is scaled per node" below.
    - a small deterministic jiggle that fades as the layout cools breaks symmetric starts (such as nodes on one line), which pure Fruchterman–Reingold forces can never leave
 3. **Separate overlapping nodes** with a collision pass, like d3's `forceCollide`.
 4. **Fit to the canvas.** A long, thin component that doesn't fit is turned a few degrees per step toward the canvas's longer side, using its principal axis. If the drawing is still too big, every component and k shrink by the same factor. This keeps the drawing in balance, because Fruchterman–Reingold's balanced shape scales linearly with k.
 5. **Pack the components.** Their bounding boxes are arranged in centered rows, trying several row widths and keeping the best fit. Each component then glides part of the way toward its slot.
+
+### Why the step is scaled per node
+
+With enough vertices and edges, auto-layout used to shimmer: vertices zig-zagged back and forth every frame for several seconds. The cause was numerical. The layout took one gradient-descent step per frame, x ← x + 0.1·F, which is an explicit Euler step on a stiff system:
+
+- **Stiffness grows with degree.** Each edge's pull, d²/k, acts near rest like a spring of stiffness about 2, and the springs at a vertex add up. So a vertex of degree 8 is several times stiffer than a leaf.
+- **Explicit Euler has a stability limit.** It is stable only while step × stiffness < 2. With a step of 0.1, vertices of degree around 5 or more crossed it. The fastest motion, neighbours moving in opposite directions, then overshot and flipped sign every frame: a 30 Hz zig-zag that only the temperature cap held in check, until the layout had cooled.
+- **Measured:** on random graphs of 12–30 vertices, more than 10% of vertices reversed direction in 70–85% of frames; in the app, 231 of 241 frames on a 20-vertex, 60-edge graph.
+
+The fix divides each vertex's step by its own stiffness, the diagonal of the energy's Hessian. This is gradient descent with a Jacobi (diagonal) preconditioner, and every vertex then stays under the stability limit whatever its degree. The forces, and so the shape the layout settles into, are unchanged. Leaves take bigger steps than before, so layouts also settle sooner.
+
+| step rule | jittery frames | frames to settle | grid folds (random starts) |
+|---|---|---|---|
+| global step 0.1 (before) | 72.8% (85% counting sub-pixel) | 344 | 5 of 50 |
+| per-node step, relaxation 1 (now) | 0% (0.1%) | 240 | 3 of 50 |
+
+Other approaches were tried on the same graphs:
+
+- **RK4** stopped the zig-zag but ruined the layouts (crossings rose from 65 to 394), at four force evaluations per frame. Its intermediate stages take full, unchecked steps on a stiff system, and its stability region is only about 1.4 times Euler's, so it cannot cure stiffness.
+- **Smoothing the drawn positions** (a Gaussian-weighted average of each vertex's recent positions, wider when its recent velocities vary more) still left 15–44% of drawn frames jittery and lagged 2–4 px behind. The simulation underneath never settled any sooner.
+- **Damped momentum**, d3-force's velocity decay, settled fast on ordinary graphs but still jittered at hubs (12% of frames on a star, K10, grid and wheel). d3 itself avoids this by dividing each link's strength by its ends' degree, which is the same idea as scaling the step by stiffness.
+- **A per-node adaptive step**, which detects reversals and slows that vertex (as in GEM, Frick et al. 1994, and ForceAtlas2's "swing", Jacomy et al. 2014), helped but left 11–33% jitter on dense or high-degree graphs.
+
+**The relaxation factor (`stepScale`, 1):** 1 is the edge of stability for a spring network. Above it, the neighbours-opposite mode in grids and even cycles grows into a sub-pixel zig-zag that keeps the layout from resting (at 1.3, a 12-cycle never settled). Below it, layouts settle more slowly and untangle less often (at 0.8, 19 of 100 grids folded).
 
 ### Why components are laid out separately
 

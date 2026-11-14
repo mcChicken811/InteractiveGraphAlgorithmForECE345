@@ -371,7 +371,7 @@
 		maxEdgeLength: 150,
 		componentGap: .5,
 		packRate: .15,
-		stepScale: .1,
+		stepScale: 1,
 		maxStep: .25,
 		cooling: .985
 	};
@@ -536,13 +536,14 @@
 			const limit = this.temperature * maxStep * k;
 			for (const component of components) {
 				if (component.length < 2) continue;
-				const force = this.componentForces(graph, component, pos, k);
+				const { force, stiffness } = this.componentForces(graph, component, pos, k);
 				for (const id of component) {
 					if (pinned.has(id)) continue;
 					const f = force.get(id);
+					const rate = stepScale / Math.max(1, stiffness.get(id));
 					const jiggle = JIGGLE * k * this.temperature ** 2;
-					let mx = f.x * stepScale + Math.cos(id * GOLDEN_ANGLE) * jiggle;
-					let my = f.y * stepScale + Math.sin(id * GOLDEN_ANGLE) * jiggle;
+					let mx = f.x * rate + Math.cos(id * GOLDEN_ANGLE) * jiggle;
+					let my = f.y * rate + Math.sin(id * GOLDEN_ANGLE) * jiggle;
 					const len = Math.hypot(mx, my);
 					if (len > limit) {
 						mx = mx / len * limit;
@@ -621,12 +622,17 @@
 			}
 			return steps;
 		}
-		/** Net Fruchterman–Reingold force on each node of one connected component. */
+		/**
+		* Net Fruchterman–Reingold force on each node of one connected component, and each
+		* node's stiffness: how fast that force changes as the node moves (the diagonal of the
+		* energy's Hessian, in magnitude): Σ k²/d² over the other nodes plus Σ 2d/k over its edges.
+		*/
 		componentForces(graph, component, pos, k) {
 			const force = new Map(component.map((id) => [id, {
 				x: 0,
 				y: 0
 			}]));
+			const stiffness = new Map(component.map((id) => [id, 0]));
 			const ids = [...component].sort((a, b) => a - b);
 			for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) {
 				const p = pos.get(ids[i]);
@@ -643,6 +649,9 @@
 				const f = k * k / d;
 				addForce(force.get(ids[i]), dx / d * f, dy / d * f);
 				addForce(force.get(ids[j]), -dx / d * f, -dy / d * f);
+				const s = k * k / (d * d);
+				stiffness.set(ids[i], stiffness.get(ids[i]) + s);
+				stiffness.set(ids[j], stiffness.get(ids[j]) + s);
 			}
 			for (const a of ids) for (const b of graph.undirectedView.neighbors(a)) {
 				if (b < a) continue;
@@ -655,8 +664,14 @@
 				const f = d * d / k;
 				addForce(force.get(a), -dx / d * f, -dy / d * f);
 				addForce(force.get(b), dx / d * f, dy / d * f);
+				const s = 2 * d / k;
+				stiffness.set(a, stiffness.get(a) + s);
+				stiffness.set(b, stiffness.get(b) + s);
 			}
-			return force;
+			return {
+				force,
+				stiffness
+			};
 		}
 	};
 	function addForce(target, x, y) {

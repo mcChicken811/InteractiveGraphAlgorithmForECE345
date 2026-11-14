@@ -10,6 +10,20 @@ import type { Graph, NodeId } from './graph.js';
  *  - each node moves along its net force, never further than the current
  *    "temperature", which cools every step so the layout settles.
  *
+ * Step size: each node's step is its force divided by its own stiffness — the diagonal of
+ * the energy's Hessian, Σ 2d/k over its edges plus Σ k²/d² over the other nodes — i.e.
+ * gradient descent with a Jacobi (diagonal) preconditioner. A single global step size
+ * (plain gradient descent, as before) is an explicit Euler step on a stiff system: the
+ * springs at a node add up, so a node of high degree is much stiffer than a leaf, and
+ * any step large enough for the leaves overshoots at the hubs. Past the stability limit
+ * (step × stiffness > 2) the fastest mode flips sign every frame — neighbouring nodes
+ * zig-zagging at 30 Hz until the temperature has cooled. Dividing by each node's own
+ * stiffness keeps every node under that limit whatever its degree, and lets leaves take
+ * larger steps, so the layout also settles sooner. The forces, and so the layout it
+ * settles into, are unchanged. (d3-force tackles the same stiffness by dividing each link's
+ * strength by its ends' degree; a higher-order integrator such as RK4 does not help, as
+ * its stability region is barely wider than Euler's, at four force evaluations a step.)
+ *
  * Disconnected graphs: the components are laid out independently and then packed
  * into the canvas, the approach used by Graphviz (`pack`), OGDF
  * (ComponentSplitterLayout + TileToRowsCCPacker) and yFiles (ComponentLayout), and
@@ -47,7 +61,14 @@ export interface LayoutOptions {
   componentGap: number;
   /** Fraction of the remaining distance a component moves toward its slot per step. */
   packRate: number;
-  /** Fraction of the net force applied per step (a gradient-descent step size). */
+  /**
+   * Relaxation factor of each node's step: its net force times this, divided by its
+   * stiffness (see the class comment). 1 is the limit for a spring network (neighbours
+   * moving in opposite directions, as in a grid or an even cycle, then neither grow nor
+   * shrink); the stiffness also counts repulsion, so it errs a little high and 1 settles.
+   * Above it, that mode grows into a sub-pixel zig-zag that keeps the layout from resting;
+   * below it, the layout settles more slowly and untangles less often.
+   */
   stepScale: number;
   /** Largest move per step at full temperature, as a fraction of k. */
   maxStep: number;
@@ -61,7 +82,7 @@ export const DEFAULT_LAYOUT_OPTIONS: LayoutOptions = {
   maxEdgeLength: 150,
   componentGap: 0.5,
   packRate: 0.15,
-  stepScale: 0.1,
+  stepScale: 1,
   maxStep: 0.25,
   cooling: 0.985,
 };
@@ -233,16 +254,18 @@ export class ForceLayout {
     const limit = this.temperature * maxStep * k;
     for (const component of components) {
       if (component.length < 2) continue;
-      const force = this.componentForces(graph, component, pos, k);
+      const { force, stiffness } = this.componentForces(graph, component, pos, k);
       for (const id of component) {
         if (pinned.has(id)) continue;
         const f = force.get(id)!;
+        // Jacobi-preconditioned step: the force over this node's own stiffness.
+        const rate = stepScale / Math.max(1, stiffness.get(id)!);
         // Small deterministic jiggle that fades as the layout cools. Pure FR forces keep
         // symmetric starts (e.g. nodes on one line) symmetric, an unstable equilibrium
         // it can never leave; d3-force's "jiggle" serves the same purpose.
         const jiggle = JIGGLE * k * this.temperature ** 2;
-        let mx = f.x * stepScale + Math.cos(id * GOLDEN_ANGLE) * jiggle;
-        let my = f.y * stepScale + Math.sin(id * GOLDEN_ANGLE) * jiggle;
+        let mx = f.x * rate + Math.cos(id * GOLDEN_ANGLE) * jiggle;
+        let my = f.y * rate + Math.sin(id * GOLDEN_ANGLE) * jiggle;
         const len = Math.hypot(mx, my);
         if (len > limit) {
           mx = (mx / len) * limit;
@@ -347,14 +370,19 @@ export class ForceLayout {
     return steps;
   }
 
-  /** Net Fruchterman–Reingold force on each node of one connected component. */
+  /**
+   * Net Fruchterman–Reingold force on each node of one connected component, and each
+   * node's stiffness: how fast that force changes as the node moves (the diagonal of the
+   * energy's Hessian, in magnitude): Σ k²/d² over the other nodes plus Σ 2d/k over its edges.
+   */
   private componentForces(
     graph: Graph,
     component: NodeId[],
     pos: ReadonlyMap<NodeId, Point>,
     k: number,
-  ): Map<NodeId, Point> {
+  ): { force: Map<NodeId, Point>; stiffness: Map<NodeId, number> } {
     const force = new Map<NodeId, Point>(component.map((id) => [id, { x: 0, y: 0 }]));
+    const stiffness = new Map<NodeId, number>(component.map((id) => [id, 0]));
     const ids = [...component].sort((a, b) => a - b);
 
     // Repulsion between every pair in the component: k² / d.
@@ -375,6 +403,9 @@ export class ForceLayout {
         const f = (k * k) / d;
         addForce(force.get(ids[i])!, (dx / d) * f, (dy / d) * f);
         addForce(force.get(ids[j])!, (-dx / d) * f, (-dy / d) * f);
+        const s = (k * k) / (d * d);
+        stiffness.set(ids[i], stiffness.get(ids[i])! + s);
+        stiffness.set(ids[j], stiffness.get(ids[j])! + s);
       }
     }
 
@@ -393,9 +424,12 @@ export class ForceLayout {
         const f = (d * d) / k;
         addForce(force.get(a)!, (-dx / d) * f, (-dy / d) * f);
         addForce(force.get(b)!, (dx / d) * f, (dy / d) * f);
+        const s = (2 * d) / k;
+        stiffness.set(a, stiffness.get(a)! + s);
+        stiffness.set(b, stiffness.get(b)! + s);
       }
     }
-    return force;
+    return { force, stiffness };
   }
 }
 
