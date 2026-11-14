@@ -373,7 +373,10 @@
 		packRate: .15,
 		stepScale: 1,
 		maxStep: .25,
-		cooling: .985
+		cooling: .985,
+		minLengthFactor: .45,
+		maxLengthFactor: 2.5,
+		weightedPull: 2
 	};
 	/** Below this temperature the force simulation counts as settled. */
 	const MIN_TEMPERATURE = .005;
@@ -396,6 +399,11 @@
 	const ELONGATED = .6;
 	/** Golden angle (radians): spreads per-node jiggle directions evenly. */
 	const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+	/**
+	* Weighted layouts: how far (in paddings ≈ node radii) a node must stay from edges it is
+	* not on. 1.25 leaves a visible gap; more costs more of the edge lengths' fidelity.
+	*/
+	const EDGE_CLEARANCE = 1.25;
 	/** Jiggle strength as a fraction of k at full temperature (fades with temperature²). */
 	const JIGGLE = .03;
 	/** Fills rows left to right, starting a new row when the next box would exceed `rowLimit`. */
@@ -519,7 +527,7 @@
 		* their component is not repositioned by the packing.
 		* Returns the largest distance any node moved.
 		*/
-		step(graph, bounds, pinned = /* @__PURE__ */ new Set()) {
+		step(graph, bounds, pinned = /* @__PURE__ */ new Set(), weight) {
 			const nodes = graph.getNodes();
 			if (!this.running || nodes.length === 0) {
 				this.stop();
@@ -533,10 +541,11 @@
 				y: n.y
 			}]));
 			const components = graph.connectedComponents();
+			const lengths = weight ? this.lengthFactors(graph, weight) : null;
 			const limit = this.temperature * maxStep * k;
 			for (const component of components) {
 				if (component.length < 2) continue;
-				const { force, stiffness } = this.componentForces(graph, component, pos, k);
+				const { force, stiffness } = this.componentForces(graph, component, pos, k, lengths);
 				for (const id of component) {
 					if (pinned.has(id)) continue;
 					const f = force.get(id);
@@ -555,6 +564,7 @@
 				}
 			}
 			for (const component of components) resolveCollisions(component, pos, pinned, 2 * padding);
+			if (lengths) for (const component of components) clearEdges(graph, component, pos, pinned, EDGE_CLEARANCE * padding);
 			for (const component of components) {
 				if (component.length < 3 || component.some((id) => pinned.has(id))) continue;
 				const box = boundingBox(component, pos, padding);
@@ -613,21 +623,40 @@
 			return maxMoved;
 		}
 		/** Runs until settled (or `maxSteps`), returning the number of steps taken. */
-		settle(graph, bounds, maxSteps = 2e3) {
+		settle(graph, bounds, maxSteps = 2e3, weight) {
 			this.reheat();
 			let steps = 0;
 			while (this.running && steps < maxSteps) {
-				this.step(graph, bounds);
+				this.step(graph, bounds, /* @__PURE__ */ new Set(), weight);
 				steps++;
 			}
 			return steps;
+		}
+		/**
+		* Each edge's ideal length as a multiple of k (keyed "a-b", a < b): its weight over the
+		* mean weight of the graph's edges, within [minLengthFactor, maxLengthFactor]. Edges of
+		* weight 0 get the shortest length; with no positive weight at all, every edge gets 1
+		* (the unweighted layout), and so does every edge when all weights are equal.
+		*/
+		lengthFactors(graph, weight) {
+			const { minLengthFactor, maxLengthFactor } = this.options;
+			const pairs = graph.undirectedView.edges();
+			const magnitudes = pairs.map(([a, b]) => Math.abs(weight(a, b)));
+			const positive = magnitudes.filter((m) => m > 0);
+			const mean = positive.length ? positive.reduce((s, m) => s + m, 0) / positive.length : 0;
+			const factors = /* @__PURE__ */ new Map();
+			pairs.forEach(([a, b], i) => {
+				const f = mean > 0 ? magnitudes[i] / mean : 1;
+				factors.set(`${a}-${b}`, Math.min(maxLengthFactor, Math.max(minLengthFactor, f)));
+			});
+			return factors;
 		}
 		/**
 		* Net Fruchterman–Reingold force on each node of one connected component, and each
 		* node's stiffness: how fast that force changes as the node moves (the diagonal of the
 		* energy's Hessian, in magnitude): Σ k²/d² over the other nodes plus Σ 2d/k over its edges.
 		*/
-		componentForces(graph, component, pos, k) {
+		componentForces(graph, component, pos, k, lengths = null) {
 			const force = new Map(component.map((id) => [id, {
 				x: 0,
 				y: 0
@@ -661,10 +690,12 @@
 				const dy = p.y - q.y;
 				const d = Math.hypot(dx, dy);
 				if (d < .01) continue;
-				const f = d * d / k;
+				const factor = lengths?.get(`${a}-${b}`) ?? 1;
+				const pull = factor === 1 && !lengths ? 1 : this.options.weightedPull / factor ** 3;
+				const f = d * d / k * pull;
 				addForce(force.get(a), -dx / d * f, -dy / d * f);
 				addForce(force.get(b), dx / d * f, dy / d * f);
-				const s = 2 * d / k;
+				const s = 2 * d / k * pull;
 				stiffness.set(a, stiffness.get(a) + s);
 				stiffness.set(b, stiffness.get(b) + s);
 			}
@@ -701,6 +732,61 @@
 			if (!bFixed) {
 				q.x += dx * push * share;
 				q.y += dy * push * share;
+			}
+		}
+	}
+	/**
+	* Pushes nodes of one component off edges they are not on: a node closer than `minDistance`
+	* to such an edge (between its ends) moves away from it, and the edge's ends move the other
+	* way, half as far each, so the push does not shift the drawing as a whole. Pinned nodes
+	* stay put.
+	*/
+	function clearEdges(graph, component, pos, pinned, minDistance) {
+		const inComponent = new Set(component);
+		const edges = graph.undirectedView.edges().filter(([a]) => inComponent.has(a));
+		for (let pass = 0; pass < 2; pass++) for (const [a, b] of edges) {
+			const p = pos.get(a);
+			const q = pos.get(b);
+			const ex = q.x - p.x;
+			const ey = q.y - p.y;
+			const len2 = ex * ex + ey * ey;
+			if (len2 < 1e-6) continue;
+			for (const v of component) {
+				if (v === a || v === b) continue;
+				const r = pos.get(v);
+				const t = ((r.x - p.x) * ex + (r.y - p.y) * ey) / len2;
+				if (t <= .05 || t >= .95) continue;
+				const cx = p.x + ex * t;
+				const cy = p.y + ey * t;
+				let dx = r.x - cx;
+				let dy = r.y - cy;
+				let d = Math.hypot(dx, dy);
+				if (d >= minDistance) continue;
+				if (d < 1e-6) {
+					dx = -ey;
+					dy = ex;
+					d = Math.hypot(dx, dy);
+					dx /= d;
+					dy /= d;
+					d = 0;
+				} else {
+					dx /= d;
+					dy /= d;
+				}
+				const push = minDistance - d;
+				const ends = [a, b].filter((id) => !pinned.has(id)).length;
+				const nodeShare = pinned.has(v) ? 0 : ends ? .5 : 1;
+				const endShare = ends ? 1 - nodeShare : 0;
+				if (nodeShare) {
+					r.x += dx * push * nodeShare;
+					r.y += dy * push * nodeShare;
+				}
+				for (const [id, share] of [[a, 1 - t], [b, t]]) {
+					if (pinned.has(id) || !endShare) continue;
+					const e = pos.get(id);
+					e.x -= dx * push * endShare * share;
+					e.y -= dy * push * endShare * share;
+				}
 			}
 		}
 	}
@@ -1406,8 +1492,6 @@
 	const SVG_NS = "http://www.w3.org/2000/svg";
 	/** Pointer travel (px) before a press on a node becomes a drag instead of a click. */
 	const DRAG_THRESHOLD = 4;
-	/** How far (px) the two arcs between a pair of nodes bow apart in directed mode. */
-	const CURVE_OFFSET = 22;
 	/** Pixels per "line" for wheel events reported in lines (deltaMode 1). */
 	const LINE_HEIGHT_PX = 16;
 	/** An algorithm's label inside a node: base font size and the width it may use. */
@@ -1697,6 +1781,7 @@
 			this.graph.directed = directed;
 			this.render();
 			this.callbacks.onChange?.();
+			if (this.graph.weighted) this.kickLayout(.5);
 			this.message(directed ? "Directed: clicking A then B adds an edge A → B." : "Undirected: edge directions are ignored; arcs both ways count as one edge.");
 		}
 		get weighted() {
@@ -1719,6 +1804,7 @@
 			this.graph.weighting = weighting;
 			this.render();
 			this.callbacks.onChange?.();
+			this.kickLayout();
 			this.message(weighting === "weighted" ? "Weighted: scroll over an edge to change its weight (up = more)." : weighting === "positive" ? "Positive: every weight counts as its magnitude (−5 as 5). Scroll over an edge to change it (up = more)." : "Unweighted: weights are hidden and every edge counts as weight 1.");
 		}
 		get autoLayoutEnabled() {
@@ -2058,6 +2144,7 @@
 			this.graph.setWeight(a, b, next);
 			this.render();
 			this.callbacks.onChange?.();
+			this.kickLayout(.5);
 			this.message(`Weight of edge ${this.edgeLabel(a, b)}: ${next}`);
 		};
 		onResize = () => {
@@ -2157,7 +2244,8 @@
 			const explored = this.highlight?.exploredEdges ? new Map(this.highlight.exploredEdges.map((e) => [this.edgeKey(e.from, e.to, directed), e])) : null;
 			const arc = this.arc;
 			for (const [a, b] of this.graph.getEdges()) {
-				const curved = directed && this.graph.hasArc(b, a);
+				const bend = directed && this.graph.hasArc(b, a) ? this.pairBend(a, b) : 0;
+				const curved = bend > 0;
 				const key = this.edgeKey(a, b, directed);
 				const arcs = arc !== null && (arc.kind !== "line" || this.arcBefore !== null || !this.straightSpine(arc, a, b, key));
 				const shape = curved || arcs ? "path" : "line";
@@ -2192,7 +2280,7 @@
 					this.edgeLayer.append(g);
 					this.edgeEls.set(key, g);
 				}
-				const { attrs, mid } = arcs ? this.arcGeometry(this.graph.getNode(a), this.graph.getNode(b), directed, key) : this.edgeGeometry(this.graph.getNode(a), this.graph.getNode(b), directed, curved);
+				const { attrs, mid } = arcs ? this.arcGeometry(this.graph.getNode(a), this.graph.getNode(b), directed, key) : this.edgeGeometry(this.graph.getNode(a), this.graph.getNode(b), directed, curved, bend);
 				g.classList.toggle("sim-active", this.isActiveEdge(a, b, directed));
 				g.classList.toggle("sim-spine", arc !== null && !arc.leaving && arc.highlightSpine && arc.spine.has(key));
 				g.classList.toggle("sim-backward", arc !== null && !arc.leaving && arc.backward.has(key));
@@ -2441,7 +2529,7 @@
 		* SVG attributes for an edge from a to b (see render() for the three cases), and the
 		* point midway along it, where the weight label goes.
 		*/
-		edgeGeometry(a, b, directed, curved) {
+		edgeGeometry(a, b, directed, curved, bend = 44) {
 			const centre = {
 				x: (a.x + b.x) / 2,
 				y: (a.y + b.y) / 2
@@ -2469,8 +2557,8 @@
 				mid: centre
 			};
 			const c = {
-				x: (a.x + b.x) / 2 - uy * CURVE_OFFSET * 2,
-				y: (a.y + b.y) / 2 + ux * CURVE_OFFSET * 2
+				x: (a.x + b.x) / 2 - uy * bend,
+				y: (a.y + b.y) / 2 + ux * bend
 			};
 			const toward = (from, to, by) => {
 				const d = Math.max(distance(from, to), .001);
@@ -2488,6 +2576,38 @@
 			return {
 				attrs: { d: `M ${start.x} ${start.y} Q ${c.x} ${c.y} ${end.x} ${end.y}` },
 				mid
+			};
+		}
+		/**
+		* Directed arcs a → b and b → a: how far a → b bows (its curve's control offset, px; 0:
+		* straight). Unweighted, or with equal magnitudes, both bow the same, apart. Weighted,
+		* the lighter arc runs straight and the heavier one bows out, the further the more they
+		* differ: from a base (nearly equal) to three times it (one of them 0). The base grows
+		* with the pair's length (a fifth of it, at least CURVE_OFFSET·2), so even a long pair
+		* reads as two arcs. The layout spaces the pair by their average weight, so the heavier
+		* arc is also the longer path.
+		*/
+		pairBend(a, b) {
+			if (!this.graph.weighted) return 44;
+			const view = this.graph.currentView;
+			const here = Math.abs(view.weight(a, b) ?? 0);
+			const back = Math.abs(view.weight(b, a) ?? 0);
+			if (here === back) return 44;
+			if (here < back) return 0;
+			return Math.max(44, .2 * distance(this.graph.getNode(a), this.graph.getNode(b))) * (1 + 2 * (here - back) / (here + back));
+		}
+		/**
+		* The weights the auto-layout gives edge lengths in proportion to: none when unweighted
+		* (every edge the same ideal length). Weighted or positive, each pair's magnitude:
+		* directed, the average of the two arcs' (one arc: its own); undirected, the edge's weight.
+		*/
+		layoutWeight() {
+			if (!this.graph.weighted) return void 0;
+			const view = this.graph.currentView;
+			if (!this.graph.directed) return (a, b) => Math.abs(view.weight(a, b) ?? 0);
+			return (a, b) => {
+				const arcs = [view.weight(a, b), view.weight(b, a)].filter((w) => w !== void 0).map(Math.abs);
+				return arcs.length ? arcs.reduce((sum, w) => sum + w, 0) / arcs.length : 0;
 			};
 		}
 		/**
@@ -2565,7 +2685,8 @@
 			const pinned = /* @__PURE__ */ new Set();
 			if (this.pending?.kind === "node" && this.pending.dragging) pinned.add(this.pending.id);
 			const steps = prefersReducedMotion$4() ? 1e3 : 1;
-			for (let i = 0; i < steps && this.layout.running; i++) this.layout.step(this.graph, bounds, pinned);
+			const weight = this.layoutWeight();
+			for (let i = 0; i < steps && this.layout.running; i++) this.layout.step(this.graph, bounds, pinned, weight);
 			this.render();
 			if (this.layout.running) this.frame = requestAnimationFrame(this.layoutFrame);
 		};

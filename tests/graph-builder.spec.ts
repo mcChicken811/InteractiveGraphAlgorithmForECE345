@@ -392,7 +392,7 @@ test.describe('Randomise', () => {
     for (const w of weights.map(Number)) expect(Number.isInteger(w) && w !== 0 && Math.abs(w) <= 20).toBe(true);
   });
 
-  test('directed: some pairs are joined both ways, drawn as two curved arrows', async ({ page }) => {
+  test('directed: some pairs are joined both ways, drawn as two arrows (weighted: the lighter straight)', async ({ page }) => {
     await page.locator('label[for="mode-directed"]').click();
     await page.locator('label[for="weights-on"]').click();
     let twoWay = 0;
@@ -405,8 +405,12 @@ test.describe('Randomise', () => {
       for (const [, , w] of arcs) expect(w !== 0 && Math.abs(w) <= 20).toBe(true);
       await expect(page.locator('#stats')).toHaveText(new RegExp(` · ${arcs.length} edges$`));
       if (twoWay) {
-        const [a, b] = arcs.find(([x, y]) => arcs.some(([p, q]) => p === y && q === x))!;
-        for (const [p, q] of [[a, b], [b, a]]) await expect(cv.edge(p, q)).toHaveAttribute('data-shape', 'path');
+        const [a, b, w] = arcs.find(([x, y]) => arcs.some(([p, q]) => p === y && q === x))!;
+        const back = arcs.find(([p, q]) => p === b && q === a)![2];
+        // Weighted: the lighter arc runs straight and the heavier bows out (equal: both bow).
+        const shapes = await Promise.all([cv.edge(a, b).getAttribute('data-shape'), cv.edge(b, a).getAttribute('data-shape')]);
+        if (Math.abs(w) === Math.abs(back)) expect(shapes).toEqual(['path', 'path']);
+        else expect(shapes).toEqual(Math.abs(w) < Math.abs(back) ? ['line', 'path'] : ['path', 'line']);
       } else {
         await page.getByRole('button', { name: 'Clear graph' }).click();
       }
@@ -4926,6 +4930,60 @@ test.describe('auto-layout', () => {
       await page.mouse.up();
       // Released, it rejoins the layout and gets pulled back toward its neighbour.
       await expect.poll(async () => (await positions(page))['0'].x).toBeGreaterThan(160);
+    });
+  });
+
+  test.describe('weighted', () => {
+    const P3: Array<[number, number]> = [
+      [300, 300],
+      [450, 300],
+      [600, 300],
+    ];
+    const d = (pos: Positions, a: number, b: number) => Math.hypot(pos[a].x - pos[b].x, pos[a].y - pos[b].y);
+    /** Scrolls over an edge's weight label until it reads `w`. */
+    async function setWeight(page: Page, a: number, b: number, w: number): Promise<void> {
+      const box = (await cv.edge(a, b).locator('.edge-weight').boundingBox())!;
+      const delta = w - Number(await cv.edge(a, b).getAttribute('data-weight'));
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.wheel(0, -((delta + 0.4 * Math.sign(delta)) / 15) * page.viewportSize()!.height);
+      await expect(cv.edge(a, b)).toHaveAttribute('data-weight', String(w));
+    }
+
+    test('edge lengths follow the weights; unweighted, they are all alike again', async ({ page }) => {
+      for (const p of P3) await cv.click(...p);
+      await connect(P3[0], P3[1]);
+      await connect(P3[1], P3[2]);
+      await page.locator('label[for="weights-on"]').click();
+      await setWeight(page, 0, 1, 3);
+      await setWeight(page, 1, 2, 12);
+      await page.getByRole('button', { name: /Auto-layout/ }).click();
+      let pos = await waitUntilSettled(page);
+      expect(d(pos, 1, 2) / d(pos, 0, 1)).toBeGreaterThan(2.2); // 12 : 3, within the length limits
+      // A new weight re-lays it out.
+      await setWeight(page, 0, 1, 12);
+      pos = await waitUntilSettled(page);
+      expect(d(pos, 1, 2) / d(pos, 0, 1)).toBeCloseTo(1, 0);
+      await setWeight(page, 0, 1, 2);
+      await page.locator('label[for="weights-off"]').click();
+      pos = await waitUntilSettled(page);
+      expect(Math.abs(d(pos, 1, 2) / d(pos, 0, 1) - 1)).toBeLessThan(0.1);
+    });
+
+    test('arcs both ways: the lighter runs straight, the heavier bows out; unweighted, both bow', async ({ page }) => {
+      await cv.click(...P3[0]);
+      await cv.click(...P3[2]);
+      await page.locator('label[for="mode-directed"]').click();
+      await connect(P3[0], P3[2]);
+      await connect(P3[2], P3[0]);
+      await expect(cv.edge(0, 1)).toHaveAttribute('data-shape', 'path');
+      await expect(cv.edge(1, 0)).toHaveAttribute('data-shape', 'path');
+      await page.locator('label[for="weights-on"]').click();
+      await setWeight(page, 0, 1, 4);
+      await setWeight(page, 1, 0, 9);
+      await expect(cv.edge(0, 1)).toHaveAttribute('data-shape', 'line');
+      await expect(cv.edge(1, 0)).toHaveAttribute('data-shape', 'path');
+      await page.locator('label[for="weights-off"]').click();
+      await expect(cv.edge(0, 1)).toHaveAttribute('data-shape', 'path');
     });
   });
 });

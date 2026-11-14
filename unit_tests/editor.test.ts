@@ -723,6 +723,57 @@ describe('GraphEditor directed / undirected mode', () => {
   });
 });
 
+describe('GraphEditor weighted arcs both ways', () => {
+  beforeEach(() => {
+    addRow(2); // 0 and 1 at x = 100, 250
+    editor.setDirected(true);
+    clickNode(0);
+    clickNode(1); // 0 → 1
+    clickNode(1);
+    clickNode(0); // 1 → 0
+  });
+  const shape = (a: number, b: number) => edgeEl(a, b)!.dataset.shape;
+  /** How far the arc's curve control point sits from the middle of its ends (px). */
+  const bend = (a: number, b: number) => {
+    const d = edgeEl(a, b)!.querySelector('.edge-line')!.getAttribute('d')!;
+    const [, cx, cy] = /Q (-?[\d.]+) (-?[\d.]+)/.exec(d)!.map(Number);
+    const [p, q] = [graph.getNode(a)!, graph.getNode(b)!];
+    return Math.hypot(cx - (p.x + q.x) / 2, cy - (p.y + q.y) / 2);
+  };
+  const setArc = (a: number, b: number, w: number) => {
+    graph.setWeight(a, b, w); // directed: that arc only
+    editor.setHighlight(null); // redraw
+  };
+
+  it('unweighted, or equal magnitudes: both arcs bow apart, alike', () => {
+    expect([shape(0, 1), shape(1, 0)]).toEqual(['path', 'path']);
+    editor.setWeighted(true);
+    setArc(0, 1, 5);
+    setArc(1, 0, -5); // the same magnitude
+    expect([shape(0, 1), shape(1, 0)]).toEqual(['path', 'path']);
+    expect(bend(0, 1)).toBeCloseTo(bend(1, 0), 5);
+  });
+
+  it('weighted: the lighter arc runs straight, the heavier bows out — the further, the more they differ', () => {
+    editor.setWeighted(true);
+    setArc(0, 1, 3);
+    setArc(1, 0, 9);
+    expect(shape(0, 1)).toBe('line');
+    expect(shape(1, 0)).toBe('path');
+    const some = bend(1, 0);
+    setArc(1, 0, 30);
+    expect(bend(1, 0)).toBeGreaterThan(some);
+    setArc(0, 1, -40); // magnitudes: now 0 → 1 is the heavier one
+    expect(shape(0, 1)).toBe('path');
+    expect(shape(1, 0)).toBe('line');
+    // Positive reads magnitudes the same way; unweighted goes back to the pair of curves.
+    editor.setWeighting('positive');
+    expect([shape(0, 1), shape(1, 0)]).toEqual(['path', 'line']);
+    editor.setWeighting('unweighted');
+    expect([shape(0, 1), shape(1, 0)]).toEqual(['path', 'path']);
+  });
+});
+
 describe('GraphEditor weighted mode', () => {
   beforeEach(() => {
     addRow(3); // nodes 0, 1, 2 at x = 100, 250, 400 (y = 300)

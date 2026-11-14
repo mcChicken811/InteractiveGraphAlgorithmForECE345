@@ -68,6 +68,7 @@ Pass Playwright options after `--`, e.g. `npm run test:e2e -- --grep "edge"`.
   - pair spacing and equilateral triangles
   - grids unfold (at least 45 of 50 random starts; a fold is a local minimum), and isolated or coincident nodes spread out
   - no zig-zag: on dense graphs, nodes don't flip direction from one frame to the next
+  - weighted: length factors (proportional, clamped, 1 for equal or no weights), heavier edges settling longer, lengths following weights on random graphs, nodes kept off other edges, and no weights giving exactly the unweighted layout
   - nodes stay in bounds and pinned nodes stay put
   - the layout settles and gives the same result every run
 - `tests/graph-builder.spec.ts`: end-to-end tests that click, drag, right-click, type and tap in a real browser. Playwright runs `npm run build`, then starts `scripts/static-server.mjs` on port 5199. That server serves files as-is from the repository root, the way Live Server does, so a page that only works through a dev server fails the tests. One test also opens `index.html` from disk (`file://`), with no server.
@@ -416,6 +417,7 @@ Every stored arc carries a whole-number **weight**, which defaults to 0. The **U
   - Fractions carry over between scroll events, so the rate stays exact while weights stay whole numbers.
   - Negative weights are allowed in Weighted mode. In Positive mode scrolling changes the magnitude, never below 0, and stores the result: scrolling up over a −5 (shown as 5) stores 6.
   - Ctrl+scroll is left to the browser for zooming.
+- **Directed weighted, arcs both ways:** of a pair of arcs a → b and b → a, the one with the smaller magnitude is drawn **straight** and the larger one **bows out**, the further the more they differ (and the longer the pair is). Equal magnitudes, and Unweighted mode, keep the usual pair of matching curves.
 - **Undirected weighted:** when arcs run both ways with different weights, the edge shows the **smaller** one (`UNDIRECTED_WEIGHT` in `src/graph-views.ts`); in Positive mode, the smaller magnitude. Editing an undirected edge sets both arcs to the new value, so they agree afterwards. Directed mode edits only the arc under the pointer.
 
 ### Reading the graph in code: directed/undirected and weighted/unweighted views
@@ -476,8 +478,31 @@ The **Auto-layout** toggle runs a force-directed layout ([src/layout.ts](src/lay
    - each node's step is its force divided by its own **stiffness** (Σ 2d/k over its edges plus Σ k²/d² over the other nodes), not one global step size. See "Why the step is scaled per node" below.
    - a small deterministic jiggle that fades as the layout cools breaks symmetric starts (such as nodes on one line), which pure Fruchterman–Reingold forces can never leave
 3. **Separate overlapping nodes** with a collision pass, like d3's `forceCollide`.
+
+**Weighted and Positive modes:** each edge's length follows its weight's magnitude (see "Edge lengths from weights" below). Unweighted mode is unchanged.
 4. **Fit to the canvas.** A long, thin component that doesn't fit is turned a few degrees per step toward the canvas's longer side, using its principal axis. If the drawing is still too big, every component and k shrink by the same factor. This keeps the drawing in balance, because Fruchterman–Reingold's balanced shape scales linearly with k.
 5. **Pack the components.** Their bounding boxes are arranged in centered rows, trying several row widths and keeping the best fit. Each component then glides part of the way toward its slot.
+
+### Edge lengths from weights
+
+In Weighted and Positive modes, auto-layout gives each edge an ideal length in proportion to its weight's magnitude. Unweighted mode keeps one ideal length k for every edge, exactly as before.
+
+- **Which weight:**
+  - **Directed:** a pair joined both ways uses the **average** of the two arcs' magnitudes, since it is one distance; a single arc uses its own.
+  - **Undirected:** the edge's shown weight (its magnitude).
+- **The ideal length:** k·|w| / mean|w|, the mean taken over the graph's nonzero weights. It is kept between 0.45k and 2.5k (`minLengthFactor`, `maxLengthFactor`), so a light edge can't pull its ends on top of each other and a heavy one can't stretch the drawing off the canvas. Weight 0 gets the shortest length. If every weight is equal, or none is set yet, every edge gets k, and the layout is the unweighted one.
+- **The force:** Fruchterman–Reingold's pull d²/k becomes d²·k²/k_e³ for an edge of ideal length k_e. For a lone pair that balances the repulsion k²/d exactly at d = k_e, and with k_e = k it is the usual pull. It is doubled (`weightedPull`, 2) so that edges hold their lengths against the repulsion of the other nodes.
+- **Re-layout:** changing a weight, the weighting, or the direction reheats the layout, so lengths follow.
+- **Keeping nodes off edges:** weights need not obey the triangle inequality. On a triangle where one side "wants" to be short and the other two long, no drawing can satisfy all three, and the cheapest compromise is to flatten it into a line, which runs an edge straight through a node. So weighted layouts also push a node off any edge it isn't on, when it comes within 1.25 node radii, and push that edge the other way (the idea of Bertault's PrEd, 2000).
+- **How closely lengths follow weights** (random graphs, weights 1–20, measured as the correlation between edge length and weight):
+
+| layout | correlation | nodes on another edge, per graph |
+|---|---|---|
+| unweighted (for comparison) | −0.04 | 1.18 |
+| weighted, without keeping nodes off edges | 0.85 | 4.30 |
+| weighted (now) | 0.67 | 0 |
+
+The pull's strength was chosen the same way: 1 left most drawings too big for the canvas, and 4 or more added crossings and lowered the correlation. A stress-majorization layout (Kamada–Kawai style) would also match the distances between nodes that aren't neighbours, which is more than this asks for, and would be a larger change.
 
 ### Why the step is scaled per node
 

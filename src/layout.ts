@@ -24,6 +24,13 @@ import type { Graph, NodeId } from './graph.js';
  * strength by its ends' degree; a higher-order integrator such as RK4 does not help, as
  * its stability region is barely wider than Euler's, at four force evaluations a step.)
  *
+ * Weighted layouts (an EdgeWeight given): each edge's ideal length is k·|w|/mean|w|,
+ * within [minLengthFactor, maxLengthFactor]; its pull d²·k²/k_e³ (times weightedPull)
+ * balances the repulsion at that length. Weights need not obey the triangle inequality, so
+ * not every set of lengths can be drawn; the cheapest compromise flattens a triangle into
+ * a line, running an edge through a node, so weighted layouts also keep nodes off edges
+ * they are not on. Without weights the layout is exactly the unweighted one.
+ *
  * Disconnected graphs: the components are laid out independently and then packed
  * into the canvas, the approach used by Graphviz (`pack`), OGDF
  * (ComponentSplitterLayout + TileToRowsCCPacker) and yFiles (ComponentLayout), and
@@ -47,6 +54,13 @@ export interface Point {
   x: number;
   y: number;
 }
+
+/**
+ * The weight of the edge between two nodes as the layout should read it: a magnitude
+ * (≥ 0). Given, edges get ideal lengths in proportion to it (see ForceLayout.lengthFactors);
+ * left out, every edge has the same ideal length k.
+ */
+export type EdgeWeight = (a: NodeId, b: NodeId) => number;
 
 export interface LayoutOptions {
   /**
@@ -74,6 +88,19 @@ export interface LayoutOptions {
   maxStep: number;
   /** Temperature multiplier per step; 0.985 cools over at most ~350 steps (~6 s at 60 fps). */
   cooling: number;
+  /**
+   * Weighted layouts: the shortest and longest ideal edge length, as multiples of k. An
+   * edge's ideal length is k·|w|/mean|w| (proportional to its weight), kept within these
+   * so a light edge cannot pull its ends on top of each other and a heavy one cannot
+   * stretch the drawing off the canvas.
+   */
+  minLengthFactor: number;
+  maxLengthFactor: number;
+  /**
+   * Weighted layouts: how hard edges pull toward their own lengths, against the repulsion
+   * of every other node (1 is Fruchterman–Reingold's balance).
+   */
+  weightedPull: number;
 }
 
 export const DEFAULT_LAYOUT_OPTIONS: LayoutOptions = {
@@ -85,6 +112,9 @@ export const DEFAULT_LAYOUT_OPTIONS: LayoutOptions = {
   stepScale: 1,
   maxStep: 0.25,
   cooling: 0.985,
+  minLengthFactor: 0.45,
+  maxLengthFactor: 2.5,
+  weightedPull: 2,
 };
 
 /** Below this temperature the force simulation counts as settled. */
@@ -108,6 +138,11 @@ const MAX_ROTATION = 0.05;
 const ELONGATED = 0.6;
 /** Golden angle (radians): spreads per-node jiggle directions evenly. */
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+/**
+ * Weighted layouts: how far (in paddings ≈ node radii) a node must stay from edges it is
+ * not on. 1.25 leaves a visible gap; more costs more of the edge lengths' fidelity.
+ */
+const EDGE_CLEARANCE = 1.25;
 /** Jiggle strength as a fraction of k at full temperature (fades with temperature²). */
 const JIGGLE = 0.03;
 
@@ -237,7 +272,7 @@ export class ForceLayout {
    * their component is not repositioned by the packing.
    * Returns the largest distance any node moved.
    */
-  step(graph: Graph, bounds: Bounds, pinned: ReadonlySet<NodeId> = new Set()): number {
+  step(graph: Graph, bounds: Bounds, pinned: ReadonlySet<NodeId> = new Set(), weight?: EdgeWeight): number {
     const nodes = graph.getNodes();
     if (!this.running || nodes.length === 0) {
       this.stop();
@@ -249,12 +284,13 @@ export class ForceLayout {
     let k = Math.max(minK, this.idealEdgeLength(bounds, nodes.length) * this.scale);
     const pos = new Map<NodeId, Point>(nodes.map((n) => [n.id, { x: n.x, y: n.y }]));
     const components = graph.connectedComponents();
+    const lengths = weight ? this.lengthFactors(graph, weight) : null;
 
     // 1. Fruchterman–Reingold forces, within each component only.
     const limit = this.temperature * maxStep * k;
     for (const component of components) {
       if (component.length < 2) continue;
-      const { force, stiffness } = this.componentForces(graph, component, pos, k);
+      const { force, stiffness } = this.componentForces(graph, component, pos, k, lengths);
       for (const id of component) {
         if (pinned.has(id)) continue;
         const f = force.get(id)!;
@@ -282,6 +318,11 @@ export class ForceLayout {
     // pair closer than two node "paddings" (≈ radii); components never overlap thanks
     // to the packing, so only pairs within a component are checked.
     for (const component of components) resolveCollisions(component, pos, pinned, 2 * padding);
+    // Weighted: lengths that cannot all be met (weights need not obey the triangle
+    // inequality) are cheapest to compromise on by flattening a triangle into a line, which
+    // runs an edge straight through a node. Keep nodes off edges they are not on (as in
+    // Bertault's PrEd, 2000). Unweighted layouts are left exactly as they were.
+    if (lengths) for (const component of components) clearEdges(graph, component, pos, pinned, EDGE_CLEARANCE * padding);
 
     // 2. Turn long, thin components that overflow the canvas toward its longer side,
     //    a few degrees per step. FR forces don't depend on rotation, so this never
@@ -360,14 +401,34 @@ export class ForceLayout {
   }
 
   /** Runs until settled (or `maxSteps`), returning the number of steps taken. */
-  settle(graph: Graph, bounds: Bounds, maxSteps = 2000): number {
+  settle(graph: Graph, bounds: Bounds, maxSteps = 2000, weight?: EdgeWeight): number {
     this.reheat();
     let steps = 0;
     while (this.running && steps < maxSteps) {
-      this.step(graph, bounds);
+      this.step(graph, bounds, new Set(), weight);
       steps++;
     }
     return steps;
+  }
+
+  /**
+   * Each edge's ideal length as a multiple of k (keyed "a-b", a < b): its weight over the
+   * mean weight of the graph's edges, within [minLengthFactor, maxLengthFactor]. Edges of
+   * weight 0 get the shortest length; with no positive weight at all, every edge gets 1
+   * (the unweighted layout), and so does every edge when all weights are equal.
+   */
+  lengthFactors(graph: Graph, weight: EdgeWeight): Map<string, number> {
+    const { minLengthFactor, maxLengthFactor } = this.options;
+    const pairs = graph.undirectedView.edges();
+    const magnitudes = pairs.map(([a, b]) => Math.abs(weight(a, b)));
+    const positive = magnitudes.filter((m) => m > 0);
+    const mean = positive.length ? positive.reduce((s, m) => s + m, 0) / positive.length : 0;
+    const factors = new Map<string, number>();
+    pairs.forEach(([a, b], i) => {
+      const f = mean > 0 ? magnitudes[i] / mean : 1;
+      factors.set(`${a}-${b}`, Math.min(maxLengthFactor, Math.max(minLengthFactor, f)));
+    });
+    return factors;
   }
 
   /**
@@ -380,6 +441,7 @@ export class ForceLayout {
     component: NodeId[],
     pos: ReadonlyMap<NodeId, Point>,
     k: number,
+    lengths: ReadonlyMap<string, number> | null = null,
   ): { force: Map<NodeId, Point>; stiffness: Map<NodeId, number> } {
     const force = new Map<NodeId, Point>(component.map((id) => [id, { x: 0, y: 0 }]));
     const stiffness = new Map<NodeId, number>(component.map((id) => [id, 0]));
@@ -421,10 +483,14 @@ export class ForceLayout {
         const dy = p.y - q.y;
         const d = Math.hypot(dx, dy);
         if (d < 0.01) continue;
-        const f = (d * d) / k;
+        // Weighted: the edge's own ideal length k_e = k·s. Pulling with d²·k²/k_e³ balances
+        // the repulsion k²/d at d = k_e for a lone pair (s = 1 is plain d²/k).
+        const factor = lengths?.get(`${a}-${b}`) ?? 1;
+        const pull = factor === 1 && !lengths ? 1 : this.options.weightedPull / factor ** 3;
+        const f = ((d * d) / k) * pull;
         addForce(force.get(a)!, (-dx / d) * f, (-dy / d) * f);
         addForce(force.get(b)!, (dx / d) * f, (dy / d) * f);
-        const s = (2 * d) / k;
+        const s = ((2 * d) / k) * pull;
         stiffness.set(a, stiffness.get(a)! + s);
         stiffness.set(b, stiffness.get(b)! + s);
       }
@@ -468,6 +534,75 @@ function resolveCollisions(
         if (!bFixed) {
           q.x += dx * push * share;
           q.y += dy * push * share;
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Pushes nodes of one component off edges they are not on: a node closer than `minDistance`
+ * to such an edge (between its ends) moves away from it, and the edge's ends move the other
+ * way, half as far each, so the push does not shift the drawing as a whole. Pinned nodes
+ * stay put.
+ */
+function clearEdges(
+  graph: Graph,
+  component: NodeId[],
+  pos: Map<NodeId, Point>,
+  pinned: ReadonlySet<NodeId>,
+  minDistance: number,
+): void {
+  const inComponent = new Set(component);
+  const edges = graph.undirectedView.edges().filter(([a]) => inComponent.has(a));
+  for (let pass = 0; pass < 2; pass++) {
+    for (const [a, b] of edges) {
+      const p = pos.get(a)!;
+      const q = pos.get(b)!;
+      const ex = q.x - p.x;
+      const ey = q.y - p.y;
+      const len2 = ex * ex + ey * ey;
+      if (len2 < 1e-6) continue;
+      for (const v of component) {
+        if (v === a || v === b) continue;
+        const r = pos.get(v)!;
+        const t = ((r.x - p.x) * ex + (r.y - p.y) * ey) / len2;
+        if (t <= 0.05 || t >= 0.95) continue; // near an end: the node–node collision handles it
+        const cx = p.x + ex * t;
+        const cy = p.y + ey * t;
+        let dx = r.x - cx;
+        let dy = r.y - cy;
+        let d = Math.hypot(dx, dy);
+        if (d >= minDistance) continue;
+        if (d < 1e-6) {
+          // Exactly on the line: step off it to one side (perpendicular).
+          dx = -ey;
+          dy = ex;
+          d = Math.hypot(dx, dy);
+          dx /= d;
+          dy /= d;
+          d = 0;
+        } else {
+          dx /= d;
+          dy /= d;
+        }
+        const push = minDistance - d;
+        const ends = [a, b].filter((id) => !pinned.has(id)).length;
+        const nodeShare = pinned.has(v) ? 0 : ends ? 0.5 : 1;
+        const endShare = ends ? 1 - nodeShare : 0;
+        if (nodeShare) {
+          r.x += dx * push * nodeShare;
+          r.y += dy * push * nodeShare;
+        }
+        // The edge moves the other way: its ends, weighted by how near the foot is to each.
+        for (const [id, share] of [
+          [a, 1 - t],
+          [b, t],
+        ] as const) {
+          if (pinned.has(id) || !endShare) continue;
+          const e = pos.get(id)!;
+          e.x -= dx * push * endShare * share;
+          e.y -= dy * push * endShare * share;
         }
       }
     }

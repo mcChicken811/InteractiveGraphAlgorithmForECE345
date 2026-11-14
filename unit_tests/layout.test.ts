@@ -391,6 +391,116 @@ describe('ForceLayout', () => {
     });
   });
 
+  describe('weighted edge lengths', () => {
+    const weighted = (g: Graph) => (a: number, b: number) => g.view('undirected', 'weighted').weight(a, b) ?? 0;
+    const d = (g: Graph, a: number, b: number) => Math.hypot(g.getNode(a)!.x - g.getNode(b)!.x, g.getNode(a)!.y - g.getNode(b)!.y);
+
+    it('length factors: weight over the mean weight, clamped; equal or no weights give 1', () => {
+      const g = new Graph();
+      for (let i = 0; i < 5; i++) g.addNode(i * 10, 0);
+      g.addEdge(0, 1, 2);
+      g.addEdge(1, 2, 4);
+      g.addEdge(2, 3, 6); // mean 4 (with 3 — 4 at 0 left out of the mean)
+      g.addEdge(3, 4, 0);
+      const layout = new ForceLayout();
+      expect(Object.fromEntries(layout.lengthFactors(g, weighted(g)))).toEqual({ '0-1': 0.5, '1-2': 1, '2-3': 1.5, '3-4': DEFAULT_LAYOUT_OPTIONS.minLengthFactor });
+      g.setWeight(2, 3, 100); // mean 35.33: 100 / 35.33 is past the longest allowed
+      expect(layout.lengthFactors(g, weighted(g)).get('2-3')).toBe(DEFAULT_LAYOUT_OPTIONS.maxLengthFactor);
+      for (const [a, b] of g.undirectedView.edges()) g.setWeight(a, b, 7);
+      expect([...layout.lengthFactors(g, weighted(g)).values()]).toEqual([1, 1, 1, 1]);
+      for (const [a, b] of g.undirectedView.edges()) g.setWeight(a, b, 0);
+      expect([...layout.lengthFactors(g, weighted(g)).values()]).toEqual([1, 1, 1, 1]); // no weights yet: as unweighted
+      g.setWeight(0, 1, -6); // magnitudes
+      expect(layout.lengthFactors(g, weighted(g)).get('0-1')).toBe(1);
+    });
+
+    it('heavier edges settle longer, in proportion', () => {
+      // A path 0 — 1 — 2 — 3 with weights 2, 4, 8: lengths in about the same ratios.
+      const g = bunched(4, [
+        [0, 1],
+        [1, 2],
+        [2, 3],
+      ]);
+      g.setWeight(0, 1, 2);
+      g.setWeight(1, 2, 4);
+      g.setWeight(2, 3, 8);
+      new ForceLayout().settle(g, BOUNDS, 2000, weighted(g));
+      const [a, b, c] = [d(g, 0, 1), d(g, 1, 2), d(g, 2, 3)];
+      expect(b / a).toBeGreaterThan(1.6);
+      expect(b / a).toBeLessThan(2.4);
+      expect(c / b).toBeGreaterThan(1.6);
+      expect(c / b).toBeLessThan(2.4);
+    });
+
+    it('on random graphs the lengths follow the weights (mean correlation above 0.6)', () => {
+      // Not every set of lengths can be drawn (weights need not obey the triangle
+      // inequality), and nodes are kept off other edges, so some graphs follow less closely.
+      let seed = 3;
+      const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+      const correlations: number[] = [];
+      for (let trial = 0; trial < 5; trial++) {
+        const g = new Graph();
+        for (let i = 0; i < 10; i++) g.addNode(100 + random() * 800, 100 + random() * 550);
+        for (let i = 1; i < 10; i++) g.addEdge(Math.floor(random() * i), i, 1 + Math.floor(random() * 20));
+        new ForceLayout().settle(g, BOUNDS, 2000, weighted(g));
+        const edges = g.undirectedView.edges();
+        const xs = edges.map(([a, b]) => d(g, a, b));
+        const ys = edges.map(([a, b]) => g.view('undirected', 'weighted').weight(a, b)!);
+        const mean = (v: number[]) => v.reduce((x, y) => x + y, 0) / v.length;
+        const [mx, my] = [mean(xs), mean(ys)];
+        const cov = mean(xs.map((x, i) => (x - mx) * (ys[i] - my)));
+        const corr = cov / Math.sqrt(mean(xs.map((x) => (x - mx) ** 2)) * mean(ys.map((y) => (y - my) ** 2)));
+        correlations.push(corr);
+      }
+      expect(correlations.reduce((a, b) => a + b, 0) / correlations.length).toBeGreaterThan(0.6);
+      for (const corr of correlations) expect(corr).toBeGreaterThan(0.2);
+    });
+
+    it('weighted layouts keep nodes off edges they are not on', () => {
+      let seed = 11;
+      const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+      for (let trial = 0; trial < 8; trial++) {
+        const g = new Graph();
+        for (let i = 0; i < 12; i++) g.addNode(100 + random() * 800, 100 + random() * 550);
+        for (let i = 1; i < 12; i++) g.addEdge(Math.floor(random() * i), i, 1 + Math.floor(random() * 20));
+        while (g.edgeCount < 18) {
+          const [a, b] = [Math.floor(random() * 12), Math.floor(random() * 12)];
+          if (a !== b && !g.hasEdge(a, b)) g.addEdge(a, b, 1 + Math.floor(random() * 20));
+        }
+        new ForceLayout().settle(g, BOUNDS, 2000, weighted(g));
+        for (const [a, b] of g.undirectedView.edges()) {
+          const [p, q] = [g.getNode(a)!, g.getNode(b)!];
+          const [ex, ey] = [q.x - p.x, q.y - p.y];
+          for (const v of g.getNodes()) {
+            if (v.id === a || v.id === b) continue;
+            const t = ((v.x - p.x) * ex + (v.y - p.y) * ey) / (ex * ex + ey * ey);
+            if (t <= 0.05 || t >= 0.95) continue;
+            // Default padding 24: at least a node's radius (≈ 22) and a little more.
+            expect(Math.hypot(v.x - (p.x + ex * t), v.y - (p.y + ey * t))).toBeGreaterThan(24);
+          }
+        }
+      }
+    });
+
+    it('without weights the layout is the unweighted one, exactly', () => {
+      const make = () => {
+        const g = bunched(6, [
+          [0, 1],
+          [1, 2],
+          [2, 3],
+          [3, 4],
+          [4, 5],
+        ]);
+        g.setWeight(0, 1, 9);
+        return g;
+      };
+      const [a, b] = [make(), make()];
+      new ForceLayout().settle(a, BOUNDS);
+      new ForceLayout().settle(b, BOUNDS, 2000, undefined);
+      expect(a.getNodes()).toEqual(b.getNodes());
+    });
+  });
+
   describe('packRows', () => {
     it('returns nothing for no boxes', () => {
       expect(packRows([], BOUNDS, 10)).toEqual({ centers: [], width: 0, height: 0 });

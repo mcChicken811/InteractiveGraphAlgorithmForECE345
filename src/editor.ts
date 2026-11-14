@@ -1,6 +1,6 @@
 import { Graph, type NodeId } from './graph.js';
 import type { Weighting } from './graph-views.js';
-import { ForceLayout } from './layout.js';
+import { ForceLayout, type EdgeWeight } from './layout.js';
 import type { ArcDiagram, ForestDiagram, Highlight } from './algorithms/types.js';
 import { fitFontSize } from './label-fit.js';
 import { halfEllipse, rowLayout, treeLayout } from './arc-diagram.js';
@@ -370,6 +370,7 @@ export class GraphEditor {
     this.graph.directed = directed;
     this.render();
     this.callbacks.onChange?.();
+    if (this.graph.weighted) this.kickLayout(0.5); // a pair's length: both arcs' average, or the edge's weight
     this.message(
       directed
         ? 'Directed: clicking A then B adds an edge A → B.'
@@ -400,6 +401,7 @@ export class GraphEditor {
     this.graph.weighting = weighting;
     this.render();
     this.callbacks.onChange?.();
+    this.kickLayout(); // edge lengths follow the weights only when they are read
     this.message(
       weighting === 'weighted'
         ? 'Weighted: scroll over an edge to change its weight (up = more).'
@@ -762,6 +764,7 @@ export class GraphEditor {
     this.graph.setWeight(a, b, next); // undirected: both arcs get the new weight
     this.render();
     this.callbacks.onChange?.();
+    this.kickLayout(0.5); // its length follows its weight
     this.message(`Weight of edge ${this.edgeLabel(a, b)}: ${next}`);
   };
 
@@ -902,7 +905,9 @@ export class GraphEditor {
       : null;
     const arc = this.arc;
     for (const [a, b] of this.graph.getEdges()) {
-      const curved = directed && this.graph.hasArc(b, a);
+      // Directed, both ways: weighted, the lighter arc is straight and the heavier one bows out.
+      const bend = directed && this.graph.hasArc(b, a) ? this.pairBend(a, b) : 0;
+      const curved = bend > 0;
       const key = this.edgeKey(a, b, directed);
       // Arc diagram: spine edges between neighbouring vertices stay straight; the rest arc.
       // Forest: every edge is a path (tree edges with no bulge), so it can blend to and fro.
@@ -932,7 +937,7 @@ export class GraphEditor {
       }
       const { attrs, mid } = arcs
         ? this.arcGeometry(this.graph.getNode(a)!, this.graph.getNode(b)!, directed, key)
-        : this.edgeGeometry(this.graph.getNode(a)!, this.graph.getNode(b)!, directed, curved);
+        : this.edgeGeometry(this.graph.getNode(a)!, this.graph.getNode(b)!, directed, curved, bend);
       g.classList.toggle('sim-active', this.isActiveEdge(a, b, directed));
       g.classList.toggle('sim-spine', arc !== null && !arc.leaving && arc.highlightSpine && arc.spine.has(key));
       g.classList.toggle('sim-backward', arc !== null && !arc.leaving && arc.backward.has(key));
@@ -1185,6 +1190,7 @@ export class GraphEditor {
     b: Point,
     directed: boolean,
     curved: boolean,
+    bend = CURVE_OFFSET * 2,
   ): { attrs: Record<string, number | string>; mid: Point } {
     const centre = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
     if (!directed) return { attrs: { x1: a.x, y1: a.y, x2: b.x, y2: b.y }, mid: centre };
@@ -1194,8 +1200,9 @@ export class GraphEditor {
     const rim = NODE_RADIUS + 1; // the arrow's tip sits just outside the target circle
     if (!curved) return { attrs: { x1: a.x, y1: a.y, x2: b.x - ux * rim, y2: b.y - uy * rim }, mid: centre };
 
-    // Quadratic curve bowing to the right of a → b (so b → a bows the other way).
-    const c = { x: (a.x + b.x) / 2 - uy * CURVE_OFFSET * 2, y: (a.y + b.y) / 2 + ux * CURVE_OFFSET * 2 };
+    // Quadratic curve bowing to the right of a → b (so b → a bows the other way), its
+    // control point `bend` px from the middle (the curve's apex is half as far).
+    const c = { x: (a.x + b.x) / 2 - uy * bend, y: (a.y + b.y) / 2 + ux * bend };
     const toward = (from: Point, to: Point, by: number): Point => {
       const d = Math.max(distance(from, to), 0.001);
       return { x: from.x + ((to.x - from.x) / d) * by, y: from.y + ((to.y - from.y) / d) * by };
@@ -1205,6 +1212,41 @@ export class GraphEditor {
     // Midpoint of the quadratic curve (t = 1/2) between the node centres: (a + 2c + b) / 4.
     const mid = { x: (a.x + 2 * c.x + b.x) / 4, y: (a.y + 2 * c.y + b.y) / 4 };
     return { attrs: { d: `M ${start.x} ${start.y} Q ${c.x} ${c.y} ${end.x} ${end.y}` }, mid };
+  }
+
+  /**
+   * Directed arcs a → b and b → a: how far a → b bows (its curve's control offset, px; 0:
+   * straight). Unweighted, or with equal magnitudes, both bow the same, apart. Weighted,
+   * the lighter arc runs straight and the heavier one bows out, the further the more they
+   * differ: from a base (nearly equal) to three times it (one of them 0). The base grows
+   * with the pair's length (a fifth of it, at least CURVE_OFFSET·2), so even a long pair
+   * reads as two arcs. The layout spaces the pair by their average weight, so the heavier
+   * arc is also the longer path.
+   */
+  private pairBend(a: NodeId, b: NodeId): number {
+    if (!this.graph.weighted) return CURVE_OFFSET * 2;
+    const view = this.graph.currentView;
+    const here = Math.abs(view.weight(a, b) ?? 0);
+    const back = Math.abs(view.weight(b, a) ?? 0);
+    if (here === back) return CURVE_OFFSET * 2;
+    if (here < back) return 0;
+    const base = Math.max(CURVE_OFFSET * 2, 0.2 * distance(this.graph.getNode(a)!, this.graph.getNode(b)!));
+    return base * (1 + (2 * (here - back)) / (here + back));
+  }
+
+  /**
+   * The weights the auto-layout gives edge lengths in proportion to: none when unweighted
+   * (every edge the same ideal length). Weighted or positive, each pair's magnitude:
+   * directed, the average of the two arcs' (one arc: its own); undirected, the edge's weight.
+   */
+  private layoutWeight(): EdgeWeight | undefined {
+    if (!this.graph.weighted) return undefined;
+    const view = this.graph.currentView;
+    if (!this.graph.directed) return (a, b) => Math.abs(view.weight(a, b) ?? 0);
+    return (a, b) => {
+      const arcs = [view.weight(a, b), view.weight(b, a)].filter((w): w is number => w !== undefined).map(Math.abs);
+      return arcs.length ? arcs.reduce((sum, w) => sum + w, 0) / arcs.length : 0;
+    };
   }
 
   /**
@@ -1283,8 +1325,9 @@ export class GraphEditor {
 
     // With reduced motion, jump straight to the settled layout instead of animating.
     const steps = prefersReducedMotion() ? 1000 : 1;
+    const weight = this.layoutWeight();
     for (let i = 0; i < steps && this.layout.running; i++) {
-      this.layout.step(this.graph, bounds, pinned);
+      this.layout.step(this.graph, bounds, pinned, weight);
     }
     this.render();
 
