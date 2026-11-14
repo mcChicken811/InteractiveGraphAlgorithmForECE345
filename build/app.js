@@ -5091,7 +5091,7 @@
 	}
 	// src/status-bar.ts
 	const DEFAULTS = {
-		hideAfterMs: 5e3,
+		hideAfterMs: 2300,
 		revealDistance: 64,
 		revealSlack: 48
 	};

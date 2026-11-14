@@ -4427,14 +4427,14 @@ test.describe('status bar (auto-hiding message box)', () => {
     });
 
   test.beforeEach(async ({ page }) => {
-    // Control the 5 s countdown; the slide animations still run in real time.
+    // Control the 2.3 s countdown; the slide animations still run in real time.
     await page.clock.install();
     await page.goto('index.html');
   });
 
-  test('slides down out of view after 5 s without a new message', async ({ page }) => {
+  test('slides down out of view after 2.3 s without a new message', async ({ page }) => {
     await expect.poll(() => position(page)).toBe('shown');
-    await page.clock.runFor(4900);
+    await page.clock.runFor(2200);
     await expect.poll(() => position(page)).toBe('shown');
     await page.clock.runFor(200);
     await expect(bar(page)).toHaveClass(/is-hidden/);
@@ -4458,7 +4458,7 @@ test.describe('status bar (auto-hiding message box)', () => {
   });
 
   test('a new message brings it back', async ({ page }) => {
-    await page.clock.runFor(5100);
+    await page.clock.runFor(2400);
     await expect.poll(() => position(page), { timeout: 3000 }).toBe('hidden');
     await cv.click(...P.a);
     await expect(bar(page)).toHaveText('Added node 0.');
@@ -4467,7 +4467,7 @@ test.describe('status bar (auto-hiding message box)', () => {
   });
 
   test('moving the mouse near where it hid brings it back, and it stays while the mouse is near', async ({ page }) => {
-    await page.clock.runFor(5100);
+    await page.clock.runFor(2400);
     await expect.poll(() => position(page), { timeout: 3000 }).toBe('hidden');
 
     await cv.move(300, 300); // far from the bottom: nothing happens
@@ -4481,17 +4481,17 @@ test.describe('status bar (auto-hiding message box)', () => {
     await page.clock.runFor(10_000); // still near: stays up
     await expect(bar(page)).not.toHaveClass(/is-hidden/);
 
-    await cv.move(300, 300); // move away: hides 5 s later
-    await page.clock.runFor(5100);
+    await cv.move(300, 300); // move away: hides 2.3 s later
+    await page.clock.runFor(2400);
     await expect(bar(page)).toHaveClass(/is-hidden/);
   });
 
-  test('stays up while hovered, and hides 5 s after the mouse leaves', async ({ page }) => {
+  test('stays up while hovered, and hides 2.3 s after the mouse leaves', async ({ page }) => {
     await bar(page).hover();
     await page.clock.runFor(15_000);
     await expect(bar(page)).not.toHaveClass(/is-hidden/);
     await cv.move(300, 300);
-    await page.clock.runFor(4900);
+    await page.clock.runFor(2200);
     await expect(bar(page)).not.toHaveClass(/is-hidden/);
     await page.clock.runFor(200);
     await expect(bar(page)).toHaveClass(/is-hidden/);
@@ -4499,7 +4499,7 @@ test.describe('status bar (auto-hiding message box)', () => {
 
   test('every part of the app reports through it (e.g. BFS steps)', async ({ page }) => {
     await cv.click(...P.a);
-    await page.clock.runFor(5100);
+    await page.clock.runFor(2400);
     await expect(bar(page)).toHaveClass(/is-hidden/);
     await page.getByRole('button', { name: 'Run', exact: true }).click();
     await expect(bar(page)).toHaveText('BFS from 0. Queue: 0. Press Update to pop 0.');
@@ -4646,7 +4646,7 @@ test.describe('status bar (auto-hiding message box)', () => {
   });
 
   test('a hidden bar slides in at its new size instead', async ({ page }) => {
-    await page.clock.runFor(5100);
+    await page.clock.runFor(2400);
     await expect.poll(() => position(page), { timeout: 3000 }).toBe('hidden');
     await cv.click(...P.a);
     const resizing = await bar(page).evaluate((el) =>
@@ -4661,7 +4661,7 @@ test.describe('status bar (auto-hiding message box)', () => {
 
     test('hides and shows without sliding', async ({ page }) => {
       expect(await bar(page).evaluate((el) => getComputedStyle(el).transitionDuration)).toBe('0s');
-      await page.clock.runFor(5100);
+      await page.clock.runFor(2400);
       await expect.poll(() => position(page)).toBe('hidden');
     });
 

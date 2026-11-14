@@ -579,7 +579,7 @@ Freivalds, Dogrusoz & Kikusts study this approach in *Disconnected Graph Layout 
 - `src/voronoi.ts` — `cutShape`: the territory of a cut and its border, as the zero line of a distance field (vertices and non-crossing edges as sites), traced with marching squares; also the smooth move between two cuts (a front sweeping out from the old side). `groupSeams`: the borders between several groups (Kruskal's trees), each traced once. For drawing Prim's and Kruskal's cuts; pure, no DOM.
 - `src/label-fit.ts` — `fitFontSize`: shrinks a label's font so long labels (DFS's `d,f`) fit inside a vertex circle.
 - `src/status-bar.ts` — `StatusBar`: every status message goes through `show(text, tone)`.
-  - **Hiding:** 5 s after the last message, with the pointer neither on the bar nor near it, the bar slides slowly down out of view.
+  - **Hiding:** 2.3 s after the last message, with the pointer neither on the bar nor near it, the bar slides slowly down out of view.
   - **Revealing:** a new message, or the pointer coming near the bottom edge where the bar hides (or a tap there), slides it quickly back.
   - **Staying up:** it stays up while hovered or approached.
   - **Resizing:** a new message never snaps the bar to its new size. Its width and height animate (0.26 s, ease-out) while the new text fades in, and from the first frame the text is laid out exactly as it will end up (same width, same line breaks). While the bar is still smaller, it clips whatever doesn't fit yet. A message arriving mid-resize continues from the current size.

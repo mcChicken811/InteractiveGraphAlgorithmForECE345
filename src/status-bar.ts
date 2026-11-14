@@ -3,7 +3,7 @@
  * through `show()`; this layer decides when the bar is visible:
  *
  *  - a new message slides it up quickly and (re)starts a countdown;
- *  - after `hideAfterMs` (5 s) with no new message, and with the pointer neither on the
+ *  - after `hideAfterMs` (2.3 s) with no new message, and with the pointer neither on the
  *    bar nor near where it sits, it slides slowly down out of view;
  *  - moving the pointer near the bottom edge where it hides (or tapping there) slides
  *    it back up quickly; while the pointer stays on or near it, it stays up, and the
@@ -26,7 +26,7 @@ export interface StatusBarOptions {
   revealSlack: number;
 }
 
-const DEFAULTS: StatusBarOptions = { hideAfterMs: 5000, revealDistance: 64, revealSlack: 48 };
+const DEFAULTS: StatusBarOptions = { hideAfterMs: 2300, revealDistance: 64, revealSlack: 48 };
 
 /** Duration and easing of the size change when a new message arrives. */
 const RESIZE_MS = 260;
